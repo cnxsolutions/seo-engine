@@ -4,18 +4,17 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import {
   LayoutDashboard,
-  BookOpen,
-  ScanSearch,
-  Target,
-  PenTool,
-  Send,
-  BarChart3,
   Globe,
+  Database,
+  Target,
+  FileText,
+  Wand2,
+  Send,
+  Calendar,
   Settings,
   Zap,
   ChevronRight,
-  Database,
-  Library,
+  Layers,
 } from 'lucide-react'
 
 const NAV_SECTIONS = [
@@ -23,27 +22,23 @@ const NAV_SECTIONS = [
     label: null,
     items: [
       { href: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
-      { href: '/methodology', icon: BookOpen, label: 'Méthodologie' },
     ],
   },
   {
     label: 'WORKFLOW',
     items: [
-      { href: '/strategy/new', icon: ScanSearch, label: '1. Analyser', step: true },
-      { href: '/strategy', icon: Target, label: '2. Stratégie', step: true },
-      { href: '/produce', icon: PenTool, label: '3. Générer', step: true },
-      { href: '/produce/schema', icon: Database, label: '3b. Schema-Aware', step: false },
-      { href: '/publish', icon: Send, label: '4. Publier', step: true },
-      { href: '/monitor', icon: BarChart3, label: '5. Suivre', step: true },
+      { href: '/sites', icon: Globe, label: '1. Sites', step: true },
+      { href: '/schema', icon: Database, label: '2. Schéma CMS', step: true },
+      { href: '/strategy', icon: Target, label: '3. Stratégie', step: true },
+      { href: '/generate', icon: Wand2, label: '4. Générer', step: true },
+      { href: '/publish', icon: Send, label: '5. Publier', step: true },
+      { href: '/calendar', icon: Calendar, label: 'Calendrier', step: false },
     ],
   },
   {
-    label: 'CONFIG',
+    label: 'GÉRER',
     items: [
-      { href: '/sites', icon: Globe, label: 'Sites' },
-      { href: '/sites/federated', icon: Database, label: 'Sites CMS' },
-      { href: '/analytics', icon: BarChart3, label: 'Analytics' },
-      { href: '/library', icon: Library, label: 'Bibliothèque' },
+      { href: '/campaigns', icon: Layers, label: 'Campagnes' },
       { href: '/settings', icon: Settings, label: 'Paramètres' },
     ],
   },
