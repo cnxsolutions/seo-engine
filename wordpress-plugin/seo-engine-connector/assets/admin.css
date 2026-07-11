@@ -1,0 +1,74 @@
+.sec-wrap {
+    max-width: 900px;
+}
+
+.sec-wrap h1 {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 1.6em;
+}
+
+.sec-status-card {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 20px;
+    margin: 20px 0;
+    border-radius: 8px;
+    font-weight: 600;
+    font-size: 14px;
+}
+
+.sec-status-card.connected {
+    background: #ecfdf5;
+    border: 1px solid #6ee7b7;
+    color: #065f46;
+}
+
+.sec-status-card.disconnected {
+    background: #fef2f2;
+    border: 1px solid #fca5a5;
+    color: #991b1b;
+}
+
+.sec-status-indicator {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+}
+
+.sec-status-card.connected .sec-status-indicator {
+    background: #10b981;
+    box-shadow: 0 0 6px rgba(16, 185, 129, 0.5);
+}
+
+.sec-status-card.disconnected .sec-status-indicator {
+    background: #ef4444;
+}
+
+.sec-test-connection {
+    margin-top: 20px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+#sec-test-result {
+    font-weight: 500;
+}
+
+.sec-badge {
+    display: inline-block;
+    padding: 3px 10px;
+    border-radius: 12px;
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: capitalize;
+}
+
+.sec-badge-pillar { background: #e0e7ff; color: #4338ca; }
+.sec-badge-child { background: #d1fae5; color: #065f46; }
+.sec-badge-alternative { background: #fef3c7; color: #92400e; }
+.sec-badge-comparative { background: #fee2e2; color: #991b1b; }
+.sec-badge-local_pack { background: #ede9fe; color: #5b21b6; }
