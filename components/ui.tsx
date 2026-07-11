@@ -9,7 +9,7 @@ interface PageHeaderProps {
   badge: string
   title: string
   subtitle?: string
-  action?: { label: string; href?: string; onClick?: () => void }
+  action?: { label: string; href?: string; onClick?: () => void; icon?: LucideIcon }
 }
 
 export function PageHeader({ icon: Icon, iconColor = '#5347ce', badge, title, subtitle, action }: PageHeaderProps) {
@@ -33,8 +33,10 @@ export function PageHeader({ icon: Icon, iconColor = '#5347ce', badge, title, su
       </div>
       {action && (
         action.href
-          ? <Link href={action.href}><button className="btn-primary">{action.label}</button></Link>
-          : <button className="btn-primary" onClick={action.onClick}>{action.label}</button>
+          ? <Link href={action.href}><button className="btn-primary" style={{ gap: 6, display: 'flex', alignItems: 'center' }}>
+            {action.icon && <action.icon size={15} />}{action.label}</button></Link>
+          : <button className="btn-primary" onClick={action.onClick} style={{ gap: 6, display: 'flex', alignItems: 'center' }}>
+            {action.icon && <action.icon size={15} />}{action.label}</button>
       )}
     </div>
   )

@@ -30,18 +30,21 @@ export async function listSites() {
 
   const siteIds = (sites ?? []).map((s) => s.id)
   let connectedSiteIds = new Set<string>()
+  let schemaSiteIds = new Set<string>()
 
   if (siteIds.length > 0) {
-    const { data: connections } = await supabase
-      .from('google_connections')
-      .select('site_id')
-      .in('site_id', siteIds)
-    connectedSiteIds = new Set((connections ?? []).map((c) => c.site_id))
+    const [connections, schemas] = await Promise.all([
+      supabase.from('google_connections').select('site_id').in('site_id', siteIds),
+      supabase.from('content_schemas').select('federated_site_id').in('federated_site_id', siteIds),
+    ])
+    connectedSiteIds = new Set((connections.data ?? []).map((c) => c.site_id))
+    schemaSiteIds = new Set((schemas.data ?? []).map((s) => s.federated_site_id))
   }
 
   return (sites ?? []).map((site) => ({
     ...site,
     google_connected: connectedSiteIds.has(site.id),
+    has_schema: schemaSiteIds.has(site.id),
   })) as Site[]
 }
 
