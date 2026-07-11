@@ -59,7 +59,7 @@ export interface ValidationPipelineResult {
     }
     duplicate?: {
       passed: boolean
-      result: ReturnType<DuplicateDetector['findDuplicates']>
+      result: Awaited<ReturnType<DuplicateDetector['findDuplicates']>>
     }
   }
   summary: ValidationSummary

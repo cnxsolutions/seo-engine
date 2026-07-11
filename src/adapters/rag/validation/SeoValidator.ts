@@ -277,7 +277,7 @@ export class SeoValidator {
       titleKeywordPosition,
       firstParagraphKeywordPosition,
       headingKeywordCount,
-      internalLinksKeywordCount: 0, // Calculé ailleurs
+      internalLinksKeywordCount: 0,
       externalLinksKeywordCount: 0,
       schemaTypes: [...new Set(schemaTypes)],
       hasOpenGraph: !!hasOpenGraph,
@@ -300,7 +300,7 @@ export class SeoValidator {
 
     // Keyword absent
     if (!contentLower.includes(keywordLower)) {
-      errorsList.push({
+      errors.push({
         element: 'keyword',
         code: 'KEYWORD_NOT_FOUND',
         message: `Focus keyword "${keyword}" not found in content`,
@@ -310,7 +310,7 @@ export class SeoValidator {
 
     // Keyword density trop bas
     if (metrics.keywordDensity < (this.config.keywordDensityMin || 0.5)) {
-      warningsList.push({
+      warnings.push({
         element: 'keyword',
         code: 'KEYWORD_DENSITY_LOW',
         message: `Keyword density (${metrics.keywordDensity.toFixed(2)}%) is below minimum (${this.config.keywordDensityMin}%)`,
@@ -320,7 +320,7 @@ export class SeoValidator {
 
     // Keyword density trop haut
     if (metrics.keywordDensity > (this.config.keywordDensityMax || 3)) {
-      warningsList.push({
+      warnings.push({
         element: 'keyword',
         code: 'KEYWORD_DENSITY_HIGH',
         message: `Keyword density (${metrics.keywordDensity.toFixed(2)}%) exceeds maximum (${this.config.keywordDensityMax}%)`,
@@ -330,7 +330,7 @@ export class SeoValidator {
 
     // Keyword pas dans le title
     if (this.config.keywordInTitle && headings.length > 0 && !headings[0].toLowerCase().includes(keywordLower)) {
-      warningsList.push({
+      warnings.push({
         element: 'keyword',
         code: 'KEYWORD_NOT_IN_TITLE',
         message: `Focus keyword "${keyword}" not found in title/H1`,
@@ -342,7 +342,7 @@ export class SeoValidator {
     if (this.config.keywordInFirstParagraph && contentText.length > 0) {
       const firstParText = contentText.slice(0, 500).toLowerCase()
       if (!firstParText.includes(keywordLower)) {
-        warningsList.push({
+        warnings.push({
           element: 'keyword',
           code: 'KEYWORD_NOT_IN_FIRST_PAR',
           message: `Focus keyword "${keyword}" not found in first 500 characters`,
@@ -353,7 +353,7 @@ export class SeoValidator {
 
     // Keyword pas dans les headings
     if (this.config.keywordInHeadings && metrics.headingKeywordCount === 0) {
-      warningsList.push({
+      warnings.push({
         element: 'keyword',
         code: 'KEYWORD_NOT_IN_HEADINGS',
         message: `Focus keyword "${keyword}" not found in any heading`,
@@ -363,22 +363,19 @@ export class SeoValidator {
   }
 
   private validateTitle(
-    title?: string,
-    metaTitle?: string,
-    keyword?: string,
-    errors?: SeoValidationError[],
-    warnings?: SeoValidationWarning[],
-    recommendations?: SeoRecommendation[]
+    title: string | undefined,
+    metaTitle: string | undefined,
+    keyword: string | undefined,
+    errors: SeoValidationError[],
+    warnings: SeoValidationWarning[],
+    recommendations: SeoRecommendation[]
   ): void {
     const titleToCheck = metaTitle || title || ''
     const titleLength = titleToCheck.length
-    const errorsList = errors || []
-    const warningsList = warnings || []
-    const recs = recommendations || []
 
     // Title manquant
     if (!titleToCheck) {
-      errorsList.push({
+      errors.push({
         element: 'title',
         code: 'TITLE_MISSING',
         message: 'Title is missing',
@@ -389,7 +386,7 @@ export class SeoValidator {
 
     // Title trop court
     if (titleLength < (this.config.metaTitleMinLength || 30)) {
-      warningsList.push({
+      warnings.push({
         element: 'title',
         code: 'TITLE_TOO_SHORT',
         message: `Title (${titleLength} chars) is shorter than recommended (${this.config.metaTitleMinLength} chars)`,
@@ -399,7 +396,7 @@ export class SeoValidator {
 
     // Title trop long
     if (titleLength > (this.config.metaTitleMaxLength || 60)) {
-      errorsList.push({
+      errors.push({
         element: 'title',
         code: 'TITLE_TOO_LONG',
         message: `Title (${titleLength} chars) exceeds recommended length (${this.config.metaTitleMaxLength} chars)`,
@@ -409,7 +406,7 @@ export class SeoValidator {
 
     // Keyword pas dans le title
     if (keyword && !titleToCheck.toLowerCase().includes(keyword.toLowerCase())) {
-      warningsList.push({
+      warnings.push({
         element: 'title',
         code: 'KEYWORD_NOT_IN_TITLE',
         message: `Focus keyword "${keyword}" not found in title`,
@@ -419,7 +416,7 @@ export class SeoValidator {
 
     // Recommandations
     if (titleLength < 50) {
-      recs.push({
+      recommendations.push({
         priority: 'low',
         element: 'title',
         title: 'Expand title for better CTR',
@@ -431,18 +428,14 @@ export class SeoValidator {
   }
 
   private validateMetaDescription(
-    metaDescription?: string,
-    keyword?: string,
-    errors?: SeoValidationError[],
-    warnings?: SeoValidationWarning[],
-    recommendations?: SeoRecommendation[]
+    metaDescription: string | undefined,
+    keyword: string | undefined,
+    errors: SeoValidationError[],
+    warnings: SeoValidationWarning[],
+    recommendations: SeoRecommendation[]
   ): void {
-    const errorsList = errors || []
-    const warningsList = warnings || []
-    const recs = recommendations || []
-
     if (!metaDescription) {
-      warningsList.push({
+      warnings.push({
         element: 'description',
         code: 'DESCRIPTION_MISSING',
         message: 'Meta description is missing',
@@ -455,7 +448,7 @@ export class SeoValidator {
 
     // Trop courte
     if (descLength < (this.config.metaDescMinLength || 120)) {
-      warningsList.push({
+      warnings.push({
         element: 'description',
         code: 'DESCRIPTION_TOO_SHORT',
         message: `Meta description (${descLength} chars) is shorter than recommended (${this.config.metaDescMinLength} chars)`,
@@ -465,7 +458,7 @@ export class SeoValidator {
 
     // Trop longue
     if (descLength > (this.config.metaDescMaxLength || 160)) {
-      errorsList.push({
+      errors.push({
         element: 'description',
         code: 'DESCRIPTION_TOO_LONG',
         message: `Meta description (${descLength} chars) exceeds recommended length (${this.config.metaDescMaxLength} chars)`,
@@ -475,7 +468,7 @@ export class SeoValidator {
 
     // Keyword pas dans la description
     if (keyword && !metaDescription.toLowerCase().includes(keyword.toLowerCase())) {
-      warningsList.push({
+      warnings.push({
         element: 'description',
         code: 'KEYWORD_NOT_IN_DESCRIPTION',
         message: `Focus keyword "${keyword}" not found in meta description`,
@@ -485,21 +478,18 @@ export class SeoValidator {
   }
 
   private validateUrl(
-    url?: string,
-    keyword?: string,
-    errors?: SeoValidationError[],
-    warnings?: SeoValidationWarning[],
-    recommendations?: SeoRecommendation[]
+    url: string,
+    keyword: string | undefined,
+    errors: SeoValidationError[],
+    warnings: SeoValidationWarning[],
+    recommendations: SeoRecommendation[]
   ): void {
-    const errorsList = errors || []
-    const warningsList = warnings || []
-    const recs = recommendations || []
     const path = (url || '').split('/').pop() || ''
     const urlLength = path.length
 
     // URL trop longue
     if (urlLength > (this.config.urlMaxLength || 75)) {
-      warningsList.push({
+      warnings.push({
         element: 'url',
         code: 'URL_TOO_LONG',
         message: `URL slug (${urlLength} chars) is quite long`,
@@ -509,7 +499,7 @@ export class SeoValidator {
 
     // Keyword pas dans l'URL
     if (this.config.urlContainsKeyword && keyword && !path.toLowerCase().includes(keyword.toLowerCase())) {
-      warningsList.push({
+      warnings.push({
         element: 'url',
         code: 'KEYWORD_NOT_IN_URL',
         message: `Focus keyword "${keyword}" not found in URL`,
@@ -519,7 +509,7 @@ export class SeoValidator {
 
     // Mauvais caractères dans l'URL
     if (/[^a-z0-9-]/i.test(path)) {
-      warningsList.push({
+      warnings.push({
         element: 'url',
         code: 'URL_SPECIAL_CHARS',
         message: 'URL contains special characters',
@@ -529,22 +519,19 @@ export class SeoValidator {
   }
 
   private validateHeadings(
-    headings?: string[],
-    keyword?: string,
-    contentText?: string,
-    errors?: SeoValidationError[],
-    warnings?: SeoValidationWarning[],
-    recommendations?: SeoRecommendation[]
+    headings: string[] | undefined,
+    keyword: string | undefined,
+    contentText: string | undefined,
+    errors: SeoValidationError[],
+    warnings: SeoValidationWarning[],
+    recommendations: SeoRecommendation[]
   ): void {
     const headingsList = headings || []
-    const errorsList = errors || []
-    const warningsList = warnings || []
-    const recs = recommendations || []
 
     // Pas de H2
     const hasH2 = headingsList.some(h => h.toLowerCase().startsWith('h2'))
     if (headingsList.length > 0 && !hasH2) {
-      warningsList.push({
+      warnings.push({
         element: 'heading',
         code: 'NO_H2',
         message: 'No H2 headings found',
@@ -552,13 +539,11 @@ export class SeoValidator {
       })
     }
 
-    // Multiple H1 (pas de H1 dans notre cas car c'est le title)
-
     // Keyword pas dans les headings
     if (keyword) {
       const keywordInHeadings = headingsList.filter(h => h.toLowerCase().includes(keyword.toLowerCase())).length
       if (headingsList.length > 0 && keywordInHeadings === 0) {
-        warningsList.push({
+        warnings.push({
           element: 'heading',
           code: 'KEYWORD_NOT_IN_HEADINGS',
           message: `Focus keyword "${keyword}" not found in any heading`,
@@ -569,7 +554,7 @@ export class SeoValidator {
 
     // Nombre de headings (heuristique)
     if (headingsList.length > 15) {
-      warningsList.push({
+      warnings.push({
         element: 'heading',
         code: 'TOO_MANY_HEADINGS',
         message: `Content has ${headingsList.length} headings, which may be excessive`,
@@ -579,18 +564,15 @@ export class SeoValidator {
   }
 
   private validateLinks(
-    internalLinks?: string[],
-    externalLinks?: string[],
-    contentText?: string,
-    errors?: SeoValidationError[],
-    warnings?: SeoValidationWarning[]
+    internalLinks: string[] | undefined,
+    externalLinks: string[] | undefined,
+    contentText: string | undefined,
+    errors: SeoValidationError[],
+    warnings: SeoValidationWarning[]
   ): void {
-    const errorsList = errors || []
-    const warningsList = warnings || []
-
     // Pas de liens internes
     if (internalLinks && internalLinks.length === 0) {
-      warningsList.push({
+      warnings.push({
         element: 'technical',
         code: 'NO_INTERNAL_LINKS',
         message: 'No internal links found',
@@ -600,7 +582,7 @@ export class SeoValidator {
 
     // Pas de liens externes
     if (externalLinks && externalLinks.length === 0) {
-      warningsList.push({
+      warnings.push({
         element: 'technical',
         code: 'NO_EXTERNAL_LINKS',
         message: 'No external links found',
@@ -610,19 +592,16 @@ export class SeoValidator {
   }
 
   private validateSchema(
-    schemaMarkup?: string,
-    errors?: SeoValidationError[],
-    warnings?: SeoValidationWarning[],
-    recommendations?: SeoRecommendation[]
+    schemaMarkup: string | undefined,
+    errors: SeoValidationError[],
+    warnings: SeoValidationWarning[],
+    recommendations: SeoRecommendation[]
   ): void {
-    const errorsList = errors || []
-    const warningsList = warnings || []
-    const recs = recommendations || []
     // Vérifier si le JSON-LD est valide
     try {
       const scripts = (schemaMarkup || '').match(/<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi) || []
       let validSchemas = 0
-      let schemaTypes: string[] = []
+      const schemaTypes: string[] = []
 
       for (const script of scripts) {
         const jsonMatch = script.match(/>([\s\S]*)<\/script>/)
@@ -634,7 +613,7 @@ export class SeoValidator {
               schemaTypes.push(data['@type'])
             }
           } catch {
-            errorsList.push({
+            errors.push({
               element: 'schema',
               code: 'INVALID_JSON_LD',
               message: 'Invalid JSON-LD schema found',
@@ -645,14 +624,14 @@ export class SeoValidator {
       }
 
       if (validSchemas === 0) {
-        warningsList.push({
+        warnings.push({
           element: 'schema',
           code: 'NO_SCHEMA',
           message: 'No structured data (JSON-LD) found',
           suggestion: 'Add structured data for rich snippets',
         })
 
-        recs.push({
+        recommendations.push({
           priority: 'medium',
           element: 'schema',
           title: 'Add structured data',
@@ -664,7 +643,7 @@ export class SeoValidator {
 
       // Types de schema recommandés
       if (!schemaTypes.includes('Article') && !schemaTypes.includes('WebPage')) {
-        recs.push({
+        recommendations.push({
           priority: 'low',
           element: 'schema',
           title: 'Add Article schema',
@@ -674,7 +653,7 @@ export class SeoValidator {
         })
       }
     } catch {
-      errorsList.push({
+      errors.push({
         element: 'schema',
         code: 'SCHEMA_PARSE_ERROR',
         message: 'Failed to parse schema markup',
@@ -695,7 +674,7 @@ export class SeoValidator {
 
     // og:title manquant
     if (!content.includes('og:title')) {
-      warningsList.push({
+      warnings.push({
         element: 'technical',
         code: 'NO_OG_TITLE',
         message: 'Open Graph title (og:title) not found',
@@ -705,7 +684,7 @@ export class SeoValidator {
 
     // og:description manquant
     if (!content.includes('og:description')) {
-      warningsList.push({
+      warnings.push({
         element: 'technical',
         code: 'NO_OG_DESCRIPTION',
         message: 'Open Graph description (og:description) not found',
@@ -715,7 +694,7 @@ export class SeoValidator {
 
     // og:image manquant
     if (!content.includes('og:image')) {
-      warningsList.push({
+      warnings.push({
         element: 'technical',
         code: 'NO_OG_IMAGE',
         message: 'Open Graph image (og:image) not found',
@@ -725,7 +704,7 @@ export class SeoValidator {
 
     // Twitter card manquant
     if (!content.includes('twitter:card')) {
-      warningsList.push({
+      warnings.push({
         element: 'technical',
         code: 'NO_TWITTER_CARD',
         message: 'Twitter Card meta tags not found',

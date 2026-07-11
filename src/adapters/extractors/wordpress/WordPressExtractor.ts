@@ -459,12 +459,7 @@ export class WordPressExtractor implements ISchemaExtractor {
       contentTypes,
       seoConfig: {
         hasSeoPlugin: !!seoInfo.plugin,
-        seoFields: seoInfo.fields.map(f => ({
-          key: f.key,
-          label: f.label,
-          type: f.type as import('../../../core/domain/entities/field-types').FieldType,
-          plugin: seoInfo.plugin as 'yoast' | 'rankmath' | 'all-in-one' | 'custom' | undefined,
-        })),
+        seoFields: seoInfo.fields.map(f => f.key),
         schemaTypes: seoInfo.schemaTypes,
       },
       publishConfig: {

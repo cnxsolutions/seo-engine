@@ -5,7 +5,7 @@
 
 import { NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase'
-import { createTemplateEngine, type RenderContext } from '@/adapters/rag/TemplateEngine'
+import { createTemplateEngine, type RenderContext } from '@/src/adapters/rag/TemplateEngine'
 import {
   CONTENT_TYPE_TEMPLATES,
   getTemplate,
@@ -14,7 +14,7 @@ import {
   WORDPRESS_TEMPLATES,
   SANITY_TEMPLATES,
   NEXTJS_TEMPLATES,
-} from '@/adapters/rag/TemplateLibrary'
+} from '@/src/adapters/rag/TemplateLibrary'
 import type { ContentTemplate } from '@/src/core/domain/entities/ContentTemplate'
 
 const supabase = createServiceClient()

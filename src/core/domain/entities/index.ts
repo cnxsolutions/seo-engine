@@ -3,7 +3,24 @@
 // Clean Core: Pure domain, no external dependencies
 // ─────────────────────────────────────────────────────────────────────────────
 
-import type { FieldType, FieldConfig, AcfFieldConfig, SeoConfig, PublishConfig } from './index'
+import type { FieldType, FieldConfig, AcfFieldConfig } from './field-types'
+
+// ─── SEO Config ────────────────────────────────────────────────────────────────
+
+export interface SeoConfig {
+  hasSeoPlugin: boolean
+  seoFields: string[]
+  schemaTypes: string[]
+}
+
+// ─── Publish Config ─────────────────────────────────────────────────────────────
+
+export interface PublishConfig {
+  requiresReview: boolean
+  defaultStatus: 'draft' | 'published' | 'pending'
+  supportedStatuses: string[]
+  autoPublish: boolean
+}
 
 // ─── Site Entity ───────────────────────────────────────────────────────────────
 

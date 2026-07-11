@@ -10,7 +10,7 @@ import {
   createSanityMonitoringService,
   type SanityPublishContent,
   type SanityPublishOptions,
-} from '@/adapters/publishers/sanity'
+} from '@/src/adapters/publishers/sanity'
 
 const supabase = createServiceClient()
 
@@ -295,7 +295,7 @@ export async function GET(request: Request) {
         sanityToken: string
       }
 
-      const { SanityClient } = await import('@/adapters/publishers/sanity')
+      const { SanityClient } = await import('@/src/adapters/publishers/sanity')
       const client = new SanityClient({
         projectId: credentials.sanityProjectId,
         dataset: credentials.sanityDataset,

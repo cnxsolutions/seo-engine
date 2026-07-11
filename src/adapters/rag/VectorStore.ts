@@ -17,14 +17,6 @@ import type {
   IndexingStatus,
   IndexingError,
   VectorSearchFilters,
-  RagContext as RagContextType,
-  RagContextParams as RagContextParamsType,
-  SchemaIndexInput,
-  ContentIndexInput,
-  ContentTypeIndexInput,
-  FieldIndexInput,
-  TaxonomyIndexInput,
-  TermIndexInput,
 } from './types'
 
 // Re-export types from types.ts
@@ -41,20 +33,7 @@ export type {
   IndexingStatus,
   IndexingError,
   VectorSearchFilters,
-  RagContextParams,
-  SchemaIndexInput,
-  ContentIndexInput,
-  ContentTypeIndexInput,
-  FieldIndexInput,
-  TaxonomyIndexInput,
-  TermIndexInput,
 } from './types'
-
-export type { RagContext, RagContextParams, SeoContext } from './types'
-
-// Alias for local use
-type RagContext = RagContextType
-type RagContextParams = RagContextParamsType
 
 /**
  * Interface abstraite pour le Vector Store

@@ -6,11 +6,11 @@
 
 import { NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase'
-import { ValidationPipelineOrchestrator } from '@/adapters/rag/validation/ValidationPipelineOrchestrator'
-import { SchemaValidator } from '@/adapters/rag/validation/SchemaValidator'
-import { ContentQualityValidator } from '@/adapters/rag/validation/ContentQualityValidator'
-import { SeoValidator } from '@/adapters/rag/validation/SeoValidator'
-import { DuplicateDetector } from '@/adapters/rag/validation/DuplicateDetector'
+import { ValidationPipelineOrchestrator } from '@/src/adapters/rag/validation/ValidationPipelineOrchestrator'
+import { SchemaValidator } from '@/src/adapters/rag/validation/SchemaValidator'
+import { ContentQualityValidator } from '@/src/adapters/rag/validation/ContentQualityValidator'
+import { SeoValidator } from '@/src/adapters/rag/validation/SeoValidator'
+import { DuplicateDetector } from '@/src/adapters/rag/validation/DuplicateDetector'
 
 // ─── Types ─────────────────────────────────────────────────────────────────
 

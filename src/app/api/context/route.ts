@@ -8,20 +8,20 @@ import { createServiceClient } from '@/lib/supabase'
 import {
   createTaxonomyContextBuilder,
   type TaxonomyContextConfig,
-} from '@/adapters/rag/context/TaxonomyContextBuilder'
+} from '@/src/adapters/rag/context/TaxonomyContextBuilder'
 import {
   createCompetitorContextBuilder,
   type CompetitorContextConfig,
-} from '@/adapters/rag/context/CompetitorContextBuilder'
+} from '@/src/adapters/rag/context/CompetitorContextBuilder'
 import {
   createGoogleContextBuilder,
   type GoogleContextConfig,
-} from '@/adapters/rag/context/GoogleContextBuilder'
+} from '@/src/adapters/rag/context/GoogleContextBuilder'
 import {
   createUnifiedContextAggregator,
   type UnifiedContextConfig,
   type ContextSourcesConfig,
-} from '@/adapters/rag/context/UnifiedContextAggregator'
+} from '@/src/adapters/rag/context/UnifiedContextAggregator'
 
 const supabase = createServiceClient()
 
@@ -94,7 +94,7 @@ export async function GET(request: Request) {
         const aggregator = createUnifiedContextAggregator(
           { siteId },
           {
-            competitor: keywords.length > 0 ? { targetKeywords: keywords } : undefined,
+            competitor: keywords.length > 0 ? { siteId, targetKeywords: keywords } : undefined,
           }
         )
         const context = await aggregator.buildContext()

@@ -291,7 +291,8 @@ export class VectorIndexingService {
 
           for (const item of items) {
             documents.push({
-              contentType: type,
+              contentTypeKey: type,
+              contentType: type.charAt(0).toUpperCase() + type.slice(1),
               title: item.title?.rendered?.replace(/<[^>]*>/g, '') || '',
               content: item.content?.rendered || '',
               excerpt: item.excerpt?.rendered?.replace(/<[^>]*>/g, ''),
@@ -364,7 +365,8 @@ export class VectorIndexingService {
 
         for (const item of data.result || []) {
           documents.push({
-            contentType: type,
+            contentTypeKey: type,
+            contentType: type.charAt(0).toUpperCase() + type.slice(1),
             title: item.title || '',
             content: typeof item.body === 'string' ? item.body : JSON.stringify(item.body),
             excerpt: item.excerpt,
@@ -481,6 +483,7 @@ interface SanityContentItem {
 }
 
 interface ContentDocument {
+  contentTypeKey: string
   contentType: string
   title: string
   content: string

@@ -5,9 +5,9 @@
 
 import { NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase'
-import { createSupabaseVectorStore } from '@/adapters/rag/providers'
-import { VectorIndexingService } from '@/adapters/rag/VectorIndexingService'
-import { SemanticSearchService } from '@/adapters/rag/SemanticSearchService'
+import { createSupabaseVectorStore } from '@/src/adapters/rag/providers'
+import { VectorIndexingService } from '@/src/adapters/rag/VectorIndexingService'
+import { SemanticSearchService } from '@/src/adapters/rag/SemanticSearchService'
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 

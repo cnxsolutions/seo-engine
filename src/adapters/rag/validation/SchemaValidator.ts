@@ -292,116 +292,39 @@ export class SchemaValidator {
   private checkType(field: ContentField, value: unknown): string | null {
     const { type } = field
 
-    switch (type) {
-      // Types texte
-      case 'text':
-      case 'slug':
-      case 'email':
-      case 'url':
-        if (typeof value !== 'string') {
-          return `Expected string for field "${field.key}", got ${typeof value}`
-        }
-        break
+    // Définir les types valides par catégorie
+    const stringTypes = ['text', 'slug', 'email', 'url', 'html', 'rich-text', 'meta', 'phone', 'address', 'json']
+    const numberTypes = ['number']
+    const booleanTypes = ['boolean']
+    const arrayTypes = ['array', 'gallery', 'flexible-content', 'repeater']
+    const objectTypes = ['object', 'group', 'block-content']
+    const mediaTypes = ['image', 'file']
+    const referenceTypes = ['reference']
 
-      // Types numériques
-      case 'number':
-      case 'integer':
-        if (typeof value !== 'number') {
-          return `Expected number for field "${field.key}", got ${typeof value}`
-        }
-        if (type === 'integer' && !Number.isInteger(value)) {
-          return `Expected integer for field "${field.key}", got decimal`
-        }
-        break
-
-      // Booléen
-      case 'boolean':
-        if (typeof value !== 'boolean') {
-          return `Expected boolean for field "${field.key}", got ${typeof value}`
-        }
-        break
-
-      // Tableau
-      case 'array':
-        if (!Array.isArray(value)) {
-          return `Expected array for field "${field.key}", got ${typeof value}`
-        }
-        break
-
-      // Objet
-      case 'object':
-      case 'group':
-      case 'block-content':
-        if (typeof value !== 'object' || value === null || Array.isArray(value)) {
-          return `Expected object for field "${field.key}", got ${typeof value}`
-        }
-        break
-
-      // HTML/Rich Text
-      case 'html':
-      case 'rich-text':
-      case 'wysiwyg':
-        if (typeof value !== 'string') {
-          return `Expected string (HTML) for field "${field.key}", got ${typeof value}`
-        }
-        break
-
-      // Date/Time
-      case 'date':
-      case 'datetime':
-      case 'time':
-        if (typeof value !== 'string') {
-          return `Expected ISO date string for field "${field.key}"`
-        }
-        if (isNaN(Date.parse(value))) {
-          return `Invalid date format for field "${field.key}"`
-        }
-        break
-
-      // Sélection
-      case 'select':
-      case 'radio':
-        if (typeof value !== 'string' && typeof value !== 'number') {
-          return `Expected string or number for field "${field.key}"`
-        }
-        if (field.config?.options && Array.isArray(field.config.options)) {
-          const options = field.config.options.map(String)
-          if (!options.includes(String(value))) {
-            return `Value "${value}" not in allowed options: ${options.join(', ')}`
-          }
-        }
-        break
-
-      // Image/Fichier
-      case 'image':
-      case 'file':
-        if (typeof value !== 'object') {
-          return `Expected object for field "${field.key}"`
-        }
-        break
-
-      // Relation
-      case 'relationship':
-      case 'post-object':
-      case 'taxonomy':
-        if (typeof value !== 'object' || value === null) {
-          return `Expected object reference for field "${field.key}"`
-        }
-        break
-
-      // Couleur
-      case 'color':
-        if (typeof value !== 'string') {
-          return `Expected color string for field "${field.key}"`
-        }
-        if (!/^#[0-9A-Fa-f]{3,8}$/.test(value)) {
-          return `Invalid color format for field "${field.key}"`
-        }
-        break
-
-      default:
-        // Type inconnu - ne pas générer d'erreur
-        break
+    if (stringTypes.includes(type)) {
+      if (typeof value !== 'string') {
+        return `Expected string for field "${field.key}", got ${typeof value}`
+      }
+    } else if (numberTypes.includes(type)) {
+      if (typeof value !== 'number') {
+        return `Expected number for field "${field.key}", got ${typeof value}`
+      }
+    } else if (booleanTypes.includes(type)) {
+      if (typeof value !== 'boolean') {
+        return `Expected boolean for field "${field.key}", got ${typeof value}`
+      }
+    } else if (arrayTypes.includes(type)) {
+      if (!Array.isArray(value)) {
+        return `Expected array for field "${field.key}", got ${typeof value}`
+      }
+    } else if (objectTypes.includes(type)) {
+      if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+        return `Expected object for field "${field.key}", got ${typeof value}`
+      }
+    } else if (mediaTypes.includes(type) || referenceTypes.includes(type)) {
+      if (typeof value !== 'object') {
+        return `Expected object for field "${field.key}"`
+      }
     }
 
     return null

@@ -8,6 +8,7 @@ import type {
   ContentSchema,
   ContentType,
   ContentField,
+  SeoConfig,
 } from '../../../core/domain/entities'
 import { SANITY_TYPE_MAPPING } from '../../../core/domain/entities/field-types'
 import type { ISchemaExtractor } from '../../../core/domain/repositories'
@@ -474,10 +475,12 @@ export class SanityExtractor implements ISchemaExtractor {
         ...contentField.config,
         fields: (field.options.of as SanityFieldDefinition[])
           .filter(o => o.type !== 'block' && o.type !== 'span')
-          .map(o => ({
+          .map((o, index) => ({
             key: o.name || o.type,
             label: o.title || o.type,
             type: SANITY_TYPE_MAPPING[o.type] ?? 'text' as import('../../../core/domain/entities/field-types').FieldType,
+            required: false,
+            sortOrder: index,
           })),
       }
     }
@@ -485,7 +488,7 @@ export class SanityExtractor implements ISchemaExtractor {
     return contentField
   }
 
-  private extractSeoConfig(schemas: SanitySchemaDefinition[]): Record<string, unknown> {
+  private extractSeoConfig(schemas: SanitySchemaDefinition[]): SeoConfig {
     const seoSchemas = schemas.filter(s =>
       s.name.includes('seo') ||
       s.name.includes('meta') ||
@@ -494,22 +497,12 @@ export class SanityExtractor implements ISchemaExtractor {
       s.type === 'openGraph'
     )
 
-    const seoFields: Array<{
-      key: string
-      label: string
-      type: import('../../../core/domain/entities/field-types').FieldType
-      plugin?: 'custom'
-    }> = []
+    const seoFields: string[] = []
 
     seoSchemas.forEach(schema => {
       if (schema.fields) {
         schema.fields.forEach(field => {
-          seoFields.push({
-            key: field.name,
-            label: field.title || field.name,
-            type: SANITY_TYPE_MAPPING[field.type] ?? 'text',
-            plugin: 'custom',
-          })
+          seoFields.push(field.name)
         })
       }
     })

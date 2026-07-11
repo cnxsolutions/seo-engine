@@ -5,13 +5,37 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { NextRequest, NextResponse } from 'next/server'
-import { createWordPressExtractor } from '../../../../adapters/extractors/wordpress/WordPressExtractor'
-import { createSanityExtractor } from '../../../../adapters/extractors/sanity/SanityExtractor'
-import type { FederatedSite } from '../../../../core/domain/entities'
-import type { ISchemaExtractor } from '../../../../core/domain/repositories'
+import { createWordPressExtractor } from '@/src/adapters/extractors/wordpress/WordPressExtractor'
+import { createSanityExtractor } from '@/src/adapters/extractors/sanity/SanityExtractor'
+import type { FederatedSite, ContentSchema } from '@/src/core/domain/entities'
+import type { ISchemaExtractor } from '@/src/core/domain/repositories'
 
 // Mock database - à remplacer par une vraie implémentation
 const sites = new Map<string, FederatedSite>()
+
+interface ContentTypeField {
+  key: string
+  label: string
+  type: string
+  required: boolean
+}
+
+interface ContentType {
+  key: string
+  label: string
+  fields: ContentTypeField[]
+  taxonomies?: Array<{ key: string; label: string }>
+}
+
+interface ExtractedSchema {
+  id: string
+  name: string
+  label: string
+  contentTypes: ContentType[]
+  extractedAt?: string
+  seoConfig?: unknown
+  publishConfig?: unknown
+}
 
 export async function GET(
   request: NextRequest,
@@ -41,16 +65,16 @@ export async function GET(
         name: schema.name,
         label: schema.label,
         contentTypesCount: schema.contentTypes.length,
-        fieldsCount: schema.contentTypes.reduce((sum, ct) => sum + ct.fields.length, 0),
+        fieldsCount: schema.contentTypes.reduce((sum: number, ct: ContentType) => sum + ct.fields.length, 0),
         extractedAt: schema.extractedAt,
         seoConfig: schema.seoConfig,
         publishConfig: schema.publishConfig,
-        contentTypes: schema.contentTypes.map(ct => ({
+        contentTypes: schema.contentTypes.map((ct: ContentType) => ({
           key: ct.key,
           label: ct.label,
           fieldCount: ct.fields.length,
-          requiredFields: ct.fields.filter(f => f.required).length,
-          taxonomies: ct.taxonomies?.map(t => ({ key: t.key, label: t.label })) || [],
+          requiredFields: ct.fields.filter((f: ContentTypeField) => f.required).length,
+          taxonomies: ct.taxonomies?.map((t: { key: string; label: string }) => ({ key: t.key, label: t.label })) || [],
         })),
       },
     })
@@ -105,8 +129,8 @@ export async function POST(
     // 7. Logger la sync
     await logSync(siteId, 'completed', {
       contentTypes: schema.contentTypes.length,
-      fields: schema.contentTypes.reduce((sum, ct) => sum + ct.fields.length, 0),
-      taxonomies: schema.contentTypes.reduce((sum, ct) => sum + (ct.taxonomies?.length || 0), 0),
+      fields: schema.contentTypes.reduce((sum: number, ct: ContentType) => sum + ct.fields.length, 0),
+      taxonomies: schema.contentTypes.reduce((sum: number, ct: ContentType) => sum + (ct.taxonomies?.length || 0), 0),
     })
 
     // 8. Retourner le résultat
@@ -118,15 +142,15 @@ export async function POST(
         name: schema.name,
         label: schema.label,
         contentTypesCount: schema.contentTypes.length,
-        fieldsCount: schema.contentTypes.reduce((sum, ct) => sum + ct.fields.length, 0),
+        fieldsCount: schema.contentTypes.reduce((sum: number, ct: ContentType) => sum + ct.fields.length, 0),
         extractedAt: schema.extractedAt,
-        seoPlugin: schema.seoConfig.hasSeoPlugin,
-        contentTypes: schema.contentTypes.map(ct => ({
+        seoPlugin: (schema.seoConfig as { hasSeoPlugin?: boolean })?.hasSeoPlugin,
+        contentTypes: schema.contentTypes.map((ct: ContentType) => ({
           key: ct.key,
           label: ct.label,
           fieldCount: ct.fields.length,
-          requiredFields: ct.fields.filter(f => f.required).length,
-          fields: ct.fields.map(f => ({
+          requiredFields: ct.fields.filter((f: ContentTypeField) => f.required).length,
+          fields: ct.fields.map((f: ContentTypeField) => ({
             key: f.key,
             label: f.label,
             type: f.type,
@@ -189,12 +213,12 @@ async function getSite(siteId: string): Promise<FederatedSite | null> {
   return sites.get(siteId) || null
 }
 
-async function saveSchema(siteId: string, schema: import('../../../core/domain/entities').ContentSchema): Promise<void> {
+async function saveSchema(siteId: string, schema: ContentSchema): Promise<void> {
   // En production: INSERT INTO content_schemas VALUES (...)
   console.log('[Schema saved]', { siteId, schemaName: schema.name })
 }
 
-async function getSchemaForSite(siteId: string): Promise<import('../../../core/domain/entities').ContentSchema | null> {
+async function getSchemaForSite(siteId: string): Promise<ContentSchema | null> {
   // En production: SELECT * FROM content_schemas WHERE federated_site_id = $1
   return null
 }
