@@ -6,7 +6,12 @@ export type GenerationStatus = 'pending' | 'generating' | 'generated' | 'publish
 export type ArticleType = 'tutorial' | 'list' | 'case_study' | 'glossary' | 'example'
 export type BacklinkType = 'thematic' | 'local' | 'directory' | 'guest_post' | 'social'
 export type PageType = 'pillar' | 'child' | 'alternative' | 'comparative' | 'local_pack'
-export type AiProvider = 'gpt-4o' | 'gpt-4o-mini' | 'claude-haiku' | 'claude-sonnet'
+/**
+ * Kept as a loose alias of the generation catalogue: `campaigns.ai_model` is a
+ * text column, and a model added in lib/ai/provider must not require a schema
+ * change to be selectable.
+ */
+export type AiProvider = import('@/lib/ai/provider').AiModel | (string & {})
 export type ScheduleFrequency = 'manual' | 'daily' | 'every_2_days' | 'every_3_days' | 'weekly' | 'biweekly' | 'monthly' | 'custom'
 export type AnalysisRunStatus = 'running' | 'completed' | 'failed'
 
@@ -20,12 +25,35 @@ export interface Site {
   wp_page_template?: string
   github_repo?: string
   github_token?: string
+  /**
+   * Branch generated pages are committed to. NULL/absent means the repository
+   * default branch — production on most setups, with no review step.
+   */
+  github_branch?: string
+  /**
+   * Merge `github_branch` into the repository default branch after publishing.
+   *
+   * Off by default: turning it on means a generated page reaches production
+   * without anyone reading it. On, because otherwise the branch is a dead end —
+   * the host deploys the default branch and the page is never visible.
+   */
+  auto_promote?: boolean
+  /**
+   * Last schema read from the client's CMS.
+   *
+   * Kept because reading it is several authenticated round-trips to their
+   * production site — the same reason `repo_profile` is kept for Next.js.
+   */
+  cms_schema?: unknown
+  cms_schema_read_at?: string | null
   github_mdx_path?: string
   repo_profile?: unknown
   is_active: boolean
   created_at: string
   updated_at: string
   google_connected?: boolean
+  /** Last successful vector indexing run for this site (migration 009). */
+  last_indexed_at?: string | null
 }
 
 export interface Campaign {
@@ -78,13 +106,48 @@ export interface Generation {
   internal_links_to?: string[]
   external_links?: ExternalLink[]
   image_alts?: string[]
+  /**
+   * The complete page object returned by the generator, stored verbatim.
+   *
+   * The scalar columns above (title, content, slug…) cannot carry the JSON-LD
+   * schemas, the FAQ items or the internal links, so any publishing path that
+   * rebuilds a page from them alone silently ships a page stripped of its
+   * structured data and internal linking. Persisting the payload lets the
+   * deferred publishing job republish exactly what was generated.
+   *
+   * Nullable: rows created before this column existed fall back to the
+   * reconstruction path in the publisher.
+   */
+  page_payload?: import('@/lib/ai/openai').GeneratedPage
   status: GenerationStatus
   published_url?: string
   published_page_id?: number
+  /** How the connector produced the page. Free string, read by humans. */
+  publish_mode?: string | null
+  /** Whether a visitor could reach it at publication time. Gates indexing. */
+  publish_live?: boolean | null
+  /** What the connector had to say that was not an error. */
+  publish_notes?: string[] | null
+  /**
+   * Why the engine declined, when it declined on purpose.
+   *
+   * NULL on a breakage. A breakage retries itself; a refusal waits for a human,
+   * and until this column existed the two were the same row in the same status.
+   */
+  refusal_kind?: string | null
   ai_model: string
   tokens_used?: number
   error_message?: string
   scheduled_for?: string
+  /**
+   * When the page actually went online (migration 010).
+   *
+   * Distinct from `updated_at`, which moves on every write: the J+30 performance
+   * measurement joins a page to the Search Console rows of the 30 days that
+   * FOLLOWED its publication, so using `updated_at` silently re-dates a page
+   * every time anything touches its row.
+   */
+  published_at?: string | null
   created_at: string
   updated_at: string
   campaign?: Campaign
@@ -107,11 +170,54 @@ export interface EditorialSlot {
   page_type: PageType
   target_keyword: string
   target_city?: string
-  status: 'planned' | 'generating' | 'generated' | 'published' | 'skipped'
+  /**
+   * `failed` is terminal on purpose: the scheduler only ever picks up `planned`
+   * slots, so a slot that exhausted its retries must not sit in `generating`
+   * forever. The reaper hands stale `generating` slots back to `planned`;
+   * `failed` means the run really did not work and needs a human decision.
+   */
+  status: 'planned' | 'generating' | 'generated' | 'published' | 'skipped' | 'failed'
+  error_message?: string
+  /**
+   * Attempts already spent on this slot, incremented when it is claimed.
+   *
+   * The scheduler retries a slot across ticks rather than inside one: a
+   * generation cannot be cancelled, so retrying it a few seconds after a timeout
+   * simply runs two of them at once. This counter is what bounds those
+   * across-tick retries.
+   */
+  attempt_count?: number
   created_at: string
   updated_at: string
   campaign?: Campaign
   generation?: Generation
+}
+
+/**
+ * The slice of a generation the editorial calendar shows: enough to say what
+ * came out of a slot and why it failed, without shipping the full HTML page.
+ */
+export interface CalendarSlotGeneration {
+  id: string
+  title?: string | null
+  slug?: string | null
+  status?: GenerationStatus | null
+  published_url?: string | null
+  error_message?: string | null
+  updated_at?: string | null
+}
+
+/**
+ * A slot as `GET /api/calendar` serialises it.
+ *
+ * Shared by the route and the page on purpose: both used to redeclare it, with
+ * `status` widened to `string` while `EditorialSlot['status']` was gaining its
+ * `failed` member. Now that the member exists, one declaration keeps the two
+ * ends from drifting again — a status the API can return but the page cannot
+ * name is exactly how `failed` stayed invisible in the first place.
+ */
+export type CalendarSlot = Omit<EditorialSlot, 'generation'> & {
+  generation?: CalendarSlotGeneration | null
 }
 
 export interface Article {
@@ -160,6 +266,14 @@ export interface SitePage {
   has_faq: boolean
   has_local_business: boolean
   geo_signals: string[]
+  /**
+   * Readable body text captured by the crawler (migration 009).
+   *
+   * This is what the vector index embeds. Without it a document is built from
+   * the title and headings alone, which describes what a page is called rather
+   * than what it says.
+   */
+  content_excerpt?: string | null
   crawled_at: string
   created_at: string
   updated_at: string

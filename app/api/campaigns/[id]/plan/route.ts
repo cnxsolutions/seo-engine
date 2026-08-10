@@ -28,12 +28,23 @@ export async function POST(req: NextRequest, context: { params: Promise<{ id: st
       return NextResponse.json({ error: 'Campagne introuvable' }, { status: 404 })
     }
 
+    // Planning is the slowest interactive action in the product — reading the
+    // SERP and crawling competitors takes a minute or more — and it used to run
+    // in complete silence. A spinner with no trace is indistinguishable from a
+    // hang, so each phase announces itself.
+    const startedAt = Date.now()
+    console.log(
+      `\n[plan] ─── ${campaign.name} — cycle de ${cycleDays} jours ───\n` +
+        `[plan] modele=${campaign.ai_model} mots-cles=${campaign.keywords.length} communes=${campaign.communes.length}`
+    )
+
     const planItems = await generatePlanPreview({
       campaign,
       cycleDays,
     })
 
     if (planItems.length === 0) {
+      console.warn(`[plan] aucun creneau produit — frequence "manual" ou cycle trop court ?`)
       return NextResponse.json({ error: 'Impossible de generer un plan (frequence manuelle?)' }, { status: 422 })
     }
 
@@ -50,6 +61,11 @@ export async function POST(req: NextRequest, context: { params: Promise<{ id: st
       total_pages: planItems.length,
       total_estimated_words: totalWords,
     })
+
+    console.log(
+      `[plan] ✓ cycle ${cycleNumber} — ${planItems.length} pages, ~${totalWords.toLocaleString('fr-FR')} mots, ` +
+        `${((Date.now() - startedAt) / 1000).toFixed(1)}s\n`
+    )
 
     return NextResponse.json({ plan })
   } catch (error) {

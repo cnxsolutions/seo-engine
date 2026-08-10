@@ -5,11 +5,10 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { createServiceClient } from '@/lib/supabase'
-import type { SupabaseVectorStore } from './providers/SupabaseVectorStore'
+import { DEFAULT_MIN_SCORE, type SupabaseVectorStore } from './providers/SupabaseVectorStore'
 import type {
   SearchConfig,
   SearchResult,
-  SimilarityQuery,
   VectorSearchFilters,
   RagContext,
   RagContextParams,
@@ -32,6 +31,14 @@ export interface SemanticSearchOptions {
   limit?: number
   minScore?: number
 }
+
+/**
+ * Score above which a keyword counts as already covered by an existing page.
+ *
+ * Higher than DEFAULT_MIN_SCORE on purpose: a gap is the absence of coverage, so
+ * a page that merely brushes the subject must still close it.
+ */
+export const GAP_COVERAGE_SCORE = 0.5
 
 /**
  * Résultats de recherche enrichis
@@ -65,9 +72,10 @@ export class SemanticSearchService {
       query,
       siteId: options.siteId,
       contentTypeKey: options.contentTypeKey,
-      documentTypes: options.documentTypes as any,
+      documentTypes: options.documentTypes as SearchConfig['documentTypes'],
       limit: options.limit || 10,
-      minScore: options.minScore || 0.7,
+      // `?? ` and not `|| `: a caller asking for 0 means "no floor", not "0.7".
+      minScore: options.minScore ?? DEFAULT_MIN_SCORE,
     }
 
     const results = await this.vectorStore.search(config)
@@ -79,7 +87,15 @@ export class SemanticSearchService {
   }
 
   /**
-   * Trouve des exemples similaires pour un type de contenu
+   * Trouve des exemples similaires pour un type de contenu.
+   *
+   * Two changes over the original, both of which decided between "some results"
+   * and "never any":
+   *   - the 0.75 floor is gone. It is a near-duplicate threshold; a query and a
+   *     genuinely related page score well below it;
+   *   - when the requested content type has nothing yet — a site whose first
+   *     article is not published still only has crawled pages — the search falls
+   *     back to every content type, REUSING the embedding already paid for.
    */
   async findSimilarExamples(
     contentTypeKey: string,
@@ -88,26 +104,48 @@ export class SemanticSearchService {
       siteId?: string
       limit?: number
       excludeIds?: string[]
+      minScore?: number
     } = {}
   ): Promise<EnrichedSearchResult[]> {
-    const query: SimilarityQuery = {
-      content: topic,
-      siteId: options.siteId,
-      contentTypeKey,
-      limit: options.limit || 5,
-      threshold: 0.75,
+    const limit = options.limit || 5
+    const minScore = options.minScore ?? DEFAULT_MIN_SCORE
+    const overFetch = limit + (options.excludeIds?.length || 0)
+
+    // An empty topic is not a question: embedding it buys a vector pointing
+    // nowhere. Callers use it to mean "the latest content", so answer that.
+    if (!topic.trim()) {
+      return this.searchByFilters(
+        { siteId: options.siteId, contentTypeKey, documentTypes: ['content'] },
+        overFetch
+      ).then(results =>
+        results.filter(r => !options.excludeIds?.includes(r.id)).slice(0, limit)
+      )
     }
 
-    const results = await this.vectorStore.findSimilar(query)
+    const embedding = await this.vectorStore.generateEmbedding(topic)
 
-    // Filtrer les exclusions
-    const filtered = results.filter(
-      r => !options.excludeIds?.includes(r.id)
-    )
+    let results = await this.vectorStore.searchByEmbedding(embedding, {
+      siteId: options.siteId,
+      contentTypeKey,
+      documentTypes: ['content'],
+      limit: overFetch,
+      minScore,
+    })
 
-    return Promise.all(
-      filtered.map(r => this.enrichResult(r))
-    )
+    if (results.length === 0 && contentTypeKey) {
+      results = await this.vectorStore.searchByEmbedding(embedding, {
+        siteId: options.siteId,
+        documentTypes: ['content'],
+        limit: overFetch,
+        minScore,
+      })
+    }
+
+    const filtered = results
+      .filter(r => !options.excludeIds?.includes(r.id))
+      .slice(0, limit)
+
+    return Promise.all(filtered.map(r => this.enrichResult(r)))
   }
 
   /**
@@ -142,14 +180,27 @@ export class SemanticSearchService {
       existingLinks?: string[]
     } = {}
   ): Promise<InternalLinkTarget[]> {
+    const limit = options.limit || 5
+
     const results = await this.semanticSearch(topic, {
       siteId,
       documentTypes: ['content'],
-      limit: options.limit || 5,
+      limit: limit + (options.existingLinks?.length || 0),
     })
 
+    // `existingLinks` are slugs and URLs, never row ids — the previous filter
+    // compared them to `r.id`, a uuid, so it never excluded anything and the
+    // generator was regularly told to link to the page it was writing.
+    const excluded = new Set(
+      (options.existingLinks || []).map(link => normalizeLinkKey(link)).filter(Boolean)
+    )
+
     return results
-      .filter(r => !options.existingLinks?.includes(r.id))
+      .filter(r => {
+        const url = r.metadata.url || ''
+        return !excluded.has(normalizeLinkKey(url)) && !excluded.has(r.id)
+      })
+      .slice(0, limit)
       .map(r => ({
         id: r.id,
         title: r.metadata.title || 'Untitled',
@@ -169,26 +220,20 @@ export class SemanticSearchService {
     const gaps: ContentGap[] = []
 
     for (const keyword of keywords) {
+      if (!keyword.trim()) continue
+
+      // A gap means "no page really covers this", so the floor here is
+      // deliberately HIGHER than a plain search: a loose match is still coverage.
       const results = await this.semanticSearch(keyword, {
         siteId,
         limit: 1,
-        minScore: 0.8,
+        minScore: GAP_COVERAGE_SCORE,
       })
 
       if (results.length === 0) {
-        // Vérifier si le keyword existe quelque part
-        const allResults = await this.vectorStore.searchByMetadata(
-          { siteId },
-          100
-        )
-
-        const hasPartialMatch = allResults.some(r =>
-          r.content.toLowerCase().includes(keyword.toLowerCase())
-        )
-
         gaps.push({
           keyword,
-          existingContent: hasPartialMatch,
+          existingContent: await this.mentionsKeyword(siteId, keyword),
           priority: 'high',
           suggestedApproach: this.suggestContentApproach(keyword),
         })
@@ -199,26 +244,58 @@ export class SemanticSearchService {
   }
 
   /**
+   * Whether the keyword appears verbatim anywhere in the site's indexed text.
+   *
+   * A counting query: the previous version downloaded 100 full page bodies to
+   * run `String.includes` on them, once per keyword.
+   */
+  private async mentionsKeyword(siteId: string, keyword: string): Promise<boolean> {
+    const pattern = keyword.replace(/[%_\\]/g, ' ').trim()
+    if (!pattern) return false
+
+    const { count, error } = await this.supabase
+      .from('vector_embeddings')
+      .select('id', { count: 'exact', head: true })
+      .eq('site_id', siteId)
+      .ilike('content', `%${pattern}%`)
+
+    if (error) return false
+    return (count || 0) > 0
+  }
+
+  /**
    * Suggère des variations de contenu basées sur l'existant
    */
   async suggestContentVariations(
     sourceId: string,
-    topic: string
+    topic: string,
+    siteId?: string
   ): Promise<ContentVariation[]> {
-    const source = await this.vectorStore.searchByMetadata(
-      { siteId: '' }, // TODO: récupérer le siteId depuis le document
-      1
-    ).then(results => results.find(r => r.id === sourceId))
+    // Read the source row directly. The previous version searched a site whose
+    // id was the empty string and then looked for `sourceId` in a single result,
+    // which could only ever return nothing.
+    const { data } = await this.supabase
+      .from('vector_embeddings')
+      .select('id, content, metadata, site_id')
+      .eq('id', sourceId)
+      .maybeSingle()
 
-    if (!source) {
+    if (!data) {
       return []
+    }
+
+    const source = {
+      id: data.id as string,
+      content: data.content as string,
+      metadata: data.metadata as SearchResult['metadata'],
+      siteId: (data.site_id as string) || siteId,
     }
 
     // Trouver des documents similaires
     const similar = await this.findSimilarExamples(
-      source.metadata.contentTypeKey || 'post',
+      source.metadata?.contentTypeKey || 'post',
       topic,
-      { excludeIds: [sourceId], limit: 5 }
+      { siteId: source.siteId, excludeIds: [sourceId], limit: 5 }
     )
 
     return similar.map(s => ({
@@ -375,6 +452,23 @@ export class SemanticSearchService {
 
     return differences
   }
+}
+
+// ─── Module Helpers ─────────────────────────────────────────────────────────
+
+/**
+ * Comparable form of a link, so a slug and a full URL for the same page match.
+ * Keeps the path only, without host, leading/trailing slash or query string.
+ */
+function normalizeLinkKey(link: string): string {
+  if (!link) return ''
+
+  let value = link.trim().toLowerCase()
+
+  const schemeless = value.replace(/^https?:\/\/[^/]+/, '')
+  if (schemeless !== value) value = schemeless || '/'
+
+  return value.split('?')[0].split('#')[0].replace(/^\/+|\/+$/g, '')
 }
 
 // ─── Types ──────────────────────────────────────────────────────────────────

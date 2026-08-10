@@ -425,15 +425,29 @@ export class GoogleContextBuilder {
       throw new Error('No Google connection found')
     }
 
-    const client = await getAuthenticatedClient(connection.id)
+    // `getAuthenticatedClient` takes a SITE id and looks the connection up by
+    // `site_id`. It was being handed `connection.id`, the connection's own
+    // primary key, so the lookup matched nothing and this method threw
+    // "Aucune connexion Google pour ce site" on every call — including when the
+    // connection it had just loaded two lines above was perfectly valid.
+    const client = await getAuthenticatedClient(this.config.siteId)
     if (!client) {
       throw new Error('Failed to authenticate with Google')
+    }
+
+    // `fetchPerformance` takes the Search Console PROPERTY URL (the verified
+    // `sc-domain:example.com` or `https://example.com/` string), not a site
+    // UUID. Passing `this.config.siteId` built a request path against an id
+    // Google has never heard of, which could only ever 403/404.
+    const gscSiteUrl = connection.gsc_site_url
+    if (!gscSiteUrl) {
+      throw new Error('Aucune propriete Search Console selectionnee pour ce site')
     }
 
     // Récupérer les données de performance
     const data = await fetchPerformance(
       client.fetch,
-      this.config.siteId,
+      gscSiteUrl,
       {
         startDate: this.config.dateRange!.start,
         endDate: this.config.dateRange!.end,

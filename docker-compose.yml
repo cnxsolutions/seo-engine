@@ -1,0 +1,102 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# SEO Engine — deploiement VPS
+#
+# Cible assumee : un VPS TOUJOURS ALLUME, un seul conteneur, qui ne s'arrete
+# jamais. Le planificateur node-cron vit dans le process Next.js ; il n'existe
+# aucun declencheur externe pour le remplacer. Si le conteneur s'arrete, plus
+# rien n'est genere ni publie.
+#
+# ⚠ INSTANCE UNIQUE — NE PAS METTRE A L'ECHELLE
+# `initScheduler()` demarre un cron par process, et son garde-fou d'idempotence
+# (`runningJobs`, lib/scheduler/cron.ts) est une Map en memoire, locale au
+# process. Deux instances sur la meme base = deux crons = chaque creneau
+# editorial genere deux fois et PUBLIE EN DOUBLE sur le site client.
+# Interdits : `docker compose up --scale seo-engine=N`, `replicas > 1`, le mode
+# Swarm et tout deploiement « rolling » faisant cohabiter deux conteneurs.
+# `container_name` ci-dessous rend d'ailleurs toute mise a l'echelle impossible :
+# c'est volontaire, c'est le garde-fou.
+#
+# Demarrer :  docker compose up -d --build
+# Journaux :  docker compose logs -f seo-engine
+# Arreter  :  docker compose down
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+  seo-engine:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: seo-engine:latest
+
+    # Fixe le nom du conteneur ET interdit mecaniquement `--scale` : Docker
+    # refuse de creer deux conteneurs portant le meme nom.
+    container_name: seo-engine
+
+    # Redemarre apres un plantage ou un reboot du VPS, mais respecte un
+    # `docker compose stop` explicite. `always` relancerait le conteneur meme
+    # apres un arret volontaire, ce qui rend toute maintenance penible.
+    restart: unless-stopped
+
+    # Redondant avec `container_name` mais ecrit noir sur blanc : cette valeur
+    # ne doit jamais depasser 1. Voir l'avertissement en tete de fichier.
+    deploy:
+      replicas: 1
+
+    # tini comme PID 1 : transmet SIGTERM au serveur Node et recolte les process
+    # zombies. Sans lui, `docker compose down` attend le timeout puis tue le
+    # process, potentiellement au milieu d'une publication.
+    init: true
+
+    # Toutes les cles vivent dans .env, jamais dans ce fichier ni dans l'image.
+    # Creer le fichier avant le premier demarrage :  cp .env.example .env
+    env_file:
+      - .env
+
+    environment:
+      # Fuseau horaire du conteneur — source de verite du deploiement.
+      # node-cron planifie sur l'heure LOCALE du process : un conteneur en UTC
+      # decale toutes les expressions cron (la synchro GSC de 4h00 part a 5h00
+      # heure de Paris en ete) et fait basculer le « jour J » du calendrier
+      # editorial au mauvais moment, donc part le mauvais jour.
+      TZ: Europe/Paris
+      NODE_ENV: production
+      PORT: "3000"
+      HOSTNAME: "0.0.0.0"
+
+    # Ecoute uniquement sur la boucle locale du VPS.
+    #
+    # L'application EST authentifiee depuis proxy.ts : un secret partage unique
+    # (APP_ACCESS_SECRET, dans .env) devant toutes les pages et toutes les routes
+    # /api, sauf /api/webhook/wordpress qui verifie le sien. Sans ce secret, tout
+    # repond 503.
+    #
+    # Le binding local reste indispensable pour autant : le challenge est du HTTP
+    # Basic, donc le secret circule en base64 — reversible — a chaque requete.
+    # Placez un reverse proxy (Caddy, nginx) devant avec TLS, et laissez ce
+    # binding sur 127.0.0.1.
+    ports:
+      - "127.0.0.1:3000:3000"
+
+    # Verifie que le serveur Node repond encore. La racine `/` redirige (307)
+    # vers /dashboard sans toucher a Supabase : le test valide le process web
+    # sans dependre de la disponibilite de la base.
+    # Attention : un conteneur « healthy » ne prouve PAS que le cron tourne.
+    # Voir la section « Verifier que le planificateur tourne » du README.
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - "-e"
+        - 'fetch("http://127.0.0.1:3000/", { redirect: "manual" }).then(r => process.exit(r.status < 500 ? 0 : 1)).catch(() => process.exit(1))'
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 40s
+
+    # Les journaux du planificateur sont le seul moyen de savoir ce qu'il a fait :
+    # ils doivent survivre plusieurs jours sans saturer le disque du VPS.
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"

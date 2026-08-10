@@ -46,8 +46,17 @@ next-env.d.ts
 # Graphify (generated knowledge graphs)
 .graphify/
 
-# Supabase (local dev config)
-supabase/
+# Supabase
+#
+# NE PAS reintroduire un `supabase/` global. Cette ligne a existe et a coute
+# cher : elle rendait le schema de la base invisible du depot. Le schema n'est
+# alors decrit nulle part, et perdre l'instance Supabase revient a perdre le
+# produit. `supabase/config.toml` et `supabase/migrations/` DOIVENT etre
+# versionnes ; voir db/README.md.
+# Seuls les artefacts locaux de la CLI Supabase sont ignores ci-dessous.
+supabase/.branches/
+supabase/.temp/
+supabase/.env
 
 # IDE
 .idea/

@@ -3,7 +3,7 @@
 // SEO Engine - Validation Pipeline
 // ─────────────────────────────────────────────────────────────────────────────
 
-// Schema Validator
+// Schema Validator (CMS field schema)
 export {
   SchemaValidator,
   createSchemaValidator,
@@ -13,6 +13,18 @@ export {
   type SchemaValidationWarning,
   type ValidatableContent,
 } from './SchemaValidator'
+
+// JSON-LD Validator (schema.org markup)
+export {
+  JsonLdValidator,
+  createJsonLdValidator,
+  type JsonLdValidationConfig,
+  type JsonLdValidationResult,
+  type JsonLdIssue,
+  type JsonLdIssueCode,
+  type JsonLdSeverity,
+  type JsonLdExpectation,
+} from './JsonLdValidator'
 
 // Content Quality Validator
 export {
@@ -32,11 +44,13 @@ export {
   SeoValidator,
   createSeoValidator,
   type SeoValidationConfig,
+  type SeoValidationInput,
   type SeoValidationResult,
   type SeoValidationError,
   type SeoValidationWarning,
   type SeoRecommendation,
   type SeoMetrics,
+  type SocialMetaInput,
 } from './SeoValidator'
 
 // Duplicate Detector
@@ -46,6 +60,7 @@ export {
   type DuplicateDetectionConfig,
   type DuplicateDetectionResult,
   type DuplicateMatch,
+  type DuplicateSignals,
   type DuplicateStats,
   type ContentToCheck,
 } from './DuplicateDetector'
@@ -55,7 +70,29 @@ export {
   ValidationPipelineOrchestrator,
   createValidationPipeline,
   type ValidationPipelineConfig,
+  type ValidationPipelineContent,
   type ValidationPipelineResult,
   type ValidationSummary,
   type ValidationAction,
 } from './ValidationPipelineOrchestrator'
+
+// French readability (exported so a caller can score text without a validator)
+export {
+  countFrenchSyllables,
+  countSyllables,
+  computeFrenchReadability,
+  describeFrenchReadability,
+  type FrenchReadabilityResult,
+  type FrenchReadabilityLabel,
+} from './french-readability'
+
+// Shared text helpers
+export {
+  extractHeadingOutline,
+  extractLinks,
+  stripHtmlToText,
+  normalizeForMatch,
+  estimatePixelWidth,
+  type HeadingNode,
+  type ExtractedLinks,
+} from './text-utils'

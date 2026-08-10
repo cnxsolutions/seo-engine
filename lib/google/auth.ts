@@ -1,9 +1,14 @@
 const GOOGLE_AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth'
 const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token'
 
+// `webmasters` instead of `webmasters.readonly`: it includes every read the
+// readonly scope allows AND the sitemap submission in lib/google/gsc.ts, which
+// is what replaces the sitemap ping Google removed in 2023. Sites connected
+// before this change keep working for reads; submitting a sitemap on one of
+// them returns 403 until it is reconnected.
 const SCOPES = [
   'https://www.googleapis.com/auth/business.manage',
-  'https://www.googleapis.com/auth/webmasters.readonly',
+  'https://www.googleapis.com/auth/webmasters',
   'https://www.googleapis.com/auth/userinfo.email',
 ]
 

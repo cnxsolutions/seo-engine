@@ -1,0 +1,54 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Contexte de build Docker
+#
+# Tout ce qui n'est pas necessaire a `next build` est exclu : le contexte est
+# envoye au demon a chaque build, et surtout `COPY . .` dans l'etape builder
+# embarquerait sinon des secrets et des artefacts de la machine hote.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Dependances et artefacts : reinstalles / reconstruits dans l'image.
+# node_modules de l'hote est en plus lie a l'OS hote (binaires natifs).
+node_modules
+.next
+out
+build
+.dist
+coverage
+*.tsbuildinfo
+
+# Secrets — ne doivent JAMAIS entrer dans le contexte de build. Les valeurs
+# reelles sont injectees a l'execution par env_file, pas au build.
+# `.env.example` est exclu lui aussi : l'image n'en a aucun usage. Next.js ne
+# charge de toute facon que .env / .env.local / .env.production.
+.env
+.env.*
+
+# Historique et outillage de developpement
+.git
+.gitignore
+.github
+.vscode
+.idea
+.claude
+.graphify
+
+# Documentation, migrations SQL et plugin WordPress.
+# Aucun n'est consomme par l'application a l'execution : les migrations
+# s'appliquent sur Supabase depuis le poste de l'operateur, et le plugin
+# s'installe a la main sur le site WordPress cible.
+*.md
+db
+wordpress-plugin
+
+# Tests : jamais executes pendant le build de l'image, donc hors contexte.
+# (Ils sont verts et typés — 82/82 — ce n'est pas une mise sous le tapis : c'est
+# simplement du poids inutile dans le contexte envoye au demon.)
+**/*.test.ts
+**/*.test.tsx
+vitest.config.ts
+
+# Divers
+.DS_Store
+npm-debug.log*
+*.swp
+*.swo

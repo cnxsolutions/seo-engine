@@ -5,17 +5,20 @@
 
 import { describe, it, expect, beforeEach } from 'vitest'
 import { SchemaValidator, createSchemaValidator } from './SchemaValidator'
-import type { ContentSchema, ContentField } from '@/src/core/domain/entities'
+import type { ContentSchema } from '@/src/core/domain/entities'
 
 // Helper to create a test schema
 function createTestSchema(overrides?: Partial<ContentSchema>): ContentSchema {
   return {
     id: 'test-schema',
-    name: 'Test Schema',
+    siteId: 'test-site',
+    name: 'test-schema',
+    label: 'Test Schema',
     contentTypes: [
       {
         key: 'post',
-        name: 'Blog Post',
+        label: 'Blog Post',
+        supports: ['title', 'editor'],
         fields: [
           {
             key: 'title',
@@ -23,6 +26,7 @@ function createTestSchema(overrides?: Partial<ContentSchema>): ContentSchema {
             type: 'text',
             required: true,
             config: { minLength: 5, maxLength: 100 },
+            sortOrder: 0,
           },
           {
             key: 'content',
@@ -30,6 +34,7 @@ function createTestSchema(overrides?: Partial<ContentSchema>): ContentSchema {
             type: 'html',
             required: true,
             config: { minLength: 100 },
+            sortOrder: 1,
           },
           {
             key: 'slug',
@@ -37,6 +42,7 @@ function createTestSchema(overrides?: Partial<ContentSchema>): ContentSchema {
             type: 'slug',
             required: true,
             config: { pattern: '^[a-z0-9-]+$' },
+            sortOrder: 2,
           },
           {
             key: 'category',
@@ -44,53 +50,69 @@ function createTestSchema(overrides?: Partial<ContentSchema>): ContentSchema {
             type: 'select',
             required: false,
             config: { options: ['news', 'tutorial', 'guide'] },
+            sortOrder: 3,
           },
           {
             key: 'featured_image',
             label: 'Featured Image',
             type: 'image',
             required: false,
+            sortOrder: 4,
           },
           {
             key: 'image_alt',
             label: 'Image Alt Text',
             type: 'text',
             required: false,
+            sortOrder: 5,
           },
           {
             key: 'publish_date',
             label: 'Publish Date',
             type: 'datetime',
             required: false,
+            sortOrder: 6,
           },
           {
             key: 'word_count',
             label: 'Word Count',
-            type: 'integer',
+            type: 'number',
             required: false,
             config: { min: 0, max: 50000 },
+            sortOrder: 7,
           },
           {
             key: 'is_featured',
             label: 'Featured',
             type: 'boolean',
             required: false,
+            sortOrder: 8,
           },
           {
             key: 'tags',
             label: 'Tags',
             type: 'array',
             required: false,
+            sortOrder: 9,
           },
           {
             key: 'metadata',
             label: 'Metadata',
             type: 'object',
             required: false,
+            sortOrder: 10,
           },
         ],
       },
     ],
+    seoConfig: { hasSeoPlugin: false, seoFields: [], schemaTypes: [] },
+    publishConfig: {
+      requiresReview: false,
+      defaultStatus: 'draft',
+      supportedStatuses: ['draft', 'publish'],
+      autoPublish: false,
+    },
+    extractedAt: new Date(),
     ...overrides,
   }
 }
@@ -245,7 +267,7 @@ describe('SchemaValidator', () => {
       expect(result.warnings.some(w => w.code === 'EMPTY_FIELD')).toBe(true)
     })
 
-    it('should detect invalid integer values', () => {
+    it('should detect invalid number values', () => {
       const content = {
         contentType: 'post',
         fields: {
@@ -262,7 +284,7 @@ describe('SchemaValidator', () => {
       expect(result.errors.some(e => e.code === 'INVALID_TYPE')).toBe(true)
     })
 
-    it('should validate integer constraints', () => {
+    it('should validate number constraints', () => {
       const content = {
         contentType: 'post',
         fields: {
@@ -344,6 +366,22 @@ describe('SchemaValidator', () => {
 
       expect(result.isValid).toBe(false)
       expect(result.errors.some(e => e.code === 'INVALID_TYPE')).toBe(true)
+    })
+
+    it('should accept an ISO date for a datetime field', () => {
+      const content = {
+        contentType: 'post',
+        fields: {
+          title: 'Title',
+          content: '<p>Long content here.</p>'.repeat(20),
+          slug: 'valid-slug',
+          publish_date: '2026-03-14T09:30:00Z',
+        },
+      }
+
+      const result = validator.validate(content)
+
+      expect(result.errors.some(e => e.field === 'publish_date')).toBe(false)
     })
 
     it('should warn about deprecated fields', () => {

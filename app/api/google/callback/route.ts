@@ -1,6 +1,7 @@
-import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest, NextResponse, after } from 'next/server'
 import { exchangeCode, getGoogleUserEmail } from '@/lib/google/auth'
 import { upsertGoogleConnection } from '@/lib/google/client'
+import { triggerGscSyncOnConnect } from '@/lib/google/sync'
 
 export async function GET(req: NextRequest) {
   const code = req.nextUrl.searchParams.get('code')
@@ -26,6 +27,18 @@ export async function GET(req: NextRequest) {
       refresh_token: tokens.refresh_token,
       token_expires_at: expiresAt,
       scopes: tokens.scope.split(' '),
+    })
+
+    // A reconnection already knows which property to read, so the data can start
+    // arriving before the operator has clicked anything. A first connection has
+    // no property yet and the sync reports `skipped` — the selection step fires
+    // it again.
+    //
+    // `after()` runs this once the redirect has been sent: the sync can neither
+    // delay it nor break it, and — unlike a floating promise — it is awaited by
+    // the runtime, so its logs are never truncated by the request ending.
+    after(async () => {
+      await triggerGscSyncOnConnect(siteId, 'oauth_callback')
     })
 
     return NextResponse.redirect(new URL(`/sites/${siteId}/google/select`, req.url))

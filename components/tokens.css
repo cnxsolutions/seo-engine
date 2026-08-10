@@ -1,0 +1,301 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   SEO Engine — design tokens
+   ───────────────────────────────────────────────────────────────────────────
+   The single source of truth for colour, space, radius, shadow and type.
+   Imported first by app/globals.css; nothing else should declare a raw hex.
+
+   Reading order for a page author:
+     surfaces  → what the thing sits on
+     ink       → what the text is
+     lines     → borders, grid, axis
+     accent    → the one interactive hue
+     status    → good / warning / serious / critical (never colour alone)
+     data      → series, ordinal ramp, diverging pair  (charts only)
+     metrics   → space, radius, shadow, type, motion
+
+   Colour rules enforced here (dataviz method):
+     · Series hues are a FIXED, ORDERED set. Slot follows the entity, never
+       its rank. Never cycle past slot 8 — fold the tail into "Autres".
+     · Status hues are reserved. A status colour always ships with an icon or
+       a label; it never impersonates a series.
+     · Text wears ink tokens, never a series hue.
+     · Sequential = one hue light→dark. Diverging = two hues + neutral grey.
+     · Dark mode is SELECTED, not inverted: every dark step was picked and
+       measured against the dark surface (#1a1a19), not derived from the light
+       one. Opt in with <html data-theme="dark">; there is no automatic flip.
+
+   Every value below was validated with the dataviz palette validator
+   (OKLab ΔE for CVD separation, WCAG for contrast). See the report for the
+   measured numbers.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+:root,
+:root[data-theme='light'] {
+  color-scheme: light;
+
+  /* ── Surfaces ─────────────────────────────────────────────────────────
+     Three planes, deepest to lightest: rail < page < card. Depth comes from
+     the plane change plus a hairline — not from a drop shadow. */
+  --surface-rail: #edece7;
+  --surface-page: #f4f4f1;
+  --surface-card: #fcfcfb;
+  --surface-raised: #ffffff;
+  --surface-inset: #eeede9;
+  --surface-hover: #f2f1ec;
+  --surface-scrim: rgb(11 11 11 / 0.44);
+
+  /* ── Ink ──────────────────────────────────────────────────────────────
+     primary 19.2:1 · secondary 7.7:1 · muted 5.0:1 · faint 3.5:1 on the card.
+     faint is chrome only (axis rules, disabled glyphs) — never body copy. */
+  --ink-primary: #0b0b0b;
+  --ink-secondary: #52514e;
+  --ink-muted: #6f6d67;
+  --ink-faint: #898781;
+  --ink-inverse: #ffffff;
+
+  /* ── Lines ────────────────────────────────────────────────────────────── */
+  --line: #e3e2da;
+  --line-strong: #cfcec5;
+  --line-grid: #e1e0d9;
+  --line-axis: #c3c2b7;
+
+  /* ── Accent ───────────────────────────────────────────────────────────
+     Blue 550. White on it: 6.6:1. As text on the card: 6.5:1. Deliberately
+     a darker step than series slot 1 so a button never reads as a data mark. */
+  --accent: #1c5cab;
+  --accent-hover: #184f95;
+  --accent-active: #104281;
+  --accent-on: #ffffff;
+  --accent-text: #1c5cab;
+  --accent-wash: rgb(42 120 214 / 0.10);
+  --accent-wash-strong: rgb(42 120 214 / 0.18);
+  --accent-ring: rgb(42 120 214 / 0.32);
+
+  /* ── Status (reserved — always with an icon or a label) ────────────────
+     -mark is the fill/glyph, -text is the WCAG-AA text step for the same
+     state, -wash is the tinted background a badge sits on. */
+  --status-good: #0ca30c;
+  --status-good-text: #006300;
+  --status-good-wash: rgb(12 163 12 / 0.12);
+  --status-warning: #fab219;
+  --status-warning-text: #7a4a00;
+  --status-warning-wash: rgb(250 178 25 / 0.14);
+  --status-serious: #ec835a;
+  --status-serious-text: #9a4a22;
+  --status-serious-wash: rgb(236 131 90 / 0.14);
+  --status-critical: #d03b3b;
+  --status-critical-text: #a32222;
+  --status-critical-wash: rgb(208 59 59 / 0.12);
+  --status-neutral-text: #5f5d59;
+  --status-neutral-wash: #eeede8;
+
+  /* ── Chart chrome ─────────────────────────────────────────────────────── */
+  --chart-surface: var(--surface-card);
+  --chart-grid: var(--line-grid);
+  --chart-axis: var(--line-axis);
+  --chart-label: var(--ink-muted);
+  --chart-quiet: #cfcec5; /* the "everything else" grey in an emphasis chart */
+
+  /* ── Series — fixed order, assigned in sequence, never cycled ─────────── */
+  --series-1: #2a78d6; /* blue    */
+  --series-2: #eb6834; /* orange  */
+  --series-3: #1baf7a; /* aqua    */
+  --series-4: #eda100; /* yellow  */
+  --series-5: #e87ba4; /* magenta */
+  --series-6: #008300; /* green   */
+  --series-7: #4a3aa7; /* violet  */
+  --series-8: #e34948; /* red     */
+
+  /* ── Ordinal / sequential ramp — one hue, light → dark ────────────────── */
+  --ramp-1: #86b6ef;
+  --ramp-2: #5598e7;
+  --ramp-3: #2a78d6;
+  --ramp-4: #1c5cab;
+  --ramp-5: #104281;
+
+  /* ── Diverging — warm/cool poles, neutral grey midpoint ───────────────── */
+  --diverge-pos: #2a78d6;
+  --diverge-mid: #f0efec;
+  --diverge-neg: #e34948;
+
+  /* ── Elevation ────────────────────────────────────────────────────────── */
+  --shadow-xs: 0 1px 2px rgb(11 11 11 / 0.04);
+  --shadow-sm: 0 1px 3px rgb(11 11 11 / 0.06);
+  --shadow-md: 0 4px 12px rgb(11 11 11 / 0.07);
+  --shadow-lg: 0 12px 32px rgb(11 11 11 / 0.10);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Dark theme — every step chosen against #1a1a19 and measured, not inverted.
+   Opt in explicitly: <html data-theme="dark">.
+   ═══════════════════════════════════════════════════════════════════════════ */
+:root[data-theme='dark'] {
+  color-scheme: dark;
+
+  --surface-rail: #0a0a0a;
+  --surface-page: #0d0d0d;
+  --surface-card: #1a1a19;
+  --surface-raised: #232322;
+  --surface-inset: #131312;
+  --surface-hover: #232322;
+  --surface-scrim: rgb(0 0 0 / 0.66);
+
+  /* primary 17.4:1 · secondary 9.7:1 · muted 4.9:1 on the dark card */
+  --ink-primary: #ffffff;
+  --ink-secondary: #c3c2b7;
+  --ink-muted: #898781;
+  --ink-faint: #6e6d67;
+  --ink-inverse: #0b0b0b;
+
+  --line: #2e2e2b;
+  --line-strong: #3f3f3a;
+  --line-grid: #2c2c2a;
+  --line-axis: #383835;
+
+  /* Blue 500: fill 3.2:1 against the dark card, white label on it 5.4:1.
+     Accent TEXT moves up the ramp to #86b6ef (8.3:1) — the fill step is too
+     dark to read as type on this surface. */
+  --accent: #256abf;
+  --accent-hover: #2a78d6;
+  --accent-active: #3987e5;
+  --accent-on: #ffffff;
+  --accent-text: #86b6ef;
+  --accent-wash: rgb(57 135 229 / 0.16);
+  --accent-wash-strong: rgb(57 135 229 / 0.26);
+  --accent-ring: rgb(57 135 229 / 0.45);
+
+  /* Same four status marks (they are mode-invariant by design); only the text
+     steps move, because #006300 is unreadable on a dark surface. */
+  --status-good: #0ca30c;
+  --status-good-text: #3fd23f;
+  --status-good-wash: rgb(12 163 12 / 0.18);
+  --status-warning: #fab219;
+  --status-warning-text: #fab219;
+  --status-warning-wash: rgb(250 178 25 / 0.18);
+  --status-serious: #ec835a;
+  --status-serious-text: #ec835a;
+  --status-serious-wash: rgb(236 131 90 / 0.18);
+  --status-critical: #d03b3b;
+  --status-critical-text: #e66767;
+  --status-critical-wash: rgb(208 59 59 / 0.20);
+  --status-neutral-text: #a8a69d;
+  --status-neutral-wash: #232322;
+
+  --chart-quiet: #4a4a45;
+
+  /* The same eight hues, stepped for the dark band — not a second palette. */
+  --series-1: #3987e5;
+  --series-2: #d95926;
+  --series-3: #199e70;
+  --series-4: #c98500;
+  --series-5: #d55181;
+  --series-6: #008300;
+  --series-7: #9085e9;
+  --series-8: #e66767;
+
+  --ramp-1: #cde2fb;
+  --ramp-2: #9ec5f4;
+  --ramp-3: #6da7ec;
+  --ramp-4: #3987e5;
+  --ramp-5: #184f95;
+
+  --diverge-pos: #3987e5;
+  --diverge-mid: #383835;
+  --diverge-neg: #e66767;
+
+  --shadow-xs: 0 1px 2px rgb(0 0 0 / 0.40);
+  --shadow-sm: 0 1px 3px rgb(0 0 0 / 0.48);
+  --shadow-md: 0 4px 12px rgb(0 0 0 / 0.55);
+  --shadow-lg: 0 12px 32px rgb(0 0 0 / 0.62);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Mode-independent metrics
+   ═══════════════════════════════════════════════════════════════════════════ */
+:root {
+  /* ── Space — a 4px grid. Every gap, pad and margin picks a rung. ──────── */
+  --space-1: 0.25rem; /*  4 */
+  --space-2: 0.5rem;  /*  8 */
+  --space-3: 0.75rem; /* 12 */
+  --space-4: 1rem;    /* 16 */
+  --space-5: 1.25rem; /* 20 */
+  --space-6: 1.5rem;  /* 24 */
+  --space-8: 2rem;    /* 32 */
+  --space-10: 2.5rem; /* 40 */
+  --space-12: 3rem;   /* 48 */
+  --space-16: 4rem;   /* 64 */
+
+  /* ── Radius ───────────────────────────────────────────────────────────── */
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 10px;
+  --radius-xl: 14px;
+  --radius-pill: 999px;
+
+  /* ── Type ─────────────────────────────────────────────────────────────
+     Root is 16px, body is 14px: this is a dense instrument, not a landing
+     page. Sizes below are the whole scale — do not invent an in-between. */
+  --font-sans: 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: ui-monospace, 'SFMono-Regular', 'JetBrains Mono', 'Cascadia Mono', Menlo, Consolas, monospace;
+
+  --fs-2xs: 0.6875rem; /* 11 — eyebrow, table head, chart tick */
+  --fs-xs: 0.75rem;    /* 12 — meta, hint, badge */
+  --fs-sm: 0.8125rem;  /* 13 — dense table cell, secondary control */
+  --fs-md: 0.875rem;   /* 14 — body */
+  --fs-lg: 1rem;       /* 16 — card title */
+  --fs-xl: 1.25rem;    /* 20 — section title */
+  --fs-2xl: 1.5rem;    /* 24 — page title */
+  --fs-3xl: 2rem;      /* 32 — stat tile value */
+  --fs-hero: 3rem;     /* 48 — hero figure, one per view */
+
+  --lh-tight: 1.15;
+  --lh-snug: 1.35;
+  --lh-normal: 1.55;
+
+  --ls-tight: -0.011em;
+  --ls-title: -0.018em;
+  --ls-eyebrow: 0.07em;
+
+  /* ── Motion ───────────────────────────────────────────────────────────── */
+  --dur-fast: 110ms;
+  --dur: 170ms;
+  --ease: cubic-bezier(0.2, 0, 0, 1);
+
+  /* ── Layers ───────────────────────────────────────────────────────────── */
+  --z-sticky: 30;
+  --z-rail: 40;
+  --z-popover: 60;
+  --z-modal: 100;
+
+  /* ── Frame ────────────────────────────────────────────────────────────── */
+  --rail-width: 248px;
+  --content-max: 1440px;
+
+  /* ═══ Compatibility aliases ══════════════════════════════════════════════
+     The names pages were already written against. Keep them: five other
+     workstreams reference them right now. New code should prefer the tokens
+     above, but nothing here is deprecated to the point of removal. */
+  --bg-primary: var(--surface-page);
+  --bg-secondary: var(--surface-inset);
+  --bg-card: var(--surface-card);
+  --bg-card-hover: var(--surface-hover);
+  --bg-sidebar: var(--surface-rail);
+  --border: var(--line);
+  --border-hover: var(--line-strong);
+  --text-primary: var(--ink-primary);
+  --text-secondary: var(--ink-secondary);
+  --text-muted: var(--ink-muted);
+  --accent-light: var(--accent-hover);
+  --accent-lighter: var(--accent-wash);
+  --accent-glow: var(--accent-ring);
+  --success: var(--status-good-text);
+  --warning: var(--status-warning-text);
+  --danger: var(--status-critical-text);
+  --info: var(--accent-text);
+  --teal: var(--series-3);
+  --teal-light: var(--status-good-wash);
+  --blue: var(--series-1);
+  --blue-light: var(--accent-wash);
+  --radius: var(--radius-lg);
+}

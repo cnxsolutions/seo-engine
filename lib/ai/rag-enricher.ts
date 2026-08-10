@@ -6,6 +6,7 @@
 
 import { createServiceClient } from '@/lib/supabase'
 import { createSupabaseVectorStore } from '@/src/adapters/rag/providers'
+import { DEFAULT_MIN_SCORE } from '@/src/adapters/rag/providers/SupabaseVectorStore'
 import { SemanticSearchService } from '@/src/adapters/rag/SemanticSearchService'
 import type { PageType } from '@/lib/types'
 
@@ -95,7 +96,15 @@ const DEFAULT_CONFIG: RagEnrichmentConfig = {
   enabled: true,
   maxExamples: 3,
   maxInternalLinks: 5,
-  minSimilarityScore: 0.7,
+  // Aligned with the vector store's own floor (`DEFAULT_MIN_SCORE`).
+  //
+  // This used to be 0.7, applied a SECOND time on top of the store's own filter.
+  // With `text-embedding-3-small`, two French pages on genuinely related topics
+  // score around 0.30-0.55 cosine; 0.7 is a near-duplicate threshold. The effect
+  // was that even a full index returned nothing here, so the generator kept
+  // writing without a single style example — the exact symptom the indexing work
+  // was meant to cure, surviving the fix because the filter sat downstream of it.
+  minSimilarityScore: DEFAULT_MIN_SCORE,
   includeGaps: true,
   includeExisting: true,
   timeoutMs: 5000,

@@ -1,26 +1,42 @@
 'use client'
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Step 2 — WordPress schema
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// Reading a schema is a live call to the client's WordPress and nothing is
+// persisted afterwards (see the note at the top of
+// app/api/schema/extract/[siteId]/route.ts). Two consequences the page has to
+// state rather than hide: the counter below only knows about this session, and
+// leaving the page loses every summary shown here.
+
 import { useEffect, useState } from 'react'
-import { Database, Globe, CheckCircle, Loader2, ExternalLink, RefreshCw } from 'lucide-react'
+import { Database, Globe, CheckCircle, Loader2, ExternalLink, RefreshCw, AlertTriangle } from 'lucide-react'
 import Link from 'next/link'
-import { PageHeader, StatusBadge } from '@/components/ui'
+import { EmptyState, PageHeader, StatTile } from '@/components/ui'
 
 interface Site {
   id: string
   name: string
   url: string
   type: string
-  is_active: boolean
-  has_schema: boolean
-  last_sync_at?: string
+}
+
+interface ExtractSummary {
+  contentTypes: number
+  fields: number
+  taxonomies: number
+  seoPlugin: string | null
 }
 
 export default function SchemaPage() {
   const [sites, setSites] = useState<Site[]>([])
   const [loading, setLoading] = useState(true)
   const [extracting, setExtracting] = useState<string | null>(null)
+  const [summaries, setSummaries] = useState<Record<string, ExtractSummary>>({})
+  const [errors, setErrors] = useState<Record<string, string>>({})
 
-  const load = () => {
+  useEffect(() => {
     fetch('/api/sites')
       .then((r) => r.json())
       .then((d) => {
@@ -28,114 +44,147 @@ export default function SchemaPage() {
         setLoading(false)
       })
       .catch(() => setLoading(false))
-  }
-
-  useEffect(() => { load() }, [])
+  }, [])
 
   const extract = async (siteId: string) => {
     setExtracting(siteId)
+    setErrors((prev) => ({ ...prev, [siteId]: '' }))
+
     try {
       const res = await fetch(`/api/schema/extract/${siteId}`, { method: 'POST' })
       const data = await res.json()
+
       if (res.ok) {
-        load()
+        setSummaries((prev) => ({ ...prev, [siteId]: data.summary }))
       } else {
-        alert(data.error || 'Erreur extraction')
+        setErrors((prev) => ({ ...prev, [siteId]: data.error || 'Erreur extraction' }))
       }
     } catch {
-      alert('Erreur réseau')
+      setErrors((prev) => ({ ...prev, [siteId]: 'Erreur réseau' }))
     } finally {
       setExtracting(null)
     }
   }
 
-  const sitesWithSchema = sites.filter((s) => s.has_schema)
-  const sitesWithoutSchema = sites.filter((s) => !s.has_schema)
+  const wordpressSites = sites.filter((s) => s.type === 'wordpress')
+  const otherSites = sites.filter((s) => s.type !== 'wordpress')
 
   return (
     <div>
       <PageHeader
         icon={Database}
-        iconColor="#5347ce"
         badge="Étape 2"
         title="Schéma CMS"
-        subtitle="Extrayez la structure de vos sites WordPress/Sanity pour créer des templates de génération"
+        subtitle="Lisez la structure de vos sites WordPress (types de contenu, champs ACF, plugin SEO) pour cadrer la génération"
       />
 
       {/* Stats */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '1rem', marginBottom: '2rem' }}>
-        <MiniStat icon={Globe} label="Sites" value={sites.length} color="#6366f1" />
-        <MiniStat icon={CheckCircle} label="Schéma extrait" value={sitesWithSchema.length} color="#10b981" />
-        <MiniStat icon={Database} label="En attente" value={sitesWithoutSchema.length} color="#f59e0b" />
+      <div className="kpi-row" style={{ marginBottom: 'var(--space-3)' }}>
+        <StatTile label="Sites" value={sites.length} icon={Globe} />
+        <StatTile label="WordPress" value={wordpressSites.length} icon={Database} />
+        <StatTile
+          label="Lus dans cette session"
+          value={Object.keys(summaries).length}
+          icon={CheckCircle}
+          hint="non persisté"
+        />
       </div>
 
-      {/* Sites sans schéma */}
-      {sitesWithoutSchema.length > 0 && (
-        <div style={{ marginBottom: '2rem' }}>
-          <h2 style={{ fontSize: '0.9rem', fontWeight: 700, marginBottom: '1rem', color: 'var(--text-secondary)' }}>
-            À configurer ({sitesWithoutSchema.length})
+      <p className="meta" style={{ marginBottom: 'var(--space-6)' }}>
+        Le schéma n&apos;est pas stocké : chaque lecture interroge l&apos;API REST du site. Ce compteur ne
+        décrit donc que cette session, et non un état enregistré.
+      </p>
+
+      {wordpressSites.length > 0 && (
+        <div style={{ marginBottom: 'var(--space-6)' }}>
+          <h2 className="card-title" style={{ marginBottom: 'var(--space-3)' }}>
+            Sites WordPress ({wordpressSites.length})
           </h2>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(360px, 1fr))', gap: '1rem' }}>
-            {sitesWithoutSchema.map((site) => (
-              <div key={site.id} className="glass-card">
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '1rem' }}>
-                  <div>
-                    <div style={{ fontWeight: 700, fontSize: '0.95rem' }}>{site.name}</div>
-                    <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{site.url}</div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(360px, 1fr))', gap: 'var(--space-3)' }}>
+            {wordpressSites.map((site) => {
+              const summary = summaries[site.id]
+              const error = errors[site.id]
+
+              return (
+                <div key={site.id} className="card" style={summary ? { borderColor: 'var(--status-good)' } : undefined}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: 'var(--space-3)', marginBottom: 'var(--space-4)' }}>
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontWeight: 600, fontSize: 'var(--fs-sm)' }}>{site.name}</div>
+                      <div className="meta truncate">{site.url}</div>
+                    </div>
+                    {/* Not a StatusBadge: nothing is "pending" here — the schema
+                        has simply not been read yet, in this session. */}
+                    <span className={summary ? 'badge badge-success' : 'badge badge-muted'}>
+                      {summary ? 'Lu' : 'Non lu'}
+                    </span>
                   </div>
-                  <StatusBadge status="pending" />
+
+                  {summary && (
+                    <div className="meta" style={{ display: 'flex', gap: 'var(--space-4)', flexWrap: 'wrap', marginBottom: 'var(--space-3)' }}>
+                      <span><strong style={{ color: 'var(--ink-primary)' }}>{summary.contentTypes}</strong> types</span>
+                      <span><strong style={{ color: 'var(--ink-primary)' }}>{summary.fields}</strong> champs</span>
+                      <span><strong style={{ color: 'var(--ink-primary)' }}>{summary.taxonomies}</strong> taxonomies</span>
+                      <span>SEO&nbsp;: {summary.seoPlugin ?? 'aucun plugin détecté'}</span>
+                    </div>
+                  )}
+
+                  {error && (
+                    <div
+                      style={{
+                        display: 'flex',
+                        alignItems: 'flex-start',
+                        gap: 'var(--space-1)',
+                        fontSize: 'var(--fs-xs)',
+                        color: 'var(--status-critical-text)',
+                        marginBottom: 'var(--space-3)',
+                      }}
+                    >
+                      <AlertTriangle size={14} style={{ flexShrink: 0, marginTop: 1 }} />
+                      {error}
+                    </div>
+                  )}
+
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 'var(--space-2)' }}>
+                    <button
+                      onClick={() => extract(site.id)}
+                      disabled={extracting === site.id}
+                      className="btn-primary btn-sm"
+                    >
+                      {extracting === site.id ? (
+                        <Loader2 size={14} className="animate-spin" />
+                      ) : (
+                        <RefreshCw size={14} />
+                      )}
+                      {summary ? 'Relire le schéma' : 'Lire le schéma'}
+                    </button>
+
+                    {/* "Ouvrir la fiche", not "Voir le détail": the detail page
+                        no longer extracts on arrival, so the label must not
+                        promise data that is not there yet. */}
+                    <Link href={`/schema/${site.id}`} className="btn-ghost btn-sm">
+                      <ExternalLink size={14} /> Ouvrir la fiche
+                    </Link>
+                  </div>
                 </div>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                    Cliquez pour extraire le schéma {site.type}
-                  </span>
-                  <button
-                    onClick={() => extract(site.id)}
-                    disabled={extracting === site.id}
-                    className="btn-primary"
-                    style={{ padding: '0.5rem 1rem', fontSize: '0.78rem', gap: 6 }}
-                  >
-                    {extracting === site.id ? (
-                      <Loader2 size={14} className="animate-spin" />
-                    ) : (
-                      <RefreshCw size={14} />
-                    )}
-                    Extraire le schéma
-                  </button>
-                </div>
-              </div>
-            ))}
+              )
+            })}
           </div>
         </div>
       )}
 
-      {/* Sites avec schéma */}
-      {sitesWithSchema.length > 0 && (
+      {otherSites.length > 0 && (
         <div>
-          <h2 style={{ fontSize: '0.9rem', fontWeight: 700, marginBottom: '1rem', color: 'var(--text-secondary)' }}>
-            Configurés ({sitesWithSchema.length})
+          <h2 className="card-title" style={{ marginBottom: 'var(--space-3)' }}>
+            Sans schéma lisible ({otherSites.length})
           </h2>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(360px, 1fr))', gap: '1rem' }}>
-            {sitesWithSchema.map((site) => (
-              <div key={site.id} className="glass-card" style={{ borderColor: '#10b98140' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '1rem' }}>
-                  <div>
-                    <div style={{ fontWeight: 700, fontSize: '0.95rem' }}>{site.name}</div>
-                    <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{site.url}</div>
-                  </div>
-                  <StatusBadge status="active" />
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.75rem', color: '#10b981' }}>
-                    <CheckCircle size={14} />
-                    Schéma extrait
-                  </div>
-                  <Link href={`/schema/${site.id}`}>
-                    <button className="btn-primary" style={{ padding: '0.5rem 1rem', fontSize: '0.78rem' }}>
-                      <ExternalLink size={14} /> Voir le détail
-                    </button>
-                  </Link>
-                </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(360px, 1fr))', gap: 'var(--space-3)' }}>
+            {otherSites.map((site) => (
+              <div key={site.id} className="card">
+                <div style={{ fontWeight: 600, fontSize: 'var(--fs-sm)' }}>{site.name}</div>
+                <div className="meta truncate" style={{ marginBottom: 'var(--space-3)' }}>{site.url}</div>
+                <p className="meta">
+                  Site {site.type}&nbsp;: la structure se lit dans le dépôt, pas via un CMS.
+                </p>
               </div>
             ))}
           </div>
@@ -143,37 +192,19 @@ export default function SchemaPage() {
       )}
 
       {loading && (
-        <div className="glass-card" style={{ textAlign: 'center', padding: '3rem' }}>
-          <Loader2 size={32} className="animate-spin" style={{ margin: '0 auto' }} />
+        <div className="card" style={{ display: 'flex', justifyContent: 'center', padding: 'var(--space-10)' }}>
+          <Loader2 size={22} className="animate-spin" color="var(--ink-faint)" />
         </div>
       )}
 
       {!loading && sites.length === 0 && (
-        <div className="glass-card" style={{ textAlign: 'center', padding: '3rem' }}>
-          <Database size={40} color="var(--text-muted)" style={{ margin: '0 auto 1rem' }} />
-          <h3 style={{ fontWeight: 700, marginBottom: '0.5rem' }}>Aucun site</h3>
-          <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginBottom: '1rem' }}>
-            Ajoutez d&apos;abord un site dans la section Sites.
-          </p>
-          <Link href="/sites">
-            <button className="btn-primary">Aller aux sites</button>
-          </Link>
-        </div>
+        <EmptyState
+          icon={Database}
+          title="Aucun site"
+          description="Ajoutez d'abord un site : le schéma se lit sur un WordPress connecté."
+          action={{ label: 'Aller aux sites', href: '/sites' }}
+        />
       )}
-    </div>
-  )
-}
-
-function MiniStat({ icon: Icon, label, value, color }: { icon: typeof Database; label: string; value: number; color: string }) {
-  return (
-    <div className="glass-card" style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', padding: '1rem' }}>
-      <div style={{ width: 36, height: 36, borderRadius: 8, background: `${color}12`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-        <Icon size={18} color={color} />
-      </div>
-      <div>
-        <div style={{ fontSize: '1.25rem', fontWeight: 800 }}>{value}</div>
-        <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>{label}</div>
-      </div>
     </div>
   )
 }

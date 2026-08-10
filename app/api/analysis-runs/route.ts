@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { analyzeCompetitors } from '@/lib/analyzer/competitive'
 import { crawlWebsite, type CrawledPage, type CrawlResult } from '@/lib/analyzer/crawler'
 import { createAnalysisRun, getSiteById, upsertSitePages } from '@/lib/db'
+import { indexSitePages } from '@/src/adapters/rag/VectorIndexingService'
 
 export async function POST(req: NextRequest) {
   try {
@@ -45,6 +46,18 @@ export async function POST(req: NextRequest) {
 
     if (site?.id) {
       await upsertSitePages(site.id, toSitePagePayload(site.id, siteCrawl) as Parameters<typeof upsertSitePages>[1]).catch(() => null)
+
+      // Feed the vector store. THIS is the crawl path the UI actually calls
+      // (app/(dashboard)/strategy/new/page.tsx posts here, not to /api/analyze),
+      // so without this line the index stays empty no matter how many crawls run.
+      //
+      // `indexSitePages` never throws by contract and is nearly free when
+      // nothing changed (documents are skipped by content hash), so it is
+      // awaited without a try/catch and must never fail the analysis run.
+      const indexing = await indexSitePages(site.id, { source: 'crawl' })
+      if (indexing.errors.length > 0) {
+        console.warn(`[analysis-runs] indexation partielle site=${site.id}:`, indexing.errors.join(' | '))
+      }
     }
 
     const analysisData = await analyzeCompetitors({
@@ -53,6 +66,10 @@ export async function POST(req: NextRequest) {
       businessType,
       businessName,
       targetCities: Array.isArray(targetCities) ? targetCities : splitList(targetCities),
+      // Lets the competitive analysis drop "missing" keywords the site already
+      // ranks for — those seed campaigns, so a false gap opens a page against
+      // the site's own best asset.
+      siteId: site?.id || siteId || undefined,
     })
 
     const analysisRun = await createAnalysisRun({
@@ -111,6 +128,9 @@ function toSitePagePayload(siteId: string, crawlResult: CrawlResult) {
     has_faq: page.hasFaq,
     has_local_business: page.hasLocalBusiness,
     geo_signals: page.geoSignals,
+    // The body of the page, not just its headings. Without it the embedding is
+    // built from the title and H2s alone — a table of contents, not a page.
+    content_excerpt: page.textExcerpt || null,
     crawled_at: crawlResult.crawledAt,
   }))
 }

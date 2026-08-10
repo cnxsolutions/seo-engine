@@ -82,20 +82,50 @@ export type {
   TermIndexInput,
 } from './VectorStore'
 
+export {
+  EMBEDDING_DIMENSION,
+  EMBEDDING_BATCH_SIZE,
+  DEFAULT_EMBEDDING_MODEL,
+  DEFAULT_MIN_SCORE,
+  MAX_EMBEDDING_CHARS,
+} from './providers/SupabaseVectorStore'
+
 export type {
   SupabaseVectorStoreConfig,
 } from './providers/SupabaseVectorStore'
 
-// Vector Indexing Service
+export type {
+  IndexingOutcome,
+  EmbeddingSearchConfig,
+} from './VectorStore'
+
+// ─── Vector Indexing — the public entry points ────────────────────────────────
+//
+// These four functions are how the rest of the application fills the index.
+// None of them throws: indexing is an enrichment, never a reason to fail the
+// crawl or the publication that triggered it.
 export {
+  indexSitePages,
+  indexGeneratedPage,
+  reindexSite,
+  getSiteIndexStatus,
   VectorIndexingService,
   getIndexingService,
+  INDEXING_BATCH_SIZE,
+  MIN_INDEXABLE_CHARS,
+  CONTENT_TYPE_CRAWLED_PAGE,
+  CONTENT_TYPE_GENERATED_POST,
+  type IndexingOptions,
+  type IndexingReport,
+  type IndexingSource,
+  type SiteIndexStatus,
 } from './VectorIndexingService'
 
 // Semantic Search Service
 export {
   SemanticSearchService,
   getSearchService,
+  GAP_COVERAGE_SCORE,
   type SemanticSearchOptions,
   type EnrichedSearchResult,
   type InternalLinkTarget,

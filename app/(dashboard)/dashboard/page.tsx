@@ -1,151 +1,115 @@
-import { Globe, Megaphone, FileText, Zap, CheckCircle, ScanSearch, CalendarDays, ArrowUpRight } from 'lucide-react'
-import Link from 'next/link'
-import { getDashboardStats, listCampaigns, listSites } from '@/lib/db'
+// ─────────────────────────────────────────────────────────────────────────────
+// The dashboard — one page, two tabs, one scope
+//
+// It used to be two pages that each mixed two kinds of measurement in the same
+// tile grid: "1 page générée" sitting next to "#26,2 position moyenne" and
+// "0,9 % CTR". Three universes of measurement, one row of tiles, nothing
+// readable.
+//
+// The split is now structural rather than cosmetic:
+//   Production   our own rows — what the engine manufactured.
+//   Performance  Search Console rows — what Google did with it.
+// Each tab states its source and its period; neither borrows the other's
+// figures. Site and period live in the URL, so a view is shareable and survives
+// a reload.
+// ─────────────────────────────────────────────────────────────────────────────
+
+import { LayoutDashboard } from 'lucide-react'
+import { Suspense } from 'react'
+import {
+  DASHBOARD_TABS,
+  getPerformanceMetrics,
+  getProductionMetrics,
+  listDashboardSites,
+  resolvePeriod,
+  resolveTab,
+  type DashboardTab,
+} from '@/app/api/dashboard/metrics'
+import { EmptyState, PageHeader, TabNav } from '@/components/ui'
+import { DashboardFilters } from './DashboardFilters'
+import { PerformanceTab } from './PerformanceTab'
+import { ProductionTab } from './ProductionTab'
 
 export const dynamic = 'force-dynamic'
 
-const quickActions = [
-  { title: 'Analyser un site', desc: 'Audit + plan de contenu', href: '/strategy/new', icon: ScanSearch, color: '#5347ce' },
-  { title: 'Créer une campagne', desc: 'Génération automatique', href: '/campaigns/new', icon: Megaphone, color: '#887cfd' },
-  { title: 'Générer maintenant', desc: 'Page SEO instantanée', href: '/generate', icon: Zap, color: '#16c8c7' },
-  { title: 'Calendrier', desc: 'Planifier le contenu', href: '/calendar', icon: CalendarDays, color: '#4896fe' },
-]
+const TAB_META: Record<DashboardTab, { label: string; caption: string }> = {
+  production: { label: 'Production', caption: 'Ce que le moteur fabrique' },
+  performance: { label: 'Performance', caption: 'Ce que Google en pense' },
+}
 
-export default async function DashboardPage() {
-  const [stats, sites, campaigns] = await Promise.all([
-    getDashboardStats(),
-    listSites(),
-    listCampaigns(),
-  ])
+type SearchParams = Record<string, string | string[] | undefined>
 
-  const cards = [
-    { label: 'Sites connectés', value: String(stats.sites), icon: Globe, color: '#5347ce' },
-    { label: 'Campagnes actives', value: String(stats.activeCampaigns), icon: Megaphone, color: '#887cfd' },
-    { label: 'Pages générées', value: String(stats.generatedPages), icon: FileText, color: '#4896fe' },
-    { label: 'Pages publiées', value: String(stats.publishedPages), icon: CheckCircle, color: '#16c8c7' },
-  ]
+export default async function DashboardPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
+  const params = await searchParams
+  const tab = resolveTab(single(params.tab))
+  const days = resolvePeriod(single(params.days))
+
+  const sites = await listDashboardSites()
+
+  // An unknown or stale site id falls back to the aggregate rather than to an
+  // empty screen — a shared link must never dead-end.
+  const requested = single(params.site)
+  const siteId = requested && sites.some((site) => site.id === requested) ? requested : null
+  const site = siteId ? sites.find((candidate) => candidate.id === siteId) : null
+  const scopeLabel = site ? site.name : `tous les sites (${sites.length})`
+
+  // Link-tabs, not a client tablist: each tab is a real, bookmarkable URL, and
+  // `TabNav` is the shared component that renders exactly that (aria-current on
+  // links rather than a tablist role, which would lie about what a click does).
+  const tabItems = DASHBOARD_TABS.map((candidate) => {
+    const query = new URLSearchParams({ tab: candidate, days: String(days) })
+    if (siteId) query.set('site', siteId)
+    return { id: candidate, label: TAB_META[candidate].label, href: `/dashboard?${query.toString()}` }
+  })
 
   return (
     <div>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '2rem' }}>
-        <div>
-          <h1 style={{ fontSize: '1.6rem', fontWeight: 800, color: 'var(--text-primary)', marginBottom: 4 }}>Dashboard</h1>
-          <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>Vue d&apos;ensemble de votre moteur SEO</p>
-        </div>
-        <div style={{ display: 'flex', gap: '0.5rem' }}>
-          <Link href="/strategy/new">
-            <button className="btn-primary" style={{ gap: 6 }}>
-              <ScanSearch size={16} /> Analyser un site
-            </button>
-          </Link>
-        </div>
-      </div>
+      <PageHeader
+        icon={LayoutDashboard}
+        badge="Tableau de bord"
+        title="Tableau de bord"
+        subtitle="Deux mesures, deux onglets : ce que le moteur produit, et ce que Google en fait."
+      >
+        {sites.length > 0 && (
+          <>
+            <TabNav items={tabItems} active={tab} ariaLabel="Nature des métriques" />
+            <p className="meta" style={{ marginTop: 'var(--space-2)' }}>{TAB_META[tab].caption}</p>
+          </>
+        )}
+      </PageHeader>
 
-      {/* Metric cards */}
-      <div className="stats-grid" style={{ marginBottom: '2rem' }}>
-        {cards.map(({ label, value, icon: Icon, color }) => (
-          <div key={label} className="stat-card">
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.75rem' }}>
-              <div style={{
-                width: 40, height: 40,
-                background: `${color}12`,
-                borderRadius: 10,
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-              }}>
-                <Icon size={20} color={color} strokeWidth={2} />
-              </div>
-            </div>
-            <div className="stat-value">{value}</div>
-            <div className="stat-label">{label}</div>
-          </div>
-        ))}
-      </div>
+      {sites.length === 0 ? (
+        <EmptyState
+          variant="not-connected"
+          title="Aucun site connecté"
+          description="Le tableau de bord mesure des sites. Connectez-en un pour que la production et les statistiques Search Console aient quelque chose à raconter."
+          action={{ label: 'Connecter un site', href: '/sites/new' }}
+        />
+      ) : (
+        <>
+          <Suspense fallback={<div style={{ height: 44, marginBottom: 'var(--space-5)' }} />}>
+            <DashboardFilters
+              sites={sites.map(({ id, name, url, type }) => ({ id, name, url, type }))}
+              siteId={siteId}
+              days={days}
+            />
+          </Suspense>
 
-      {/* Quick actions */}
-      <div style={{ marginBottom: '2rem' }}>
-        <h2 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: '1rem', color: 'var(--text-primary)' }}>Actions rapides</h2>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '1rem' }}>
-          {quickActions.map(({ title, desc, href, icon: Icon, color }) => (
-            <Link key={href} href={href} style={{ textDecoration: 'none' }}>
-              <div className="glass-card" style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '1rem', padding: '1.25rem' }}>
-                <div style={{
-                  width: 44, height: 44, minWidth: 44,
-                  background: `${color}12`,
-                  borderRadius: 10,
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                }}>
-                  <Icon size={20} color={color} strokeWidth={2} />
-                </div>
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontWeight: 600, fontSize: '0.88rem', color: 'var(--text-primary)' }}>{title}</div>
-                  <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: 2 }}>{desc}</div>
-                </div>
-                <ArrowUpRight size={14} color="var(--text-muted)" />
-              </div>
-            </Link>
-          ))}
-        </div>
-      </div>
-
-      {/* Two column layout */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: '1.5rem' }}>
-        <div className="glass-card">
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1.25rem' }}>
-            <h3 style={{ fontWeight: 700, fontSize: '0.95rem' }}>Sites connectés</h3>
-            <Link href="/sites" style={{ fontSize: '0.75rem', color: 'var(--accent)', fontWeight: 600, textDecoration: 'none' }}>Voir tout</Link>
-          </div>
-          {sites.length === 0 ? (
-            <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', textAlign: 'center', padding: '2rem 0' }}>Aucun site. Ajoutez un site pour commencer.</p>
+          {tab === 'production' ? (
+            <ProductionTab metrics={await getProductionMetrics(siteId, days)} scopeLabel={scopeLabel} />
           ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-              {sites.slice(0, 5).map((site) => (
-                <div key={site.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1rem', padding: '0.5rem 0', borderBottom: '1px solid var(--border)' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                    <div style={{
-                      width: 32, height: 32, borderRadius: 8,
-                      background: site.type === 'wordpress' ? '#4896fe12' : '#16c8c712',
-                      display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    }}>
-                      <Globe size={15} color={site.type === 'wordpress' ? '#4896fe' : '#16c8c7'} />
-                    </div>
-                    <div>
-                      <div style={{ fontWeight: 600, fontSize: '0.85rem' }}>{site.name}</div>
-                      <div style={{ color: 'var(--text-muted)', fontSize: '0.72rem' }}>{site.url}</div>
-                    </div>
-                  </div>
-                  <span className={`badge ${site.type === 'wordpress' ? 'badge-info' : 'badge-success'}`}>{site.type}</span>
-                </div>
-              ))}
-            </div>
+            <PerformanceTab
+              metrics={await getPerformanceMetrics(siteId, days, sites)}
+              scopeLabel={scopeLabel}
+              siteId={siteId}
+            />
           )}
-        </div>
-
-        <div className="glass-card">
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1.25rem' }}>
-            <h3 style={{ fontWeight: 700, fontSize: '0.95rem' }}>Campagnes récentes</h3>
-            <Link href="/campaigns" style={{ fontSize: '0.75rem', color: 'var(--accent)', fontWeight: 600, textDecoration: 'none' }}>Voir tout</Link>
-          </div>
-          {campaigns.length === 0 ? (
-            <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', textAlign: 'center', padding: '2rem 0' }}>Créez votre première campagne pour démarrer.</p>
-          ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-              {campaigns.slice(0, 5).map((campaign) => (
-                <div key={campaign.id} style={{ padding: '0.5rem 0', borderBottom: '1px solid var(--border)' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                    <div style={{ fontWeight: 600, fontSize: '0.85rem' }}>{campaign.name}</div>
-                    <span className={`badge ${campaign.is_active ? 'badge-success' : 'badge-muted'}`}>
-                      {campaign.is_active ? 'Actif' : 'Inactif'}
-                    </span>
-                  </div>
-                  <div style={{ color: 'var(--text-muted)', fontSize: '0.72rem', marginTop: 3 }}>
-                    {campaign.business_type} • {campaign.communes.length} communes • {campaign.ai_model}
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      </div>
+        </>
+      )}
     </div>
   )
+}
+
+function single(value: string | string[] | undefined): string | undefined {
+  return Array.isArray(value) ? value[0] : value
 }

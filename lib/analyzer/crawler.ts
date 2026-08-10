@@ -28,7 +28,24 @@ export interface CrawledPage {
   hasLocalBusiness: boolean
   geoSignals: string[]
   keywords: string[]
+  /**
+   * Opening of the page's readable body, navigation and boilerplate removed.
+   *
+   * Persisted to `site_pages.content_excerpt` and embedded into the vector
+   * index. Without it an embedding is built from the title and headings alone —
+   * a table of contents, which retrieves badly.
+   */
+  textExcerpt: string
 }
+
+/**
+ * Characters of body text kept per page.
+ *
+ * 2 000 characters is roughly the first third of a typical article: enough for
+ * an embedding to place the page in topic space, small enough that a 50-page
+ * crawl stays a rounding error on both the database and the embedding bill.
+ */
+export const CONTENT_EXCERPT_MAX_CHARS = 2000
 
 export interface CrawlOptions {
   siteUrl: string
@@ -158,7 +175,18 @@ function extractUrlsFromSitemap(xml: string, baseUrl: string): string[] {
   return urls.filter((u) => !u.endsWith('.xml'))
 }
 
-async function crawlPage(url: string, baseUrl: string): Promise<CrawledPage | null> {
+/**
+ * Fetch and parse a single page.
+ *
+ * Exported so competitor measurement (lib/serp) can reuse this extractor rather
+ * than grow a second, subtly different one: the point of measuring ranking pages
+ * is comparing them to our own on the SAME ruler — same word counting, same
+ * heading extraction, same FAQ detection.
+ *
+ * Returns null on any failure — a competitor that blocks us, times out or serves
+ * a PDF is one missing measurement, never a broken plan.
+ */
+export async function crawlPage(url: string, baseUrl: string): Promise<CrawledPage | null> {
   try {
     const res = await fetch(url, {
       signal: AbortSignal.timeout(15000),
@@ -188,10 +216,19 @@ function parsePage(html: string, url: string, baseUrl: string): CrawledPage {
   const h1 = extractFirst(html, /<h1[^>]*>([\s\S]*?)<\/h1>/i) || ''
   const h2s = extractAll(html, /<h2[^>]*>([\s\S]*?)<\/h2>/gi)
 
-  // Word count (strip tags from body)
+  // Word count and readable text.
+  // Scripts and styles are removed FIRST: stripping tags alone leaves their
+  // contents behind, so a page carrying an inline bundle used to be counted as
+  // several thousand words of minified JavaScript.
   const bodyMatch = html.match(/<body[^>]*>([\s\S]*)<\/body>/i)
-  const bodyText = bodyMatch ? bodyMatch[1].replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ') : ''
+  const bodyHtml = stripNonContent(bodyMatch ? bodyMatch[1] : html)
+  const bodyText = htmlToPlainText(bodyHtml)
   const wordCount = bodyText.split(/\s+/).filter(Boolean).length
+
+  // The excerpt drops navigation, header, footer and asides on top of that:
+  // every page of a site shares them, and embedding them makes every page look
+  // like every other one.
+  const textExcerpt = htmlToPlainText(stripChrome(bodyHtml)).slice(0, CONTENT_EXCERPT_MAX_CHARS)
 
   // Links
   const allLinks = extractLinks(html)
@@ -243,7 +280,41 @@ function parsePage(html: string, url: string, baseUrl: string): CrawledPage {
     hasLocalBusiness,
     geoSignals,
     keywords,
+    textExcerpt,
   }
+}
+
+/** Removes elements whose text content is not page content. */
+function stripNonContent(html: string): string {
+  return html
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<noscript[\s\S]*?<\/noscript>/gi, ' ')
+    .replace(/<svg[\s\S]*?<\/svg>/gi, ' ')
+    .replace(/<template[\s\S]*?<\/template>/gi, ' ')
+    .replace(/<!--[\s\S]*?-->/g, ' ')
+}
+
+/** Removes the parts every page of a site repeats. */
+function stripChrome(html: string): string {
+  return html
+    .replace(/<header[\s\S]*?<\/header>/gi, ' ')
+    .replace(/<nav[\s\S]*?<\/nav>/gi, ' ')
+    .replace(/<footer[\s\S]*?<\/footer>/gi, ' ')
+    .replace(/<aside[\s\S]*?<\/aside>/gi, ' ')
+}
+
+function htmlToPlainText(html: string): string {
+  return html
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#0?39;|&apos;/gi, "'")
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/\s+/g, ' ')
+    .trim()
 }
 
 function extractFirst(html: string, pattern: RegExp): string | null {

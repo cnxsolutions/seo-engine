@@ -4,20 +4,35 @@
  *
  * Supports:
  * - IndexNow (Bing, Yandex, Seznam, Naver)
- * - Google Ping (sitemap notification)
  * - Google Indexing API (optional, requires service account)
+ *
+ * WHAT WAS REMOVED, AND WHY
+ *
+ * `submitGooglePing` hit `https://www.google.com/ping?sitemap=…`. Google removed
+ * that endpoint in June 2023; it answers 404. Every publication therefore made
+ * one HTTP call that could only fail, and reported the failure as a real
+ * indexing signal in `IndexingResult` — a metric of nothing. Sitemap submission
+ * now belongs to `submitSitemap()` in @/lib/google/gsc, which uses the Search
+ * Console API and needs an authenticated connection this module does not hold.
+ *
+ * The local `getGoogleAccessToken` was also removed: it base64-encoded the JWT
+ * header and payload with `btoa`, i.e. standard base64 with `+`, `/` and `=`
+ * padding, where JWT requires base64url. Google rejected every assertion, which
+ * read from the outside like a bad service-account key. The working
+ * implementation is `submitUrlToIndexingApi()` in @/lib/google/indexing-api,
+ * which encodes all three segments correctly and caches the token.
  */
+
+import { submitUrlToIndexingApi } from '@/lib/google/indexing-api'
 
 export interface IndexingResult {
   indexNow: { success: boolean; error?: string }
-  googlePing: { success: boolean; error?: string }
   googleIndexingApi?: { success: boolean; error?: string }
 }
 
 export interface IndexingOptions {
   pageUrl: string
   siteUrl: string
-  sitemapUrl?: string
   indexNowKey?: string
 }
 
@@ -26,24 +41,21 @@ export interface IndexingOptions {
  * Call this immediately after a successful publish.
  */
 export async function submitForIndexing(opts: IndexingOptions): Promise<IndexingResult> {
-  const { pageUrl, siteUrl, sitemapUrl, indexNowKey } = opts
+  const { pageUrl, siteUrl, indexNowKey } = opts
 
-  const sitemap = sitemapUrl || `${siteUrl.replace(/\/$/, '')}/sitemap.xml`
   const key = indexNowKey || process.env.INDEXNOW_KEY || ''
 
-  const [indexNowResult, googlePingResult] = await Promise.all([
-    key ? submitIndexNow({ pageUrl, siteUrl, key }) : Promise.resolve({ success: false, error: 'No IndexNow key configured' }),
-    submitGooglePing(sitemap),
-  ])
+  const indexNowResult = key
+    ? await submitIndexNow({ pageUrl, siteUrl, key })
+    : { success: false, error: 'No IndexNow key configured' }
 
   let googleApiResult: IndexingResult['googleIndexingApi']
   if (process.env.GOOGLE_INDEXING_CREDENTIALS) {
-    googleApiResult = await submitGoogleIndexingApi(pageUrl)
+    googleApiResult = await submitUrlToIndexingApi(pageUrl)
   }
 
   return {
     indexNow: indexNowResult,
-    googlePing: googlePingResult,
     googleIndexingApi: googleApiResult,
   }
 }
@@ -57,7 +69,6 @@ export async function submitBatchForIndexing(urls: string[], siteUrl: string): P
   results: IndexingResult[]
 }> {
   const key = process.env.INDEXNOW_KEY || ''
-  const sitemap = `${siteUrl.replace(/\/$/, '')}/sitemap.xml`
 
   // IndexNow supports batch (up to 10,000 URLs per request)
   let indexNowBatch: { success: boolean; error?: string } = { success: false, error: 'No key' }
@@ -65,22 +76,22 @@ export async function submitBatchForIndexing(urls: string[], siteUrl: string): P
     indexNowBatch = await submitIndexNowBatch({ urls, siteUrl, key })
   }
 
-  // Google ping once (it re-crawls the whole sitemap)
-  const googlePing = await submitGooglePing(sitemap)
-
   // Google Indexing API per URL if configured
   let googleApiResults: Array<{ success: boolean; error?: string }> = []
   if (process.env.GOOGLE_INDEXING_CREDENTIALS) {
-    googleApiResults = await Promise.all(urls.map((url) => submitGoogleIndexingApi(url)))
+    googleApiResults = await Promise.all(urls.map((url) => submitUrlToIndexingApi(url)))
   }
 
   const results: IndexingResult[] = urls.map((_, i) => ({
     indexNow: indexNowBatch,
-    googlePing,
     googleIndexingApi: googleApiResults[i],
   }))
 
-  const failed = results.filter((r) => !r.indexNow.success && !r.googlePing.success).length
+  // Counted against the channels that can actually succeed. The dead sitemap
+  // ping used to sit in this expression and made `failed` unreadable.
+  const failed = results.filter(
+    (r) => !r.indexNow.success && !r.googleIndexingApi?.success
+  ).length
 
   return { submitted: urls.length - failed, failed, results }
 }
@@ -135,100 +146,6 @@ async function submitIndexNowBatch(opts: { urls: string[]; siteUrl: string; key:
   } catch (err) {
     return { success: false, error: err instanceof Error ? err.message : 'Network error' }
   }
-}
-
-// --- Google Sitemap Ping ---
-
-async function submitGooglePing(sitemapUrl: string): Promise<{ success: boolean; error?: string }> {
-  try {
-    const pingUrl = `https://www.google.com/ping?sitemap=${encodeURIComponent(sitemapUrl)}`
-    const response = await fetch(pingUrl, { method: 'GET' })
-
-    if (response.ok) {
-      return { success: true }
-    }
-    return { success: false, error: `Google ping HTTP ${response.status}` }
-  } catch (err) {
-    return { success: false, error: err instanceof Error ? err.message : 'Network error' }
-  }
-}
-
-// --- Google Indexing API (optional — requires GOOGLE_INDEXING_CREDENTIALS env) ---
-
-async function submitGoogleIndexingApi(pageUrl: string): Promise<{ success: boolean; error?: string }> {
-  try {
-    const credentials = process.env.GOOGLE_INDEXING_CREDENTIALS
-    if (!credentials) return { success: false, error: 'No credentials' }
-
-    const { client_email, private_key } = JSON.parse(credentials)
-    const token = await getGoogleAccessToken(client_email, private_key)
-
-    const response = await fetch('https://indexing.googleapis.com/v3/urlNotifications:publish', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({
-        url: pageUrl,
-        type: 'URL_UPDATED',
-      }),
-    })
-
-    if (response.ok) {
-      return { success: true }
-    }
-    const err = await response.json().catch(() => ({}))
-    return { success: false, error: `Google API ${response.status}: ${(err as { error?: { message?: string } }).error?.message || ''}` }
-  } catch (err) {
-    return { success: false, error: err instanceof Error ? err.message : 'Google API error' }
-  }
-}
-
-async function getGoogleAccessToken(clientEmail: string, privateKey: string): Promise<string> {
-  const now = Math.floor(Date.now() / 1000)
-  const header = btoa(JSON.stringify({ alg: 'RS256', typ: 'JWT' }))
-  const payload = btoa(JSON.stringify({
-    iss: clientEmail,
-    scope: 'https://www.googleapis.com/auth/indexing',
-    aud: 'https://oauth2.googleapis.com/token',
-    iat: now,
-    exp: now + 3600,
-  }))
-
-  const signInput = `${header}.${payload}`
-
-  // Use Web Crypto API for RS256 signing
-  const keyData = privateKey.replace(/-----[^-]+-----/g, '').replace(/\s/g, '')
-  const binaryKey = Uint8Array.from(atob(keyData), (c) => c.charCodeAt(0))
-
-  const cryptoKey = await crypto.subtle.importKey(
-    'pkcs8',
-    binaryKey,
-    { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' },
-    false,
-    ['sign']
-  )
-
-  const signature = await crypto.subtle.sign(
-    'RSASSA-PKCS1-v1_5',
-    cryptoKey,
-    new TextEncoder().encode(signInput)
-  )
-
-  const sig = btoa(String.fromCharCode(...new Uint8Array(signature)))
-    .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
-
-  const jwt = `${header}.${payload}.${sig}`
-
-  const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: `grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer&assertion=${jwt}`,
-  })
-
-  const tokenData = await tokenRes.json()
-  return (tokenData as { access_token: string }).access_token
 }
 
 // --- Utility: Generate IndexNow key file content ---

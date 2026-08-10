@@ -8,6 +8,7 @@ import {
   updateCyclePlan,
   upsertSitePages,
 } from '@/lib/db'
+import { indexSitePages } from '@/src/adapters/rag/VectorIndexingService'
 import { deleteEditorialSlots, saveEditorialSlots } from './editorial'
 import { generatePlanPreview } from './plan-preview'
 import type { Campaign, CyclePlan, PlanPreviewItem } from '@/lib/types'
@@ -16,12 +17,27 @@ export async function checkCycleCompletion() {
   const now = new Date().toISOString()
   const expiringCycles = await getCampaignsWithExpiringCycles(now)
 
-  for (const cyclePlan of expiringCycles) {
-    const campaign = cyclePlan.campaign
-    if (!campaign || !campaign.cycle_auto_renew) continue
+  const renewals = expiringCycles.filter(
+    (cyclePlan) => cyclePlan.campaign && cyclePlan.campaign.cycle_auto_renew
+  )
 
-    await endCycleAndStartNew(campaign, cyclePlan).catch(() => null)
-  }
+  // A renewal re-crawls the site and calls the model: one campaign whose site is
+  // unreachable must not stop the others from getting their next cycle. The
+  // rejection is journalled rather than swallowed — a cycle that silently never
+  // renews looks exactly like a campaign that has nothing left to publish.
+  const results = await Promise.allSettled(
+    renewals.map((cyclePlan) => endCycleAndStartNew(cyclePlan.campaign, cyclePlan))
+  )
+
+  results.forEach((result, index) => {
+    if (result.status === 'rejected') {
+      console.error(
+        '[ERROR] [cycle] Cycle renewal failed for campaign',
+        renewals[index].campaign?.id,
+        result.reason instanceof Error ? result.reason.message : result.reason
+      )
+    }
+  })
 }
 
 export async function endCycleAndStartNew(campaign: Campaign, currentCycle: CyclePlan) {
@@ -55,10 +71,25 @@ export async function endCycleAndStartNew(campaign: Campaign, currentCycle: Cycl
         has_faq: page.hasFaq,
         has_local_business: page.hasLocalBusiness,
         geo_signals: page.geoSignals,
+        // The body of the page, not just its headings — see the same field in
+        // app/api/analysis-runs/route.ts.
+        content_excerpt: page.textExcerpt || null,
         crawled_at: crawlResult.crawledAt,
       }))
 
       await upsertSitePages(campaign.site_id, sitePages as Parameters<typeof upsertSitePages>[1]).catch(() => null)
+
+      // Refresh the vector index with what the re-crawl just found. This is the
+      // second of the two crawl paths that run in production (the other is
+      // /api/analysis-runs); both must index or the store only ever holds
+      // whatever the very first crawl saw.
+      //
+      // Never fails the cycle: `indexSitePages` reports errors instead of
+      // throwing, and a stale index is not a reason to block a cycle renewal.
+      const indexing = await indexSitePages(campaign.site_id, { source: 'crawl' })
+      if (indexing.errors.length > 0) {
+        console.warn(`[cycle-manager] indexation partielle site=${campaign.site_id}:`, indexing.errors.join(' | '))
+      }
     }
 
     await updateCampaign(campaign.id, { last_crawl_at: new Date().toISOString() })

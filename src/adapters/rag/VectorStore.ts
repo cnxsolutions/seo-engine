@@ -18,6 +18,7 @@ import type {
   IndexingError,
   VectorSearchFilters,
 } from './types'
+import { SupabaseVectorStore } from './providers/SupabaseVectorStore'
 
 // Re-export types from types.ts
 export type {
@@ -34,6 +35,27 @@ export type {
   IndexingError,
   VectorSearchFilters,
 } from './types'
+
+/**
+ * Outcome of an indexing run, enriched with the two numbers that tell a cheap
+ * run from an expensive one.
+ *
+ * `IndexingStatus` lives in types.ts and is left untouched so the other adapters
+ * keep compiling; extending it here means every existing consumer still reads
+ * the same shape.
+ */
+export interface IndexingOutcome extends IndexingStatus {
+  /** Documents whose content hash was unchanged: recognised, not re-embedded. */
+  documentsSkipped: number
+  /** HTTP calls actually made to the embeddings provider — each one is billed. */
+  embeddingRequests: number
+}
+
+/**
+ * Search parameters once the query has already been turned into a vector.
+ * Lets a caller reuse one paid embedding across several filtered queries.
+ */
+export type EmbeddingSearchConfig = Omit<SearchConfig, 'query'>
 
 /**
  * Interface abstraite pour le Vector Store
@@ -77,19 +99,23 @@ export interface IVectorStore {
   indexDocument(document: IndexedDocument): Promise<string>
 
   /**
-   * Indexe plusieurs documents en batch
+   * Indexe plusieurs documents en batch.
+   *
+   * `document.id` is the stable document key: re-indexing the same id REPLACES
+   * the row rather than adding one, and a document whose content hash has not
+   * moved is skipped without paying for an embedding.
    */
-  indexDocuments(documents: IndexedDocument[]): Promise<IndexingStatus>
+  indexDocuments(documents: IndexedDocument[]): Promise<IndexingOutcome>
 
   /**
    * Indexe un schéma de contenu complet
    */
-  indexSchema(siteId: string, schema: SchemaIndexInput): Promise<IndexingStatus>
+  indexSchema(siteId: string, schema: SchemaIndexInput): Promise<IndexingOutcome>
 
   /**
    * Indexe du contenu existant
    */
-  indexContent(siteId: string, content: ContentIndexInput): Promise<IndexingStatus>
+  indexContent(siteId: string, content: ContentIndexInput): Promise<IndexingOutcome>
 
   /**
    * Met à jour un document existant
@@ -117,6 +143,11 @@ export interface IVectorStore {
    * Recherche sémantique
    */
   search(config: SearchConfig): Promise<SearchResult[]>
+
+  /**
+   * Recherche sémantique à partir d'un embedding déjà calculé
+   */
+  searchByEmbedding(embedding: number[], config?: EmbeddingSearchConfig): Promise<SearchResult[]>
 
   /**
    * Recherche par similarité de contenu
@@ -154,7 +185,7 @@ export interface IVectorStore {
   /**
    * Réindexe un site complet
    */
-  reindexSite(siteId: string): Promise<IndexingStatus>
+  reindexSite(siteId: string): Promise<IndexingOutcome>
 
   /**
    * Nettoie les entrées orphelines
@@ -434,9 +465,33 @@ export function createVectorStore(config: VectorStoreFactoryConfig): IVectorStor
   }
 }
 
-// Lazy loading des implémentations
+/**
+ * Statically imported, not `require()`d.
+ *
+ * The comment this replaces claimed the `require` avoided a circular
+ * dependency. There is none to avoid: `SupabaseVectorStore` imports this module
+ * with `import type` only, and type imports are erased at compile time, so the
+ * back-edge does not exist in the emitted graph. What the `require` did produce
+ * was a module that throws `require is not defined` the first time this factory
+ * was called, because this file is ESM.
+ *
+ * It also blinded the compiler. `require()` returns `any`, so nothing checked
+ * that the factory config's `supabaseUrl` and `supabaseKey` are OPTIONAL while
+ * `SupabaseVectorStoreConfig` requires both. `createVectorStore({ provider:
+ * 'supabase', embeddingConfig })` type-checked and would have built a client
+ * against `undefined`. Both are validated here instead, where the caller can
+ * still be told what is missing.
+ */
 function createSupabaseVectorStore(config: VectorStoreFactoryConfig): IVectorStore {
-  // Dynamic import pour éviter les dépendances circulaires
-  const { SupabaseVectorStore } = require('./providers/SupabaseVectorStore')
-  return new SupabaseVectorStore(config)
+  if (!config.supabaseUrl || !config.supabaseKey) {
+    throw new Error(
+      'createVectorStore({ provider: "supabase" }) requires supabaseUrl and supabaseKey'
+    )
+  }
+
+  return new SupabaseVectorStore({
+    supabaseUrl: config.supabaseUrl,
+    supabaseKey: config.supabaseKey,
+    embeddingConfig: config.embeddingConfig,
+  })
 }
