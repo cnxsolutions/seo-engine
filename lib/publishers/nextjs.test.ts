@@ -274,4 +274,57 @@ describe('publishToNextJs — collision de slug', () => {
     expect((await publishToNextJs(options)).success).toBe(true)
     expect(commits).toHaveLength(1)
   })
+
+  // ── `replaces` : une CLE, jamais un interrupteur ───────────────────────────
+  //
+  // Le pendant Next.js de `TargetOptions.replaces`. Le garde ci-dessus protege
+  // les pages ecrites a la main ; celui-ci decide QUAND il se leve. La seule
+  // propriete qui compte est que la levee soit NOMINATIVE : une cle qui ouvre
+  // n'importe quelle porte est `force` sous un autre nom, et ce depot contient
+  // les pages que le proprietaire a ecrites lui-meme.
+
+  it('deverrouille la page du proprietaire que `replaces` NOMME', async () => {
+    const { commits } = repoServing('export default function Fait() { return <div>a la main</div> }')
+
+    const result = await publishToNextJs({ ...options, replaces: { path: '/reserver-taxi-troyes-gare' } })
+
+    expect(result.success).toBe(true)
+    expect(commits).toHaveLength(1)
+  })
+
+  it('refuse quand `replaces` nomme une AUTRE page que celle qu on commite', async () => {
+    // La moitie qui porte la surete. Le premier test ne prouve que l'ouverture ;
+    // sans celui-ci, un `replaces` renseigne au hasard vaudrait permission
+    // generale sur tout le depot.
+    const { commits } = repoServing('export default function Fait() { return <div>a la main</div> }')
+
+    const result = await publishToNextJs({ ...options, replaces: { path: '/contact' } })
+
+    expect(result.success).toBe(false)
+    expect(result.error).toMatch(/n'a pas ete ecrite par le moteur/)
+    expect(commits).toHaveLength(0)
+  })
+
+  it('tolere le slash et la casse, et rien d autre', async () => {
+    // `/Reserver-Taxi-Troyes-Gare/` et `reserver-taxi-troyes-gare` viennent de
+    // deux ecrans et designent la meme page. Refuser sur l'orthographe pousserait
+    // l'operateur vers `force`, seul resultat que ce dispositif evite.
+    const { commits } = repoServing('export default function Fait() { return <div>a la main</div> }')
+
+    const result = await publishToNextJs({ ...options, replaces: { path: '/Reserver-Taxi-Troyes-Gare/' } })
+
+    expect(result.success).toBe(true)
+    expect(commits).toHaveLength(1)
+  })
+
+  it('ne deverrouille rien par PREFIXE', async () => {
+    // `/reserver` est un prefixe du slug. Une comparaison laxiste transformerait
+    // un chemin court en passe-partout sur toute une branche du site.
+    const { commits } = repoServing('export default function Fait() { return <div>a la main</div> }')
+
+    const result = await publishToNextJs({ ...options, replaces: { path: '/reserver' } })
+
+    expect(result.success).toBe(false)
+    expect(commits).toHaveLength(0)
+  })
 })

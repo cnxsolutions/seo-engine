@@ -83,15 +83,73 @@ export async function deleteGoogleConnection(siteId: string) {
 
 export type GoogleFetch = (url: string, options?: RequestInit) => Promise<Response>
 
-export async function getAuthenticatedClient(siteId: string): Promise<{ fetch: GoogleFetch; connection: GoogleConnection }> {
+/**
+ * How much life a token must have left before a READ is issued.
+ *
+ * The value this file has always used, kept to the millisecond: no existing
+ * caller — GSC sync, GBP sync, the RAG context builders, the dashboard pages —
+ * changes behaviour because the margin became a parameter.
+ *
+ * Five minutes is enough for a read because a read that dies on an expired token
+ * is a read that gets repeated. Nothing was created, nothing is in doubt.
+ */
+export const TOKEN_MARGIN_READ_MS = 5 * 60 * 1000
+
+/**
+ * How much life a token must have left before a NON-IDEMPOTENT WRITE is issued.
+ *
+ * Double the read margin, and the reason is not caution for its own sake. The
+ * token is captured in the `googleFetch` closure below and never re-evaluated:
+ * once the client is handed out, an expiry that falls mid-operation cannot be
+ * noticed, let alone repaired. On `POST .../localPosts` that produces the single
+ * worst outcome available — the request left, the answer is 401, and nothing
+ * says whether the post was created before the token died. The row is then
+ * `incertain` forever, and a human has to open the listing and look.
+ *
+ * Refreshing EARLY removes that case rather than handling it. The cost of being
+ * early is one extra refresh call against a quota that does not meter them; the
+ * cost of being late is a duplicate post on a client's public listing.
+ *
+ * Ten minutes, not thirty: the margin has to stay well under the token's own
+ * hour of life, or every single call would refresh and the stored token would
+ * never be used at all.
+ */
+export const TOKEN_MARGIN_WRITE_MS = 10 * 60 * 1000
+
+/**
+ * A fetch already carrying this site's Google credentials.
+ *
+ * @param opts.minRemainingMs how much validity the access token must still have
+ *   for it to be reused. Defaults to `TOKEN_MARGIN_READ_MS`, which is what every
+ *   caller written before the GBP connector gets, unchanged. A writer passes
+ *   `TOKEN_MARGIN_WRITE_MS`. Made a parameter rather than raised for everyone:
+ *   the margin that a non-idempotent write needs is not the margin a read needs,
+ *   and one number for both would either refresh far too often or protect the
+ *   write far too little.
+ */
+export async function getAuthenticatedClient(
+  siteId: string,
+  opts?: { minRemainingMs?: number }
+): Promise<{ fetch: GoogleFetch; connection: GoogleConnection }> {
   const connection = await getGoogleConnection(siteId)
   if (!connection) throw new Error('Aucune connexion Google pour ce site')
 
   let accessToken = connection.access_token
-  const expiresAt = new Date(connection.token_expires_at)
+  const expiresAt = new Date(connection.token_expires_at).getTime()
 
-  // Refresh if token expires within 5 minutes
-  if (expiresAt.getTime() - Date.now() < 5 * 60 * 1000) {
+  // An unreadable expiry counts as expired. `new Date('…').getTime()` is NaN, and
+  // every comparison against NaN is false — so the stored date going bad used to
+  // mean "never refresh" and handed out a token nobody could vouch for. On a
+  // write path that is the doubtful 401 this margin exists to prevent.
+  // Negative infinity rather than 0, so that even a caller asking for a margin of
+  // 0 refreshes: "use it until it dies" needs a death date to be honoured.
+  const remainingMs = Number.isNaN(expiresAt) ? Number.NEGATIVE_INFINITY : expiresAt - Date.now()
+
+  // Refresh when less than the requested margin is left. `??` and not `||`: a
+  // caller asking for 0 is asking for "use the token until it dies", and `||`
+  // would silently hand it the five-minute default instead.
+  const minRemainingMs = opts?.minRemainingMs ?? TOKEN_MARGIN_READ_MS
+  if (remainingMs < minRemainingMs) {
     const refreshed = await refreshAccessToken(connection.refresh_token)
     accessToken = refreshed.access_token
 

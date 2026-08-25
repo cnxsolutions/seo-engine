@@ -4,14 +4,20 @@
 // Detects duplicate and near-duplicate content
 // ─────────────────────────────────────────────────────────────────────────────
 
+// INTENT_MARKERS et detectIntents vivaient ICI, module-prives. Ils sont
+// desormais lus par deux politiques (ce detecteur et la comparaison d'identite
+// editoriale du domaine) : en garder une copie locale serait garantir que les
+// deux listes de marqueurs divergent en silence, et que deux verdicts portant le
+// meme nom ne mesurent plus la meme chose.
 import {
   contentTokens,
   cosineSimilarityOfTokens,
+  detectIntents,
   jaccardIndex,
   normalizeForMatch,
   stripHtmlToText,
   wordShingles,
-} from './text-utils'
+} from '@/src/core/domain/text/text-utils'
 
 /**
  * WHAT THIS DETECTOR ACTUALLY SEES — stated plainly, because the answer changes
@@ -126,19 +132,6 @@ interface PreparedContent extends ContentToCheck {
   titleTokens: string[]
   intents: Set<string>
 }
-
-/**
- * Search-intent markers. Two pages that target the same intent with the same
- * title cannibalise each other even when their prose differs — which is exactly
- * the failure mode of a generator producing one page per city.
- */
-const INTENT_MARKERS: ReadonlyArray<{ name: string; pattern: RegExp }> = [
-  { name: 'question', pattern: /\b(comment|pourquoi|quand|quel|quelle|quels|quelles|combien)\b/ },
-  { name: 'transactional', pattern: /\b(prix|tarif|tarifs|devis|cout|couts|acheter|commander|reserver|urgence|depannage|pas cher)\b/ },
-  { name: 'comparison', pattern: /\b(comparatif|comparaison|meilleur|meilleure|meilleurs|top|versus|alternative|alternatives)\b/ },
-  { name: 'local', pattern: /\b(pres de moi|a proximite|proximite|quartier|autour de moi|alentours)\b/ },
-  { name: 'informational', pattern: /\b(guide|definition|etapes|conseils|astuces|tout savoir|checklist)\b/ },
-]
 
 /**
  * Détecteur de duplicats
@@ -478,17 +471,6 @@ export class DuplicateDetector {
       },
     }
   }
-}
-
-// ─── Helpers ─────────────────────────────────────────────────────────────────
-
-/** Detects which search intents a normalized text targets. */
-function detectIntents(normalizedText: string): Set<string> {
-  const intents = new Set<string>()
-  for (const marker of INTENT_MARKERS) {
-    if (marker.pattern.test(normalizedText)) intents.add(marker.name)
-  }
-  return intents
 }
 
 // ─── Factory ─────────────────────────────────────────────────────────────────

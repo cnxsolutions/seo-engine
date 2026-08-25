@@ -2,11 +2,18 @@
 
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import {
-  AlertTriangle, CalendarDays, CheckCircle2, ChevronLeft, ChevronRight, ExternalLink, Loader2, RefreshCw, X,
+  AlertTriangle, CalendarDays, CheckCircle2, ChevronLeft, ChevronRight, ExternalLink, Loader2, RefreshCw, Store,
 } from 'lucide-react'
-import { Button, EmptyState, PageHeader, StatusBadge } from '@/components/ui'
-import { Tabs } from '@/components/charts'
-import type { Campaign, CalendarSlot } from '@/lib/types'
+import { Button, EmptyState, PageHeader, StatusBadge, formatDay } from '@/components/ui'
+import { Modal, Tabs } from '@/components/charts'
+import { PAGE_TYPE_LABELS, type Campaign, type CalendarSlot } from '@/lib/types'
+// Les sept angles en français, écrits UNE fois pour tout le produit. Leur foyer
+// définitif est components/ui.tsx, aux côtés de PAGE_TYPE_LABELS ; ce fichier-là
+// n'appartient pas au chantier des posts, et recopier sept libellés ici est
+// exactement la façon dont les cinq PAGE_TYPE_LABELS divergents du dépôt sont
+// nés. Les deux modules sont des composants clients : l'import ne traverse
+// aucune frontière serveur.
+import { angleLabel } from '../publish/GbpTab'
 
 // ─── View model ──────────────────────────────────────────────
 //
@@ -52,28 +59,104 @@ function tint(color: string, percent: number): string {
   return `color-mix(in srgb, ${color} ${percent}%, transparent)`
 }
 
-const PAGE_TYPE_LABELS: Record<string, string> = {
-  pillar: 'Pilier',
-  child: 'Fille',
-  alternative: 'Alternative',
-  comparative: 'Comparatif',
-  local_pack: 'Local Pack',
+/**
+ * The shared dictionary (lib/types.ts) with the fallback this table needs: a row
+ * whose `page_type` the database holds and the union does not still prints
+ * something, and an empty one prints the em dash rather than a blank cell.
+ */
+function pageTypeLabel(pageType: string | null): string {
+  return PAGE_TYPE_LABELS[pageType as keyof typeof PAGE_TYPE_LABELS] || pageType || '—'
 }
 
-function pageTypeLabel(pageType: string): string {
-  return PAGE_TYPE_LABELS[pageType] || pageType || '—'
+// ─── Deux natures d'artefact, un seul calendrier ─────────────
+//
+// UN SEUL CALENDRIER, un discriminant. Un second dupliquerait la grille, le
+// report de créneau et le budget de tentatives pour la seule raison que
+// l'artefact produit n'est pas une page.
+//
+// FORME DÉCLARÉE DES DEUX CÔTÉS DU FIL. `CalendarSlot` (lib/types.ts) ne porte
+// pas de champ `gbp_post` et ce fichier-là n'appartient pas au présent lot ;
+// app/api/calendar/route.ts déclare donc la même forme de son côté, exactement
+// comme cette page redéclare déjà l'enveloppe `{ slots }` de la réponse. Les
+// deux déclarations disparaîtront ensemble le jour où lib/types portera le
+// champ.
+
+/** Le post produit par un créneau `artifact_kind = 'gbp_post'`. */
+interface CalendarSlotGbpPost {
+  id: string
+  angle: string | null
+  summary: string
+  status: string
+  remote_search_url: string | null
+  remote_state: string | null
+  error_message: string | null
+  published_at: string | null
+}
+
+type Slot = CalendarSlot & { gbp_post?: CalendarSlotGbpPost | null }
+
+function isGbpPost(slot: Slot): boolean {
+  return slot.artifact_kind === 'gbp_post'
+}
+
+/**
+ * Ce que le créneau produit, nommé.
+ *
+ * `page_type` est NULL sur un créneau de post PAR CONTRAINTE
+ * (`editorial_calendar_page_type_check`) : ce n'est pas une donnée manquante,
+ * c'est une donnée sans objet. Y afficher le tiret cadratin dirait « on a perdu
+ * quelque chose » là où il n'y a jamais rien eu à perdre — c'est le libellé qui
+ * change de nature, pas la valeur qui manque.
+ */
+function artifactLabel(slot: Slot): string {
+  if (!isGbpPost(slot)) return pageTypeLabel(slot.page_type)
+  const angle = slot.gbp_post?.angle
+  return angle ? angleLabel(angle) : 'Post fiche'
+}
+
+/**
+ * Le titre d'un créneau.
+ *
+ * Un post de fiche n'a PAS de requête cible — `target_keyword` est NULL par
+ * contrainte — et y afficher celle d'à côté, ou une chaîne vide, mentirait sur
+ * ce que le créneau va produire.
+ */
+function slotTitle(slot: Slot): string {
+  if (isGbpPost(slot)) {
+    const angle = slot.gbp_post?.angle
+    return angle ? `Post de fiche — ${angleLabel(angle)}` : 'Post de fiche'
+  }
+  return slot.target_keyword || 'Sans requête cible'
 }
 
 // ─── Slot diagnostics ────────────────────────────────────────
 
-/** The slot carries its own message once it has one; otherwise fall back to the generation that failed. */
-function slotError(slot: CalendarSlot): string | null {
+/**
+ * The slot carries its own message once it has one; otherwise fall back to the
+ * artefact that failed — the generation for a page, the post for a listing post.
+ */
+function slotError(slot: Slot): string | null {
   const own = slot.error_message?.trim()
   if (own) return own
+  if (isGbpPost(slot)) return slot.gbp_post?.error_message?.trim() || null
   return slot.generation?.error_message?.trim() || null
 }
 
-function hasFailed(slot: CalendarSlot): boolean {
+/**
+ * Le titre du bloc de message.
+ *
+ * Un créneau de post encore `planned` qui porte un message n'a pas échoué : il a
+ * été REPORTÉ, parce que tous les angles étaient en cooldown ou qu'aucune page
+ * n'était disponible à annoncer. `lib/gbp/posts/run.ts` écrit le motif verbatim
+ * dans `error_message` — la colonne existe déjà, et une spécification
+ * d'interface ne crée pas de schéma. L'appeler « Dernière erreur » ferait
+ * chercher une panne là où le moteur a simplement refusé de se répéter.
+ */
+function slotErrorTitle(slot: Slot): string {
+  return isGbpPost(slot) && slot.status === 'planned' ? 'Créneau reporté' : 'Dernière erreur'
+}
+
+function hasFailed(slot: Slot): boolean {
   return slot.status === 'failed' || slot.generation?.status === 'failed'
 }
 
@@ -86,12 +169,12 @@ function hasFailed(slot: CalendarSlot): boolean {
  * reaper runs, and the case where the reaper itself cannot run. Kept because a
  * slot that looks eternally in progress is the one failure mode nobody notices.
  */
-function isStalled(slot: CalendarSlot, today: string): boolean {
+function isStalled(slot: Slot, today: string): boolean {
   return slot.status === 'generating' && Boolean(today) && slot.scheduled_date < today
 }
 
 /** Deliberately ignores a leftover error message: a generation keeps its last error even after a successful retry. */
-function needsAttention(slot: CalendarSlot, today: string): boolean {
+function needsAttention(slot: Slot, today: string): boolean {
   return hasFailed(slot) || isStalled(slot, today)
 }
 
@@ -123,27 +206,19 @@ function monthLabel({ year, month }: MonthCursor): string {
   return new Date(year, month, 1).toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' })
 }
 
-function formatDay(date: string): string {
-  const [year, month, day] = date.split('-').map(Number)
-  if (!year || !month || !day) return date
-  return new Date(year, month - 1, day).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric' })
-}
-
 const WEEKDAYS = ['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim']
-
-/** Mirrors the `--z-modal` token: csstype rejects a custom property here. */
-const MODAL_Z = 100
 
 // ─── Page ────────────────────────────────────────────────────
 
 export default function CalendarPage() {
-  const [slots, setSlots] = useState<CalendarSlot[]>([])
+  const [slots, setSlots] = useState<Slot[]>([])
   const [campaigns, setCampaigns] = useState<Campaign[]>([])
   const [siteId, setSiteId] = useState('')
   const [campaignId, setCampaignId] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
+  const [artifactFilter, setArtifactFilter] = useState('')
   const [view, setView] = useState<'month' | 'list'>('month')
-  const [selected, setSelected] = useState<CalendarSlot | null>(null)
+  const [selected, setSelected] = useState<Slot | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -219,13 +294,26 @@ export default function CalendarPage() {
     [scopedSlots]
   )
 
+  // La nature de l'artefact, comptée sur la portée déjà filtrée par site et par
+  // campagne : le libellé du filtre annonce ce qu'il va montrer.
+  const artifactCounts = useMemo(() => {
+    let posts = 0
+    for (const slot of scopedSlots) if (isGbpPost(slot)) posts += 1
+    return { post: posts, page: scopedSlots.length - posts }
+  }, [scopedSlots])
+
   const visibleSlots = useMemo(
-    () => (statusFilter ? scopedSlots.filter((s) => s.status === statusFilter) : scopedSlots),
-    [scopedSlots, statusFilter]
+    () =>
+      scopedSlots.filter(
+        (s) =>
+          (!statusFilter || s.status === statusFilter) &&
+          (!artifactFilter || (artifactFilter === 'gbp_post') === isGbpPost(s))
+      ),
+    [scopedSlots, statusFilter, artifactFilter]
   )
 
   const slotsByDate = useMemo(() => {
-    const map = new Map<string, CalendarSlot[]>()
+    const map = new Map<string, Slot[]>()
     for (const slot of visibleSlots) {
       const bucket = map.get(slot.scheduled_date)
       if (bucket) bucket.push(slot)
@@ -317,6 +405,23 @@ export default function CalendarPage() {
           {statusOptions.map((status) => (
             <option key={status} value={status}>{statusMeta(status).label}</option>
           ))}
+        </select>
+
+        {/* Un QUATRIÈME select, et non un second contrôle segmenté : la barre en
+            porte déjà un pour la vue Mois/Liste, et deux segmentés côte à côte ne
+            se distinguent pas — rien ne dirait lequel est la vue et lequel est le
+            filtre. Même forme, même place, même grammaire que les trois filtres
+            voisins. */}
+        <select
+          value={artifactFilter}
+          onChange={(e) => setArtifactFilter(e.target.value)}
+          className="input"
+          style={{ maxWidth: 200 }}
+          aria-label="Nature du créneau"
+        >
+          <option value="">Tous les types</option>
+          <option value="page">Pages ({artifactCounts.page})</option>
+          <option value="gbp_post">Posts fiche ({artifactCounts.post})</option>
         </select>
 
         <Button variant="ghost" size="sm" icon={RefreshCw} loading={loading} onClick={load}>
@@ -411,6 +516,17 @@ export default function CalendarPage() {
       )}
 
       {!error && !loading && visibleSlots.length === 0 && (
+        artifactFilter === 'gbp_post' ? (
+          // Les posts de fiche sont un opt-in strict, campagne par campagne :
+          // « aucun créneau » est ici le comportement NORMAL et non une panne.
+          <EmptyState
+            icon={Store}
+            variant="no-data"
+            title="Aucun créneau de post sur ce mois"
+            description="Les posts de fiche s’activent campagne par campagne, avec leur propre cadence. Tant qu’aucune campagne ne les autorise, le calendrier ne planifie que des pages."
+            action={{ label: 'Piloter les posts', href: '/publish' }}
+          />
+        ) : (
         <EmptyState
           icon={CalendarDays}
           variant="no-data"
@@ -422,6 +538,7 @@ export default function CalendarPage() {
           }
           action={{ label: 'Planifier un cycle', href: '/strategy' }}
         />
+        )
       )}
 
       {!error && !loading && visibleSlots.length > 0 && view === 'month' && cursor && (
@@ -454,8 +571,8 @@ function MonthGrid({
 }: {
   cursor: MonthCursor
   today: string
-  slotsByDate: Map<string, CalendarSlot[]>
-  onSelect: (slot: CalendarSlot) => void
+  slotsByDate: Map<string, Slot[]>
+  onSelect: (slot: Slot) => void
 }) {
   const totalDays = daysInMonth(cursor)
   const blanks = leadingBlanks(cursor)
@@ -521,18 +638,19 @@ function MonthGrid({
   )
 }
 
-function SlotChip({ slot, today, onSelect }: { slot: CalendarSlot; today: string; onSelect: (slot: CalendarSlot) => void }) {
+function SlotChip({ slot, today, onSelect }: { slot: Slot; today: string; onSelect: (slot: Slot) => void }) {
   const meta = statusMeta(slot.status)
   const attention = needsAttention(slot, today)
   // A stalled slot keeps its own label but borrows the failure colour: in a
   // month grid the colour is the only thing read at a glance.
   const color = attention ? statusMeta('failed').color : meta.color
+  const post = isGbpPost(slot)
 
   return (
     <button
       type="button"
       onClick={() => onSelect(slot)}
-      title={`${slot.target_keyword}${slot.target_city ? ` — ${slot.target_city}` : ''} · ${meta.label}${isStalled(slot, today) ? ' (bloqué)' : ''}`}
+      title={`${post ? 'Post fiche — ' : ''}${slotTitle(slot)}${slot.target_city ? ` — ${slot.target_city}` : ''} · ${meta.label}${isStalled(slot, today) ? ' (bloqué)' : ''}`}
       style={{
         display: 'flex', alignItems: 'center', gap: 3, width: '100%',
         padding: '2px 5px', marginBottom: 2, borderRadius: 'var(--radius-xs)',
@@ -542,14 +660,20 @@ function SlotChip({ slot, today, onSelect }: { slot: CalendarSlot; today: string
       }}
     >
       {attention && <AlertTriangle size={9} color={color} style={{ flexShrink: 0 }} />}
-      <span className="truncate">{slot.target_keyword}</span>
+      {/* La COULEUR reste le STATUT dans cette grille : elle est déjà prise, et
+          une septième teinte pour la nature ne se lirait plus. Le type
+          d'artefact passe donc par un GLYPHE, doublé du mot « Post fiche » dans
+          l'infobulle et dans le titre de la ligne — deux encodages, dont un non
+          chromatique. */}
+      {post && <Store size={9} color="var(--ink-secondary)" style={{ flexShrink: 0 }} aria-hidden="true" />}
+      <span className="truncate">{slotTitle(slot)}</span>
     </button>
   )
 }
 
 // ─── List view ───────────────────────────────────────────────
 
-function SlotTable({ slots, today, onSelect }: { slots: CalendarSlot[]; today: string; onSelect: (slot: CalendarSlot) => void }) {
+function SlotTable({ slots, today, onSelect }: { slots: Slot[]; today: string; onSelect: (slot: Slot) => void }) {
   const sorted = [...slots].sort((a, b) => a.scheduled_date.localeCompare(b.scheduled_date))
 
   return (
@@ -576,7 +700,12 @@ function SlotTable({ slots, today, onSelect }: { slots: CalendarSlot[]; today: s
               <tr key={slot.id} onClick={() => onSelect(slot)} style={{ cursor: 'pointer' }}>
                 <td style={{ whiteSpace: 'nowrap' }}>{formatDay(slot.scheduled_date)}</td>
                 <td>
-                  <div className="cell-strong">{slot.target_keyword}</div>
+                  <div className="cell-strong" style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+                    {isGbpPost(slot) && (
+                      <span className="chip"><Store size={10} aria-hidden="true" /> Post fiche</span>
+                    )}
+                    <span>{slotTitle(slot)}</span>
+                  </div>
                   {slot.target_city && <div className="meta">{slot.target_city}</div>}
                   {message && (
                     <div
@@ -588,26 +717,14 @@ function SlotTable({ slots, today, onSelect }: { slots: CalendarSlot[]; today: s
                     </div>
                   )}
                 </td>
-                <td>{pageTypeLabel(slot.page_type)}</td>
+                <td>{artifactLabel(slot)}</td>
                 <td>{slot.campaign?.name ?? '—'}</td>
                 <td>
                   <span className={meta.badge}>{meta.label}</span>
                   {stalled && <span className="badge badge-danger" style={{ marginLeft: 4 }}>Bloqué</span>}
                 </td>
                 <td>
-                  {slot.generation?.published_url ? (
-                    <a
-                      href={slot.generation.published_url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      onClick={(e) => e.stopPropagation()}
-                      className="btn-link"
-                    >
-                      Voir la page <ExternalLink size={12} />
-                    </a>
-                  ) : (
-                    <span className="meta">{slot.generation?.title ?? '—'}</span>
-                  )}
+                  <SlotOutcome slot={slot} />
                 </td>
               </tr>
             )
@@ -618,12 +735,60 @@ function SlotTable({ slots, today, onSelect }: { slots: CalendarSlot[]; today: s
   )
 }
 
+/**
+ * Ce que le créneau a produit, quelle que soit sa nature.
+ *
+ * Un créneau de post ne pointe vers aucune page publiée : son résultat est sur
+ * la fiche Google, et `remote_search_url` est le seul lien que Google en donne.
+ * Sans cette branche, la colonne resterait vide sur tous les posts — c'est-à-dire
+ * qu'elle dirait « rien n'a été produit » d'un post en ligne.
+ */
+function SlotOutcome({ slot }: { slot: Slot }) {
+  if (isGbpPost(slot)) {
+    const post = slot.gbp_post
+    if (post?.remote_search_url) {
+      return (
+        <a
+          href={post.remote_search_url}
+          target="_blank"
+          rel="noopener noreferrer"
+          onClick={(e) => e.stopPropagation()}
+          className="btn-link"
+        >
+          Voir sur la fiche <ExternalLink size={12} />
+        </a>
+      )
+    }
+    return (
+      <span className="meta truncate" style={{ display: 'inline-block', maxWidth: 280 }} title={post?.summary}>
+        {post?.summary ?? 'Pas encore composé'}
+      </span>
+    )
+  }
+
+  if (slot.generation?.published_url) {
+    return (
+      <a
+        href={slot.generation.published_url}
+        target="_blank"
+        rel="noopener noreferrer"
+        onClick={(e) => e.stopPropagation()}
+        className="btn-link"
+      >
+        Voir la page <ExternalLink size={12} />
+      </a>
+    )
+  }
+
+  return <span className="meta">{slot.generation?.title ?? '—'}</span>
+}
+
 // ─── Detail modal ────────────────────────────────────────────
 
 function SlotDetail({
   slot, today, onClose, onRescheduled,
 }: {
-  slot: CalendarSlot
+  slot: Slot
   today: string
   onClose: () => void
   onRescheduled: () => void
@@ -631,16 +796,11 @@ function SlotDetail({
   const meta = statusMeta(slot.status)
   const message = slotError(slot)
   const stalled = isStalled(slot, today)
+  const postponed = isGbpPost(slot) && slot.status === 'planned'
 
   const [date, setDate] = useState(slot.scheduled_date)
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
-
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) => { if (event.key === 'Escape') onClose() }
-    document.addEventListener('keydown', onKey)
-    return () => document.removeEventListener('keydown', onKey)
-  }, [onClose])
 
   /**
    * Only a `planned` slot may move. The scheduler owns `status` and
@@ -671,114 +831,156 @@ function SlotDetail({
   }
 
   return (
-    <div
-      role="dialog"
-      aria-modal="true"
-      aria-label={`Créneau — ${slot.target_keyword}`}
-      onClick={onClose}
-      style={{
-        position: 'fixed', inset: 0, zIndex: MODAL_Z, padding: 'var(--space-6)',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        background: 'var(--surface-scrim)',
-      }}
+    <Modal
+      title={slotTitle(slot)}
+      subtitle={
+        // `pageTypeLabel` n'est PAS appelée sur un créneau de post : `page_type`
+        // y est NULL par contrainte et la fonction rendrait « — », c'est-à-dire
+        // « donnée manquante » pour une donnée sans objet. C'est le libellé
+        // d'angle qui prend la place.
+        <>
+          {formatDay(slot.scheduled_date)}
+          {slot.target_city ? ` · ${slot.target_city}` : ''} · {artifactLabel(slot)}
+        </>
+      }
+      onClose={onClose}
+      size="md"
     >
-      <div
-        className="panel"
-        onClick={(e) => e.stopPropagation()}
-        style={{ width: '100%', maxWidth: 580, maxHeight: '86vh', overflow: 'auto', boxShadow: 'var(--shadow-lg)' }}
-      >
-        <div className="panel__header">
-          <div style={{ minWidth: 0 }}>
-            <h2 className="card-title">{slot.target_keyword}</h2>
-            <div className="meta">
-              {formatDay(slot.scheduled_date)}
-              {slot.target_city ? ` · ${slot.target_city}` : ''} · {pageTypeLabel(slot.page_type)}
-            </div>
-          </div>
-          <button type="button" className="btn-icon" onClick={onClose} aria-label="Fermer">
-            <X size={15} />
-          </button>
+      <div className="panel__body" style={{ display: 'grid', gap: 'var(--space-4)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+          <span className={meta.badge}>{meta.label}</span>
+          {stalled && <span className="badge badge-danger">Bloqué</span>}
+          {slot.attempt_count ? <span className="chip">{slot.attempt_count} tentative{slot.attempt_count > 1 ? 's' : ''}</span> : null}
         </div>
 
-        <div className="panel__body" style={{ display: 'grid', gap: 'var(--space-4)' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
-            <span className={meta.badge}>{meta.label}</span>
-            {stalled && <span className="badge badge-danger">Bloqué</span>}
-            {slot.attempt_count ? <span className="chip">{slot.attempt_count} tentative{slot.attempt_count > 1 ? 's' : ''}</span> : null}
-          </div>
+        <DetailRow label="Campagne" value={slot.campaign?.name ?? '—'} />
+        <DetailRow label="Site" value={slot.campaign?.site?.name ?? '—'} />
+        <DetailRow label="Nature" value={isGbpPost(slot) ? 'Post de fiche Google' : 'Page du site'} />
 
-          <DetailRow label="Campagne" value={slot.campaign?.name ?? '—'} />
-          <DetailRow label="Site" value={slot.campaign?.site?.name ?? '—'} />
-          <DetailRow
-            label="Page générée"
-            value={slot.generation?.title ?? (slot.generation_id ? 'Sans titre' : 'Pas encore générée')}
-          />
-          {slot.generation?.status && (
-            <DetailRow label="État de la génération" value={<StatusBadge status={slot.generation.status} />} />
-          )}
+        {isGbpPost(slot) ? <GbpSlotDetail post={slot.gbp_post ?? null} /> : <PageSlotDetail slot={slot} />}
 
-          {slot.generation?.published_url && (
-            <a
-              href={slot.generation.published_url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="btn-secondary"
-              style={{ justifySelf: 'start' }}
-            >
-              Ouvrir la page publiée <ExternalLink size={13} />
-            </a>
-          )}
-
-          {message && (
-            <div className="inset" style={{ borderLeft: '3px solid var(--status-critical)' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', color: 'var(--status-critical-text)', fontWeight: 600, fontSize: 'var(--fs-xs)', marginBottom: 4 }}>
-                <AlertTriangle size={13} /> Dernière erreur
-              </div>
-              <p style={{ margin: 0, fontSize: 'var(--fs-sm)', color: 'var(--ink-secondary)', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-                {message}
-              </p>
+        {/* Un report n'est pas une panne : le moteur a refusé de se répéter, ce
+            qui est le comportement attendu. Il garde donc le ton de
+            l'avertissement, jamais celui de l'échec — peindre en rouge une
+            décision correcte apprend à l'opérateur à ignorer le rouge. */}
+        {message && (
+          <div className="inset" style={{ borderLeft: `3px solid ${postponed ? 'var(--status-warning)' : 'var(--status-critical)'}` }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', color: postponed ? 'var(--status-warning-text)' : 'var(--status-critical-text)', fontWeight: 600, fontSize: 'var(--fs-xs)', marginBottom: 4 }}>
+              <AlertTriangle size={13} /> {slotErrorTitle(slot)}
             </div>
-          )}
-
-          {stalled && !message && (
-            <p className="meta" style={{ margin: 0 }}>
-              Le créneau est resté en génération après sa date prévue : la tâche planifiée n’est jamais revenue.
-              Le planificateur le reprend automatiquement au bout de 30 minutes — s’il est toujours dans cet état
-              après le prochain quart d’heure, c’est que le planificateur lui-même ne tourne pas.
+            <p style={{ margin: 0, fontSize: 'var(--fs-sm)', color: 'var(--ink-secondary)', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+              {message}
             </p>
-          )}
+          </div>
+        )}
 
-          {slot.status === 'planned' && (
-            <div className="inset" style={{ display: 'grid', gap: 'var(--space-2)' }}>
-              <span style={{ fontSize: 'var(--fs-xs)', fontWeight: 600 }}>Reporter ce créneau</span>
-              <div style={{ display: 'flex', gap: 'var(--space-2)', alignItems: 'center', flexWrap: 'wrap' }}>
-                <input
-                  type="date"
-                  className="input"
-                  style={{ maxWidth: 180 }}
-                  value={date}
-                  onChange={(e) => setDate(e.target.value)}
-                  aria-label="Nouvelle date de publication"
-                />
-                <Button
-                  size="sm"
-                  icon={CheckCircle2}
-                  loading={saving}
-                  disabled={!date || date === slot.scheduled_date}
-                  onClick={reschedule}
-                >
-                  Enregistrer
-                </Button>
-              </div>
-              {saveError && <span style={{ fontSize: 'var(--fs-xs)', color: 'var(--status-critical-text)' }}>{saveError}</span>}
-              <span className="meta">
-                Seul un créneau encore planifié peut être déplacé : au-delà, le planificateur détient déjà le créneau.
-              </span>
+        {stalled && !message && (
+          <p className="meta" style={{ margin: 0 }}>
+            Le créneau est resté en génération après sa date prévue : la tâche planifiée n’est jamais revenue.
+            Le planificateur le reprend automatiquement au bout de 30 minutes — s’il est toujours dans cet état
+            après le prochain quart d’heure, c’est que le planificateur lui-même ne tourne pas.
+          </p>
+        )}
+
+        {slot.status === 'planned' && (
+          <div className="inset" style={{ display: 'grid', gap: 'var(--space-2)' }}>
+            <span style={{ fontSize: 'var(--fs-xs)', fontWeight: 600 }}>Reporter ce créneau</span>
+            <div style={{ display: 'flex', gap: 'var(--space-2)', alignItems: 'center', flexWrap: 'wrap' }}>
+              <input
+                type="date"
+                className="input"
+                style={{ maxWidth: 180 }}
+                value={date}
+                onChange={(e) => setDate(e.target.value)}
+                aria-label="Nouvelle date de publication"
+              />
+              <Button
+                size="sm"
+                icon={CheckCircle2}
+                loading={saving}
+                disabled={!date || date === slot.scheduled_date}
+                onClick={reschedule}
+              >
+                Enregistrer
+              </Button>
             </div>
-          )}
-        </div>
+            {saveError && <span style={{ fontSize: 'var(--fs-xs)', color: 'var(--status-critical-text)' }}>{saveError}</span>}
+            <span className="meta">
+              Seul un créneau encore planifié peut être déplacé : au-delà, le planificateur détient déjà le créneau.
+            </span>
+          </div>
+        )}
       </div>
-    </div>
+    </Modal>
+  )
+}
+
+/** Le détail d'un créneau de page : la génération, son état, sa mise en ligne. */
+function PageSlotDetail({ slot }: { slot: Slot }) {
+  return (
+    <>
+      <DetailRow
+        label="Page générée"
+        value={slot.generation?.title ?? (slot.generation_id ? 'Sans titre' : 'Pas encore générée')}
+      />
+      {slot.generation?.status && (
+        <DetailRow label="État de la génération" value={<StatusBadge status={slot.generation.status} />} />
+      )}
+      {slot.generation?.published_url && (
+        <a
+          href={slot.generation.published_url}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="btn-secondary"
+          style={{ justifySelf: 'start' }}
+        >
+          Ouvrir la page publiée <ExternalLink size={13} />
+        </a>
+      )}
+    </>
+  )
+}
+
+/**
+ * Le détail d'un créneau de post.
+ *
+ * `post === null` couvre deux cas que rien ne permet de distinguer d'ici, et
+ * c'est pourquoi la phrase ne tranche pas : le créneau n'a pas encore tourné, ou
+ * la migration 019 n'est pas appliquée et la jointure n'a rien pu lire. Les deux
+ * mènent à la même conduite — il n'y a pas de post à montrer — et affirmer l'un
+ * des deux serait inventer.
+ */
+function GbpSlotDetail({ post }: { post: CalendarSlotGbpPost | null }) {
+  if (!post) {
+    return <DetailRow label="Post" value="Pas encore composé" />
+  }
+
+  return (
+    <>
+      <DetailRow label="Angle" value={angleLabel(post.angle)} />
+      <DetailRow
+        label="État du post"
+        value={<StatusBadge status={post.status} label={post.status === 'incertain' ? 'État inconnu' : undefined} />}
+      />
+      {/* L'état que Google rapporte, quand il en rapporte un. 'PROCESSING' et
+          'REJECTED' sont précisément ce qu'un opérateur doit voir : un post
+          enregistré n'est pas encore un post affiché. */}
+      {post.remote_state && <DetailRow label="État sur Google" value={post.remote_state} />}
+      <div className="inset">
+        <span className="field-label">Texte du post</span>
+        <p style={{ margin: 'var(--space-1) 0 0', fontSize: 'var(--fs-sm)', color: 'var(--ink-secondary)', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+          {post.summary}
+        </p>
+      </div>
+      <div style={{ display: 'flex', gap: 'var(--space-3)', flexWrap: 'wrap' }}>
+        {post.remote_search_url && (
+          <a href={post.remote_search_url} target="_blank" rel="noopener noreferrer" className="btn-secondary">
+            Ouvrir le post sur la fiche <ExternalLink size={13} />
+          </a>
+        )}
+        <a href="/publish" className="btn-ghost">Piloter les posts</a>
+      </div>
+    </>
   )
 }
 

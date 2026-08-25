@@ -1,9 +1,9 @@
+import { toSitePagePayloads } from '@/lib/analyzer/to-site-pages'
 import { crawlWebsite } from '@/lib/analyzer/crawler'
 import {
   createCyclePlan,
   getCampaignsWithExpiringCycles,
   getLatestCyclePlan,
-  getSiteContext,
   updateCampaign,
   updateCyclePlan,
   upsertSitePages,
@@ -12,6 +12,15 @@ import { indexSitePages } from '@/src/adapters/rag/VectorIndexingService'
 import { deleteEditorialSlots, saveEditorialSlots } from './editorial'
 import { generatePlanPreview } from './plan-preview'
 import type { Campaign, CyclePlan, PlanPreviewItem } from '@/lib/types'
+
+/**
+ * Pages the renewal crawl is allowed to read.
+ *
+ * Same figure as the ceiling `loadSiteInventory` uses to decide `truncated`, so
+ * "the crawl stopped early" and "the inventory admits it is incomplete" are the
+ * same fact rather than two thresholds that drift apart.
+ */
+const RENEWAL_CRAWL_MAX_PAGES = 300
 
 export async function checkCycleCompletion() {
   const now = new Date().toISOString()
@@ -46,38 +55,50 @@ export async function endCycleAndStartNew(campaign: Campaign, currentCycle: Cycl
 
   // 2. Re-crawl the site to detect new pages and changes
   if (campaign.site?.url) {
+    // 300 rather than 50, aligned with the ceiling the inventory uses to decide
+    // `truncated`. At 50 the renewal saw a sixth of a real client site and the
+    // rest was invisible to every slug decision of the next cycle — a page the
+    // crawl never reached is a page the engine will happily write over.
     const crawlResult = await crawlWebsite({
       siteUrl: campaign.site.url,
-      maxPages: 50,
+      maxPages: RENEWAL_CRAWL_MAX_PAGES,
       followLinks: true,
     })
 
-    if (crawlResult.pages.length > 0 && campaign.site_id) {
-      const sitePages = crawlResult.pages.map(page => ({
-        site_id: campaign.site_id,
-        url: page.url,
-        path: page.path,
-        title: page.title || null,
-        meta_description: page.metaDescription || null,
-        h1: page.h1 || null,
-        h2s: page.h2s,
-        word_count: page.wordCount,
-        focus_keyword: page.keywords[0] || null,
-        keywords: page.keywords,
-        internal_links: page.internalLinks.slice(0, 20),
-        external_links: page.externalLinks.slice(0, 10),
-        has_schema: page.hasSchema,
-        schema_types: page.schemaTypes,
-        has_faq: page.hasFaq,
-        has_local_business: page.hasLocalBusiness,
-        geo_signals: page.geoSignals,
-        // The body of the page, not just its headings — see the same field in
-        // app/api/analysis-runs/route.ts.
-        content_excerpt: page.textExcerpt || null,
-        crawled_at: crawlResult.crawledAt,
-      }))
+    // Said out loud rather than counted silently: past the ceiling the inventory
+    // stops claiming to know the site, and the operator is the only one who can
+    // decide whether that matters.
+    if (crawlResult.truncated) {
+      console.warn(
+        `[cycle-manager] crawl plafonne a ${RENEWAL_CRAWL_MAX_PAGES} pages pour ${campaign.site.url} :` +
+          ` l'inventaire du prochain cycle sera incomplet.`
+      )
+    }
 
-      await upsertSitePages(campaign.site_id, sitePages as Parameters<typeof upsertSitePages>[1]).catch(() => null)
+    const siteId = campaign.site_id
+
+    if (crawlResult.pages.length > 0 && siteId) {
+      const sitePages = toSitePagePayloads(siteId, crawlResult)
+
+      // The cast covers the `|| null` fallbacks above, and only those: `SitePage`
+      // types its optional strings as `string | undefined`, while `null` is what
+      // actually CLEARS a column the crawl no longer finds. The fields added by
+      // migration 018 are declared on `CreateSitePagePayload`, so they are not
+      // what it is hiding — a cast is how a column gets lost, and this one is
+      // bounded on purpose.
+      // Journalise plutot qu'avale : un echec d'ecriture ici laissait
+      // l'inventaire vide sans qu'aucune trace n'existe nulle part. Le cycle
+      // continue — un inventaire absent degrade, il ne bloque pas — mais il
+      // devient diagnosticable.
+      await upsertSitePages(siteId, sitePages as Parameters<typeof upsertSitePages>[1]).catch(
+        (error: unknown) => {
+          console.error(
+            `[cycle] site_pages non ecrit site=${siteId}:`,
+            error instanceof Error ? error.message : error
+          )
+          return null
+        }
+      )
 
       // Refresh the vector index with what the re-crawl just found. This is the
       // second of the two crawl paths that run in production (the other is
@@ -86,33 +107,26 @@ export async function endCycleAndStartNew(campaign: Campaign, currentCycle: Cycl
       //
       // Never fails the cycle: `indexSitePages` reports errors instead of
       // throwing, and a stale index is not a reason to block a cycle renewal.
-      const indexing = await indexSitePages(campaign.site_id, { source: 'crawl' })
+      const indexing = await indexSitePages(siteId, { source: 'crawl' })
       if (indexing.errors.length > 0) {
-        console.warn(`[cycle-manager] indexation partielle site=${campaign.site_id}:`, indexing.errors.join(' | '))
+        console.warn(`[cycle-manager] indexation partielle site=${siteId}:`, indexing.errors.join(' | '))
       }
     }
 
     await updateCampaign(campaign.id, { last_crawl_at: new Date().toISOString() })
   }
 
-  // 3. Get fresh site context for dedup
-  let existingSlugs: string[] = []
-  let existingKeywords: string[] = []
-  if (campaign.site_id) {
-    const context = await getSiteContext(campaign.site_id).catch(() => null)
-    if (context) {
-      existingSlugs = context.usedSlugs
-      existingKeywords = context.usedKeywords
-    }
-  }
-
-  // 4. Generate new plan (auto-confirmed since cycle_auto_renew=true)
+  // 3. Generate new plan (auto-confirmed since cycle_auto_renew=true)
+  //
+  // No site context is read here any more. This function used to call
+  // `getSiteContext` and hand the planner two arrays of strings; the planner now
+  // loads the inventory itself, right after this crawl updated it. Reading it
+  // here as well would be the same rows over the wire twice, five lines apart —
+  // and the two readers would drift the first time one of them was fixed.
   const cycleDays = campaign.cycle_duration_days || 14
   const planItems = await generatePlanPreview({
     campaign,
     cycleDays,
-    existingSlugs,
-    existingKeywords,
   })
 
   if (planItems.length === 0) return
@@ -133,7 +147,7 @@ export async function endCycleAndStartNew(campaign: Campaign, currentCycle: Cycl
     crawl_completed_at: new Date().toISOString(),
   })
 
-  // 5. Create editorial slots from plan
+  // 4. Create editorial slots from plan
   await deleteEditorialSlots(campaign.id)
   const slots = planItems.map(item => ({
     campaign_id: campaign.id,
@@ -146,7 +160,7 @@ export async function endCycleAndStartNew(campaign: Campaign, currentCycle: Cycl
   }))
   await saveEditorialSlots(slots)
 
-  // 6. Update campaign
+  // 5. Update campaign
   await updateCampaign(campaign.id, { current_cycle_id: newPlan.id })
 }
 

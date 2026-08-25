@@ -640,8 +640,12 @@ function errorMessage(error: unknown): string {
 /**
  * Object wrapper over the functions above.
  *
- * Kept because `RagGeneratorWithTemplates` instantiates it with an explicit
- * store; new code should prefer the free functions, which manage their own.
+ * NOBODY INSTANTIATES IT ANY MORE. It was kept for a single caller that passed
+ * an explicit store, and that caller was deleted with the templated generator;
+ * every remaining consumer imports the free functions above, which manage their
+ * own store. Only the barrel still names it. Left in place rather than removed
+ * here because deleting it is a public-surface change and belongs to whoever
+ * prunes the barrel — but new code must not reach for it.
  */
 export class VectorIndexingService {
   constructor(vectorStore?: SupabaseVectorStore) {

@@ -3,23 +3,13 @@
 // Exports RAG content generation adapters
 // ─────────────────────────────────────────────────────────────────────────────
 
-// RAG Generator with Templates
-export {
-  RagGeneratorWithTemplates,
-  createRagGeneratorWithTemplates,
-  type TemplateGenerationOptions,
-  type GenerationContext,
-  type TemplateGenerationResult,
-  type GeneratedContent,
-  type WordPressFields,
-  type SanityFields,
-  type FaqItem,
-  type RagSource,
-  type GenerationStats,
-  type ContentValidation,
-  type ValidationError,
-  type ValidationWarning,
-} from './RagGeneratorWithTemplates'
+// `RagGeneratorWithTemplates` was exported here, and the barrel was its only
+// consumer: no production code ever called it. It built its own vector store in
+// a field initialiser with `process.env...!`, so merely constructing it threw
+// without the environment variables — a competing, partial implementation of the
+// generation path, kept alive by this export alone.
+//
+// A barrel must only export what lives.
 
 // Template Engine
 export {

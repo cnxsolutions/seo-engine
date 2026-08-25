@@ -47,12 +47,21 @@ export function formatDuration(ms: number | null): string {
 
 // ─── Dates ───────────────────────────────────────────────────────────────────
 //
+// The short-day, long-day and URL shorteners used to be declared here, byte for
+// byte identical to the ones in components/ui. They are re-exported now rather
+// than redeclared: this file stays the single import site for the two dashboard
+// tabs (nothing downstream has to change) while there remains exactly one
+// implementation of "how do we print a day" in the repository.
+//
+// `formatDateTime` stays local — it is the only one of the four with no twin in
+// the design system, and its `jj/mm hh:mm` shape belongs to the run table.
+//
 // `Intl.DateTimeFormat` is safe here where `Intl.NumberFormat` was not: both tabs
 // are server components, so these run once on the server and cross to the client
 // as finished strings — including the x-axis labels handed to the charts.
 
-const DAY = new Intl.DateTimeFormat('fr-FR', { day: 'numeric', month: 'short' })
-const DAY_LONG = new Intl.DateTimeFormat('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' })
+export { formatDay, formatDayLong, shortenUrl } from '@/components/ui'
+
 const DATE_TIME = new Intl.DateTimeFormat('fr-FR', {
   day: '2-digit',
   month: '2-digit',
@@ -60,25 +69,6 @@ const DATE_TIME = new Intl.DateTimeFormat('fr-FR', {
   minute: '2-digit',
 })
 
-export function formatDay(iso: string): string {
-  return DAY.format(new Date(`${iso.slice(0, 10)}T12:00:00Z`))
-}
-
-export function formatDayLong(iso: string): string {
-  return DAY_LONG.format(new Date(`${iso.slice(0, 10)}T12:00:00Z`))
-}
-
 export function formatDateTime(iso: string): string {
   return DATE_TIME.format(new Date(iso))
-}
-
-/** `https://www.site.fr/taxi-troyes` → `/taxi-troyes`, so a table column stays readable. */
-export function shortenUrl(url: string): string {
-  try {
-    const parsed = new URL(url)
-    const path = `${parsed.pathname}${parsed.search}`.replace(/\/$/, '')
-    return path === '' ? '/' : path
-  } catch {
-    return url
-  }
 }

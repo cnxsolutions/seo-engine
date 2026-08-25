@@ -18,12 +18,21 @@
 // Indexing API. Asking a search engine to index a 404 is not a neutral mistake:
 // it spends crawl budget and teaches the engine that this site advertises pages
 // that are not there.
+//
+// The same rule now governs a second write. A live page is inserted into
+// `site_pages` on the spot instead of waiting for the next crawl: without it the
+// generator works for days against an inventory that ignores what the engine has
+// just put online, and proposes again the very slug it already occupies.
 
-import { updateGeneration } from '@/lib/db'
+import { CONTENT_EXCERPT_MAX_CHARS } from '@/lib/analyzer/crawler'
+import { updateGeneration, upsertSitePages } from '@/lib/db'
 import { countHtmlWords, indexPublishedPage } from '@/lib/pipeline'
+import { censusHeadings } from '@/lib/pipeline/structure'
 import { submitForIndexing } from '@/lib/seo/indexing'
+import { normalizeInventoryPath } from '@/src/core/domain/existing/inventory'
+import { stripHtmlToText } from '@/src/core/domain/text/text-utils'
 import type { GeneratedPage } from '@/lib/ai/openai'
-import type { PageType, Site } from '@/lib/types'
+import type { CreateSitePagePayload, PageType, Site } from '@/lib/types'
 import type { PublishOutcome } from './outcome'
 
 export interface RecordOptions {
@@ -35,7 +44,14 @@ export interface RecordOptions {
 }
 
 export interface RecordReport {
-  /** The row was updated. False when there is no row to update. */
+  /**
+   * The `generations` row was updated. False when there is no row to update.
+   *
+   * Answers about that row and NOTHING else. It used to be computed from
+   * `problems.length === 0`, so an unrelated failure — indexing, the vector
+   * store, the inventory — reported that the row had not been written when it
+   * had. A caller reading that lie republishes a page that is already online.
+   */
   stored: boolean
   /** Search engines were told. False whenever the page is not live. */
   indexed: boolean
@@ -54,6 +70,7 @@ export interface RecordReport {
 export async function recordPublication(opts: RecordOptions): Promise<RecordReport> {
   const { site, page, pageType, generationId, outcome } = opts
   const problems: string[] = []
+  let generationStored = false
 
   if (generationId) {
     try {
@@ -76,14 +93,28 @@ export async function recordPublication(opts: RecordOptions): Promise<RecordRepo
         // period during which nobody could visit it.
         ...(outcome.live ? { published_at: new Date().toISOString() } : {}),
       })
+      generationStored = true
     } catch (error) {
       problems.push(`statut non enregistre : ${message(error)}`)
     }
   }
 
   if (!outcome.live || !outcome.pageUrl) {
-    return { stored: Boolean(generationId) && problems.length === 0, indexed: false, problems }
+    return { stored: generationStored, indexed: false, problems }
   }
+
+  // The inventory learns about this page NOW, before any external call.
+  //
+  // Gated on `live` for the same reason indexing is: a draft or a commit on an
+  // unpromoted branch would reserve a path nobody serves and mark its topic as
+  // covered, so the engine would refuse to write the page it never published.
+  //
+  // Failing here never fails a publication that succeeded — the row is a cache
+  // of what the crawler would have found anyway, and the next crawl catches up.
+  await recordInInventory(site.id, page, outcome.pageUrl, generationId).catch((error) => {
+    problems.push(`inventaire non alimente : ${message(error)}`)
+    return null
+  })
 
   await submitForIndexing({ pageUrl: outcome.pageUrl, siteUrl: site.url }).catch((error) => {
     problems.push(`indexation non soumise : ${message(error)}`)
@@ -111,7 +142,63 @@ export async function recordPublication(opts: RecordOptions): Promise<RecordRepo
     })
   }
 
-  return { stored: Boolean(generationId) && problems.length === 0, indexed: true, problems }
+  return { stored: generationStored, indexed: true, problems }
+}
+
+/**
+ * Write the `site_pages` row for a page a visitor can reach.
+ *
+ * Idempotent by construction: `upsertSitePages` conflicts on `(site_id, path)`,
+ * which `idx_site_pages_url` already enforces, so republishing the same path
+ * updates the one row instead of adding a second entry for the same page.
+ */
+async function recordInInventory(
+  siteId: string,
+  page: GeneratedPage,
+  pageUrl: string,
+  generationId: string | undefined,
+): Promise<void> {
+  // Normalised by the domain's own function, never by a local variant. Three
+  // writers must land on the same string — the SQL seeding of migration 018, the
+  // crawler, and this call — or the same page holds two inventory entries and
+  // neither of them sees the other.
+  const path = normalizeInventoryPath(new URL(pageUrl).pathname)
+
+  const payload: CreateSitePagePayload = {
+    site_id: siteId,
+    url: pageUrl,
+    path,
+    title: page.title,
+    meta_description: page.metaDescription,
+    // The H1 the page actually carries, not the title. They diverge often enough
+    // that reading the title here would hide the divergence from the operator.
+    h1: censusHeadings(page.htmlContent).h1Texts[0],
+    focus_keyword: page.focusKeyword,
+    word_count: countHtmlWords(page.htmlContent),
+    // TEXT, not HTML, and capped like the crawler caps its own excerpt. The
+    // column feeds the lexical duplicate comparison: markup left in would make
+    // every page produced by the same template look like a duplicate of the
+    // others, and none of them like the page it really duplicates.
+    content_excerpt: stripHtmlToText(page.htmlContent).slice(0, CONTENT_EXCERPT_MAX_CHARS),
+    origin: 'engine',
+    generation_id: generationId,
+    crawled_at: new Date().toISOString(),
+    // Below: what only a crawler visit can observe. Left neutral rather than
+    // guessed. The inventory reads title, meta, focus keyword and body and
+    // nothing else, so a fabricated heading list or schema flag would buy
+    // nothing and would sit in the column where the next crawl writes the truth.
+    h2s: [],
+    keywords: [],
+    internal_links: [],
+    external_links: [],
+    has_schema: false,
+    schema_types: [],
+    has_faq: false,
+    has_local_business: false,
+    geo_signals: [],
+  }
+
+  await upsertSitePages(siteId, [payload])
 }
 
 /** `published_page_id` is an integer column; a commit SHA is not one. */

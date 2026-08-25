@@ -15,7 +15,7 @@ import {
   normalizeForMatch,
   stripHtmlToText,
   type HeadingNode,
-} from './text-utils'
+} from '@/src/core/domain/text/text-utils'
 
 /**
  * SEVERITY POLICY — only `impact: 'high'` errors block publication

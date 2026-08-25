@@ -2,10 +2,10 @@
 
 import { useState } from 'react'
 import {
-  ArrowRight, CheckCircle2, Code2, Eye, EyeOff, Globe, Globe2, PlugZap, TriangleAlert, type LucideIcon,
+  ArrowRight, CheckCircle2, Code2, Eye, EyeOff, Globe, Globe2, PlugZap, type LucideIcon,
 } from 'lucide-react'
 import { useRouter } from 'next/navigation'
-import { Button, FormField, IconBox, PageHeader } from '@/components/ui'
+import { Button, FormField, IconBox, Notice, PageHeader } from '@/components/ui'
 import type { SiteType } from '@/lib/types'
 
 /**
@@ -242,6 +242,7 @@ export default function NewSitePage() {
 
           {testResult && (
             <Notice
+              inline
               tone={testResult.ok ? 'good' : 'critical'}
               title={testResult.ok ? 'Connexion réussie' : 'Connexion refusée'}
               body={[testResult.message, ...(testResult.details ?? [])]
@@ -250,7 +251,7 @@ export default function NewSitePage() {
             />
           )}
 
-          {error && <Notice tone="critical" title="Site non enregistré" body={error} />}
+          {error && <Notice inline tone="critical" title="Site non enregistré" body={error} />}
         </div>
 
         <div className="panel__footer" style={{ display: 'flex', gap: 'var(--space-3)', alignItems: 'center' }}>
@@ -267,18 +268,7 @@ export default function NewSitePage() {
   )
 }
 
-/** Same shape as the notice used on the Google page: one tone, one title, one line. */
-function Notice({ tone, title, body }: { tone: 'good' | 'critical'; title: string; body: string }) {
-  const color = tone === 'good' ? 'var(--status-good)' : 'var(--status-critical)'
-  const Icon = tone === 'good' ? CheckCircle2 : TriangleAlert
-
-  return (
-    <div className="inset" style={{ borderLeft: `3px solid ${color}`, display: 'flex', gap: 'var(--space-3)', alignItems: 'flex-start' }}>
-      <Icon size={16} color={color} style={{ flexShrink: 0, marginTop: 2 }} />
-      <div style={{ minWidth: 0 }}>
-        <strong style={{ fontSize: 'var(--fs-sm)' }}>{title}</strong>
-        <p style={{ fontSize: 'var(--fs-sm)', color: 'var(--ink-secondary)', margin: '0.25rem 0 0', lineHeight: 1.55, wordBreak: 'break-word' }}>{body}</p>
-      </div>
-    </div>
-  )
-}
+// The third copy of the notice — the one whose own comment said "same shape as
+// the notice used on the Google page" — is gone. Both call sites above pass
+// `inline`, which is what reproduces the `.inset` frame this copy hard-coded:
+// they sit inside a `.panel__body`, where a second card frame would nest.

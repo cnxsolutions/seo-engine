@@ -35,6 +35,14 @@ second. Le dossier `db/` sert uniquement a la baseline decrite en section 4.
 | `008_generation_rejected_status.sql` | Elargit la contrainte CHECK de `generations.status` a `'rejected'` (bloc `DO` idempotent quel que soit le nom de la contrainte) + index partiel `idx_generations_rejected`. Sans elle, un article refuse par le gate retombe sur `'failed'` et on ne distingue plus « la generation a plante » de « le controle qualite a refuse » | present |
 | `009_vector_index_keys.sql` | Identite stable des documents vectoriels : colonne `vector_embeddings.document_key` + index unique `(site_id, document_key)`, suppression de l'`UNIQUE(content_hash)` **global** qui faisait se voler leurs lignes a deux sites partageant une phrase, colonne `site_pages.content_excerpt`, colonne `sites.last_indexed_at`, fonction `get_site_index_status(uuid)` | present |
 | `010_gsc_performance_loop.sql` | **Creation de `gsc_performance`** (jusqu'ici definie nulle part) + son index unique `(site_id, date, page_url, query)` **sans lequel tout upsert du sync GSC etait refuse en silence**, index unique `google_connections(site_id)` exige par le nouveau `onConflict`, et `generations.published_at` avec backfill depuis `updated_at` | present |
+| `011_serp_snapshots.sql` | `serp_snapshots` : la mesure de ce qui classe reellement pour une requete | present |
+| `012_site_github_branch.sql` | `sites.github_branch` | present |
+| `013_google_sync_observability.sql` | Colonnes de suivi des synchros GSC et GBP sur `google_connections` : dernier passage, statut, erreur, plage couverte | present |
+| `014_site_auto_promote.sql` | `sites.auto_promote` | present |
+| `015_publication_truth.sql` | Ce qui a REELLEMENT ete publie : `publish_mode`, `publish_live`, `publish_notes` sur `generations` | present |
+| `016_refusal_kind.sql` | `generations.refusal_kind` — distinguer « le moteur a refuse de publier » de « la publication a casse » | present |
+| `017_site_cms_schema.sql` | `sites.cms_schema` et `cms_schema_read_at` | present |
+| `018_conscience_existant.sql` | **Conscience de l'existant.** `site_pages` : `canonical_path`, `robots_noindex`, `origin`, `generation_id` — sans quoi « cette URL est occupee » et « ce sujet est couvert » restent indistinguables. `generations` : `intent`, `refresh_target_path`, `refresh_target_generation_id`, `refresh_plan`, `duplicate_verdict`, CHECK sur `refusal_kind` elargi a `'duplicat'`. **Aucun statut nouveau** sur `generations`. Amorce `site_pages` depuis les pages deja publiees, pour qu'un site en production ne reparte pas d'un inventaire vide | present |
 
 ### L'ordre d'application
 
@@ -48,7 +56,27 @@ Sur une base vierge, dans cet ordre strict, sans en sauter :
 008_generation_rejected_status.sql
 009_vector_index_keys.sql
 010_gsc_performance_loop.sql
+011_serp_snapshots.sql
+012_site_github_branch.sql
+013_google_sync_observability.sql
+014_site_auto_promote.sql
+015_publication_truth.sql
+016_refusal_kind.sql
+017_site_cms_schema.sql
+018_conscience_existant.sql
 ```
+
+`018` doit passer APRES `016`, dont elle elargit la contrainte sur
+`refusal_kind`, et apres tout ce qui cree `generations` et `site_pages`. Elle
+est idempotente et **rejouable** : tous ses ajouts sont `IF NOT EXISTS`, tous
+ses CHECK sont precedes d'un `DROP ... IF EXISTS`, et son amorcage se termine
+par `ON CONFLICT (site_id, path) DO NOTHING`. La relancer deux fois de suite ne
+produit ni erreur ni doublon.
+
+Tous ses CHECK sont poses `NOT VALID` : ils s'appliquent aux ecritures futures
+sans jamais faire echouer la migration sur une ligne historique. Une ligne
+existante qui les violerait est un fait a corriger, pas un motif de blocage au
+deploiement.
 
 `008`, `009` et `010` ont ete ecrites en parallele par trois chantiers
 differents. Leurs objets sont disjoints — `008` touche la contrainte de statut

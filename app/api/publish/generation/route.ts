@@ -14,11 +14,21 @@
 // It re-reads the page from `generations.page_payload` rather than rebuilding it
 // from the scalar columns: those cannot carry the JSON-LD blocks, the FAQ or the
 // internal links, so a page rebuilt from them ships stripped of all three.
+//
+// C'EST AUSSI LA ROUTE PAR LAQUELLE UNE MISE A JOUR EST VALIDEE.
+//
+// `replaces` nomme la page du proprietaire que cette publication a le droit de
+// remplacer, et elle seule ; c'est /publish qui la construit a partir du
+// `refresh_target_path` de la ligne, apres une modale ou un humain a lu le
+// chemin vise. `force`, lui, leve les gardes de destination en aveugle. Les deux
+// ne s'envoient JAMAIS ensemble : accepter la combinaison ferait gagner `force`
+// par construction, et l'operateur croirait avoir contraint l'ecriture a la page
+// qu'il a regardee alors qu'il ne l'a pas fait.
 
 import { NextRequest, NextResponse } from 'next/server'
 import { getSiteById, updateGeneration } from '@/lib/db'
 import { publishPage } from '@/lib/publishing/publish'
-import { markGenerationRejected, runPrePublishGate } from '@/lib/pipeline'
+import { markGenerationRejected, persistDuplicateVerdict, runPrePublishGate } from '@/lib/pipeline'
 import { claimGenerationForPublishing } from '@/lib/scheduler/editorial'
 import { createServiceClient } from '@/lib/supabase'
 import type { GeneratedPage } from '@/lib/ai/openai'
@@ -48,9 +58,36 @@ export async function POST(req: NextRequest) {
     // occupancy, redirect — and never the quality gate, which is a different
     // question and not the operator's to overrule.
     const force = body.force === true
+    // Autorise l'ecriture sur UNE page nommee du proprietaire, et sur celle-la
+    // seule. C'est ce que /publish envoie pour valider une mise a jour, a partir
+    // du `refresh_target_path` de la ligne.
+    const replaces = parseReplaces(body.replaces)
 
     if (!generationId) {
       return NextResponse.json({ error: 'generationId est requis' }, { status: 400 })
+    }
+    // `!= null` et non `!== undefined` : une interface qui envoie
+    // `replaces: null` pour dire « aucune reprise » ne merite pas un 400.
+    if (body.replaces != null && !replaces) {
+      return NextResponse.json(
+        { error: '« replaces » doit nommer le chemin de la page à reprendre.' },
+        { status: 400 }
+      )
+    }
+    // Refuse AVANT la reclamation de la ligne : arbitrer plus tard laisserait
+    // une generation finie en « publishing » pour une requete qui n'avait aucune
+    // chance d'aboutir. `publishPage` porte la meme garde pour ses appelants non
+    // HTTP — elle reste la reference, celle-ci ne fait que repondre en 400 au
+    // lieu de 422.
+    if (replaces && force) {
+      return NextResponse.json(
+        {
+          error:
+            'Une reprise ciblée et un écrasement en aveugle sont deux décisions différentes : '
+            + 'choisissez l’une.',
+        },
+        { status: 400 }
+      )
     }
 
     const supabase = createServiceClient()
@@ -131,6 +168,17 @@ export async function POST(req: NextRequest) {
     })
 
     if (gate && !gate.publishable) {
+      // L'evidence avant le verdict, et les deux avant que la ligne soit garee.
+      //
+      // Sur ce chemin la barriere tourne ICI, pas dans `publishPage` : sans ces
+      // deux lignes un refus pour duplicat arriverait a l'ecran sans les pages
+      // contre lesquelles il a ete prononce, et un refus qui ne nomme pas la
+      // page en cause est inaffichable. `persistDuplicateVerdict` n'echoue
+      // jamais bruyamment — perdre la preuve ne doit pas perdre la page.
+      if (gate.duplicateVerdict) {
+        await persistDuplicateVerdict(generationId, gate.duplicateVerdict)
+      }
+
       const outcome = await markGenerationRejected(generationId, gate.reasons).catch(async (error) => {
         console.error('[POST /api/publish/generation] rejet non enregistré', error)
         // The claim left the row in `publishing`, a status nothing reads back.
@@ -176,6 +224,7 @@ export async function POST(req: NextRequest) {
       generationId,
       knownRemoteId: generation.published_page_id ?? undefined,
       force,
+      replaces: replaces ?? undefined,
       // The gate ran a few lines above, on this exact page. Running it twice
       // doubles the cost and can disagree with itself on a borderline article.
       gateAlreadyRan: true,
@@ -203,6 +252,12 @@ export async function POST(req: NextRequest) {
         {
           error: outcome.refusal?.message ?? outcome.error ?? 'Erreur de publication',
           refusal: outcome.refusal?.kind,
+          // La page contre laquelle le refus a ete prononce, quand le connecteur
+          // la connait. Seul le refus 'duplicat' en porte une : l'union est
+          // interrogee, pas castee, pour que l'ajout d'un cinquieme refus ne
+          // puisse pas faire apparaitre ici un champ qui n'existe pas.
+          targetUrl:
+            outcome.refusal && 'targetUrl' in outcome.refusal ? outcome.refusal.targetUrl : undefined,
           written: outcome.written,
         },
         { status: 422 }
@@ -228,4 +283,29 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ error: message }, { status: 500 })
   }
+}
+
+/**
+ * Le `replaces` du corps, ou `null` s'il n'en est pas un.
+ *
+ * Un chemin vide ou absent rend `null` plutot qu'un objet a chemin vide : c'est
+ * la correspondance EXACTE du chemin qui fait toute la propriete de surete de
+ * `replaces`, et une chaine vide ne correspond a rien — le connecteur la
+ * refuserait, mais l'appelant croirait avoir cible une page.
+ *
+ * `remoteId` n'a aucune colonne derriere lui : il n'existe que pour l'appelant
+ * qui le connait deja. Un identifiant non entier ou negatif est ignore plutot
+ * que refuse — le connecteur retrouve la page par son chemin de toute facon.
+ */
+function parseReplaces(value: unknown): { path: string; remoteId?: number } | null {
+  if (typeof value !== 'object' || value === null) return null
+
+  const { path, remoteId } = value as { path?: unknown; remoteId?: unknown }
+  const named = typeof path === 'string' ? path.trim() : ''
+  if (!named) return null
+
+  const knownId =
+    typeof remoteId === 'number' && Number.isInteger(remoteId) && remoteId > 0 ? remoteId : undefined
+
+  return knownId === undefined ? { path: named } : { path: named, remoteId: knownId }
 }

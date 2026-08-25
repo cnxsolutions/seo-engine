@@ -14,9 +14,10 @@ import {
   type GeneratedPage,
   type PageAnomaly,
 } from './openai'
-import { buildPageSlug } from '@/lib/seo/slug'
 import { createFullRagContextBuilder, type RagGenerationContext } from './full-rag-context'
-import { createRagContextBuilder, type RagEnrichmentContext } from './rag-enricher'
+import { buildExistingAwarenessBlock } from '@/lib/existing/prompt-block'
+import type { EditorialAction } from '@/src/core/domain/existing/action'
+import type { InventoryEntry, InventoryFreshness } from '@/src/core/domain/existing/inventory'
 
 export interface PageTypeGenerateOptions {
   pageType: PageType
@@ -36,8 +37,39 @@ export interface PageTypeGenerateOptions {
   pillarTitle?: string
   competitorNames?: string[]
   alternativeNames?: string[]
-  existingSlugs?: string[]
-  existingKeywords?: string[]
+  /**
+   * The address this page will have, already written to `generations.slug`.
+   *
+   * REQUIRED, and required is the point. The slug used to be an OUTPUT of the
+   * model, arbitrated against the existing pages only after the page had been
+   * paid for; it is now an INPUT, reserved before the first token, with the
+   * partial unique index (site_id, slug) as the arbiter. A caller that has
+   * nothing to reserve — the cluster route — resolves it with `resolveFreeSlug`
+   * and passes the result here.
+   */
+  reservedSlug: string
+  /**
+   * The pages of the site closest to this subject, ALREADY sorted by proximity.
+   *
+   * This module does not sort and does not fetch: it shows the first few. What
+   * it replaces was `existingSlugs` and `existingKeywords`, two arrays of bare
+   * strings from which no model could say how its page differed — a slug carries
+   * neither a title, nor a meta description, nor a promise.
+   */
+  inventoryNeighbours: readonly InventoryEntry[]
+  /**
+   * What this generation does to the existing site: create, refresh, or skip.
+   */
+  action: EditorialAction
+  /**
+   * How much the list above can be trusted, and since when.
+   *
+   * Carried alongside the neighbours rather than derived from them, because an
+   * empty list has two very different meanings — "this site has no page on the
+   * subject" and "we have not looked at this site in two months" — and the
+   * prompt must not present the second as the first.
+   */
+  inventoryFreshness: InventoryFreshness
   planBrief?: PlanItemBrief
   googleContext?: import('@/lib/google/context').GoogleContext | null
   enableRag?: boolean
@@ -428,8 +460,6 @@ export async function generateSeoPage(opts: PageTypeGenerateOptions): Promise<Ge
           secondaryKeywords: keywords,
           city,
           department,
-          existingSlugs: opts.existingSlugs || [],
-          existingKeywords: opts.existingKeywords || [],
           planBrief,
         })
       }
@@ -458,8 +488,17 @@ export async function generateSeoPage(opts: PageTypeGenerateOptions): Promise<Ge
     pillarTitle,
     competitorNames,
     alternativeNames,
-    existingSlugs: opts.existingSlugs || [],
-    existingKeywords: opts.existingKeywords || [],
+    // ONE block about what the site already carries, built once, here.
+    //
+    // Two used to travel in this same prompt: the "ANTI-DOUBLON (CRITIQUE)"
+    // section below and `buildAntiDuplicateBlock` inside the RAG context, on the
+    // same corpus, at two different truncations, under two different headings.
+    existingAwareness: buildExistingAwarenessBlock({
+      reservedSlug: opts.reservedSlug,
+      neighbours: opts.inventoryNeighbours,
+      action: opts.action,
+      freshness: opts.inventoryFreshness,
+    }),
     planBrief,
     googleContext: opts.googleContext || undefined,
     fullRagContext,
@@ -519,8 +558,8 @@ export function buildUserPrompt(opts: {
   pillarTitle?: string
   competitorNames: string[]
   alternativeNames: string[]
-  existingSlugs: string[]
-  existingKeywords: string[]
+  /** Already rendered by lib/existing/prompt-block.ts. Inserted verbatim. */
+  existingAwareness: string
   planBrief?: PlanItemBrief
   googleContext?: import('@/lib/google/context').GoogleContext
   fullRagContext?: RagGenerationContext
@@ -664,7 +703,7 @@ REPONDS EN JSON avec cette structure :
 {
   "title": "string (max 65 chars, format QUESTION longue traine ou intention specifique, mot-cle focus inclus)",
   "metaDescription": "string (max 155 chars, mot-cle focus + benefice + CTA + localisation)",
-  "slug": "string LONG-TAIL OBLIGATOIRE (6-10 mots separes par tirets, ex: depannage-plomberie-urgence-fuite-eau-troyes-centre-ville). JAMAIS de slug court a 2-3 mots.",
+  "slug": "recopie exactement le slug reserve annonce plus bas, sans rien y ajouter",
   "focusKeyword": "${mainKeyword}",
   "secondaryKeywords": ["MINIMUM 8 mots-cles: 2 variations geo (quartiers/communes voisines), 2 questions longue-traine, 2 'pres de moi/a proximite', 2 variantes service specifique"],
   "searchIntent": "${opts.searchIntent}",
@@ -693,17 +732,9 @@ REPONDS EN JSON avec cette structure :
   "readingTimeMinutes": number
 }
 
-ANTI-DOUBLON (CRITIQUE):
-${opts.existingSlugs.length > 0 ? `- Slugs DEJA UTILISES (NE PAS reutiliser): ${opts.existingSlugs.slice(0, 30).join(', ')}` : '- Pas de slugs existants connus.'}
-${opts.existingKeywords.length > 0 ? `- Mots-cles DEJA CIBLES (choisir un angle DIFFERENT): ${opts.existingKeywords.slice(0, 30).join(', ')}` : '- Pas de mots-cles existants connus.'}
+${opts.existingAwareness}
 
 STRATEGIE LONG-TAIL (OBLIGATOIRE):
-- Le slug DOIT faire entre 6 et 10 mots, separes par des tirets. JAMAIS moins de 5 mots.
-- Format slug: [service]-[specificite]-[intention]-[localisation-precise]
-- Exemples de slugs CORRECTS:
-  * "depannage-plomberie-urgence-fuite-eau-troyes-centre-ville"
-  * "installation-chauffe-eau-thermodynamique-prix-troyes-saint-andre"
-  * "meilleur-electricien-renovation-appartement-ancien-troyes-aube"
 - Le TITLE doit cibler une question ou intention longue-traine (ex: "Comment trouver un plombier pas cher a Troyes pour une fuite urgente?")
 - OBLIGATOIRE dans le contenu:
   * Au moins 3 variantes semantiques LSI du mot-cle focus
@@ -720,8 +751,8 @@ Contraintes critiques :
 4. Les liens externes pointent vers des sources REELLES et fiables (pas de liens inventes).
 5. Le maillage interne suggere des pages coherentes avec la strategie pilier/fille.
 6. Schema.org complet et valide, sans aucune propriete inventee.
-7. Le slug DOIT etre UNIQUE — ne pas reprendre un slug de la liste existante ci-dessus.
-8. Si le mot-cle focus est deja cible par une page existante, VARIER l'angle (longue traine, geo-specifique, intention differente).
+7. Le slug est celui qui t'est donne. Il est deja reserve : toute autre valeur sera ignoree.
+8. Si une page listee ci-dessus traite deja le sujet, VARIER l'angle (sous-intention, geo-specifique, question differente).
 
 RAPPEL FINAL — LES TROIS POINTS QUI DECIDENT DE LA VALIDATION DE CETTE PAGE :
 1. LONGUEUR : le texte reel de htmlContent (hors balises) doit tenir entre ${opts.adjustedLength} et
@@ -767,15 +798,18 @@ export function normalizeResponse(
     )
   }
 
-  // The page type is NOT part of a URL. The previous fallback pasted it in
-  // front — `child-taxi-troyes` — and the padding step added it a second time.
-  const slug = buildPageSlug({
-    proposed: firstNonEmpty(opts.planBrief?.proposed_slug, p.slug),
-    focusKeyword: firstNonEmpty(p.focusKeyword),
-    title: firstNonEmpty(p.title),
-    city: opts.city,
-    businessType: opts.businessType,
-  })
+  // COPIED, not rebuilt. This line is the whole inversion of the change.
+  //
+  // The address is already written to `generations.slug`, and the partial unique
+  // index (site_id, slug) has already guaranteed it is nobody else's. Running
+  // the factory again here could only produce a different answer — the model may
+  // have returned another slug, the brief may carry a third — and a page written
+  // at one address while another is reserved is a page published on top of
+  // something.
+  //
+  // Nothing creative is lost: `buildPageSlug` was already rerun on every
+  // response and never once consulted what the site already served.
+  const slug = opts.reservedSlug
 
   const title = firstNonEmpty(p.title, opts.planBrief?.proposed_title)
   if (!title) {

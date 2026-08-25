@@ -18,9 +18,10 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { getAuthenticatedClient, listConnectedSiteIds, type GoogleFetch } from './client'
-import { fetchProfile, fetchReviews, fetchPhotos, fetchPosts, fetchQA, summarizeReviews } from './gbp'
+import { fetchProfile, fetchReviews, fetchPhotos, fetchPosts, fetchQA, summarizeReviews, type GbpLocalPost } from './gbp'
 import { fetchPerformance } from './gsc'
 import { createServiceClient } from '@/lib/supabase'
+import { fingerprintSummary } from '@/src/core/domain/gbp/rotation'
 
 // ─── Tunables ────────────────────────────────────────────────────────────────
 
@@ -411,7 +412,20 @@ export async function syncGbpProfile(siteId: string): Promise<GbpSyncResult> {
         reviews: reviews.slice(0, 50),
         reviews_summary: summarizeReviews(reviews),
         photos: photos.slice(0, 20).map((p: { googleUrl: string; category: string }) => ({ url: p.googleUrl, category: p.category })),
-        posts: posts.slice(0, 10).map((p: { summary: string; createTime: string }) => ({ summary: p.summary, date: p.createTime })),
+        // `posts` N'EST PLUS ECRITE ICI, et la colonne N'EST PAS SUPPRIMEE.
+        //
+        // Ce jsonb etait ECRASE a chaque synchronisation (upsert sur site_id),
+        // reduit aux dix derniers posts, et la lecture jetait le champ `name` de
+        // l'API. Rien ne pouvait donc y etre trace : ni un post que nous aurions
+        // ecrit, ni un doublon, ni une ancre d'idempotence — la trace
+        // disparaissait a la synchro suivante. Les posts partent desormais dans
+        // `gbp_posts` avec `source = 'remote'` (voir `mirrorRemotePosts`
+        // ci-dessous), ou ils PERSISTENT et entrent dans le meme corpus
+        // d'anti-duplication que les notres.
+        //
+        // Cesser d'ecrire une colonne est reversible ; la supprimer ne l'est pas.
+        // Verifie avant la bascule : `rg "\.posts\b" app components lib src` ne
+        // montre AUCUN lecteur de ce champ.
         qa: qa.slice(0, 20).map((q: { text: string; topAnswers?: Array<{ text: string }> }) => ({
           question: q.text,
           answer: q.topAnswers?.[0]?.text || '',
@@ -424,14 +438,203 @@ export async function syncGbpProfile(siteId: string): Promise<GbpSyncResult> {
       return finishGbp({ ...base, status: 'failed', message: error.message, error: error.message }, startedAt)
     }
 
-    return finishGbp({ ...base, status: 'success', message: 'Fiche établissement à jour.' }, startedAt)
+    const mirror = await mirrorRemotePosts(siteId, posts)
+
+    return finishGbp(
+      {
+        ...base,
+        status: 'success',
+        // Le miroir des posts est rapporte, pas tu. Il ne fait PAS echouer la
+        // synchronisation — le profil, lui, est bien a jour, et renvoyer 'failed'
+        // ferait croire a une fiche non lue. Mais un corpus incomplet affaiblit
+        // l'anti-duplication en silence, et le silence est precisement ce que ce
+        // module existe pour supprimer.
+        message: mirror.problems.length > 0
+          ? `Fiche établissement à jour. ${mirror.problems.join(' ')}`
+          : 'Fiche établissement à jour.',
+      },
+      startedAt
+    )
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
     if (message.includes('Aucune connexion Google')) {
       return finishGbp({ ...base, status: 'skipped', skipReason: 'no_connection', message: 'Google non connecté pour ce site.' }, startedAt)
     }
-    return finishGbp({ ...base, status: 'failed', message, error: message }, startedAt)
+    const described = describeAuthFailure(message)
+    return finishGbp({ ...base, status: 'failed', message: described, error: described }, startedAt)
   }
+}
+
+/**
+ * Un jeton refuse et une panne de reseau ne demandent PAS la meme chose.
+ *
+ * `refreshAccessToken` (lib/google/auth.ts) jette une `Error` generique dont le
+ * message commence par « Google token refresh failed: » suivi de
+ * l'`error_description` de Google — « Token has been expired or revoked. » sur un
+ * `invalid_grant`. Une coupure reseau, elle, jette AVANT que cette phrase ne
+ * soit construite : le `fetch` echoue et le message est celui du transport.
+ *
+ * Ce prefixe est donc le discriminant, et il est fiable dans les deux sens : sa
+ * PRESENCE prouve que Google a repondu et a refuse le jeton — l'operateur doit
+ * reconnecter le compte, et aucune reprise automatique n'y changera rien. Son
+ * ABSENCE laisse le message brut, qui est le seul indice disponible sur une
+ * panne dont nous ne savons rien.
+ *
+ * Sans cette distinction, `gbp_last_sync_error` affichait la meme ligne
+ * illisible dans les deux cas, et un compte revoque ressemblait a une
+ * indisponibilite passagere — donc n'etait jamais reconnecte.
+ */
+function describeAuthFailure(message: string): string {
+  if (!message.includes('Google token refresh failed')) return message
+
+  return "Google a refusé de renouveler l'accès de ce site (jeton expiré ou révoqué) : "
+    + 'reconnectez le compte Google depuis la page du site. '
+    + `Ce n'est pas une panne réseau et aucune reprise automatique ne le corrigera. (${message})`
+}
+
+// ─── Le miroir des posts ecrits a la main ────────────────────────────────────
+
+export interface GbpPostMirrorReport {
+  /** Lignes `gbp_posts` creees en `source = 'remote'`. */
+  inserted: number
+  /** Lignes deja connues dont l'etat distant a ete rafraichi. */
+  refreshed: number
+  /** Posts que la fiche porte mais que ce miroir ne sait pas representer. */
+  ignored: number
+  /** Ce qui s'est mal passe, en francais, sans faire echouer la synchronisation. */
+  problems: string[]
+}
+
+/**
+ * Fait entrer dans `gbp_posts` les posts que le proprietaire a ecrits lui-meme.
+ *
+ * POURQUOI CES POSTS COMPTENT. L'anti-duplication compare un brouillon a tout ce
+ * que la fiche porte deja, sans distinguer la main qui l'a ecrit
+ * (src/core/domain/gbp/rotation.ts). Ignorer les posts du proprietaire ferait
+ * proposer au moteur de redire ce qu'il vient d'ecrire : redondant ET
+ * visiblement automatique, le pire post disponible.
+ *
+ * IDEMPOTENT PAR `name`, ET PAS PAR `upsert`. `gbp_posts_remote_name_key` est un
+ * index unique PARTIEL — `(site_id, remote_name) WHERE remote_name IS NOT NULL`
+ * — et PostgreSQL ne retient un index partiel pour un `ON CONFLICT (…)` que si
+ * la requete repete son predicat, ce que l'upsert de PostgREST ne sait pas
+ * exprimer. Un `upsert(onConflict: 'site_id,remote_name')` echouerait donc a
+ * chaque synchronisation avec « no unique or exclusion constraint matching ».
+ * La lecture prealable des noms deja connus fait le meme travail, en une requete
+ * de plus et sans dependre de ce que PostgREST sait ecrire.
+ *
+ * ON N'ECRASE JAMAIS UNE LIGNE 'engine'. Un post que le moteur a publie porte
+ * deja ce `remote_name` : le rencontrer ici n'en fait pas un post « du
+ * proprietaire ». Seuls son etat distant et son adresse de recherche sont
+ * rafraichis — `source`, `angle`, `summary` et `linked_generation_id` restent
+ * ceux que la publication a poses. Ecraser `summary` reecrirait notre propre
+ * journal avec ce que Google veut bien nous rendre.
+ *
+ * NE JETTE JAMAIS : une synchronisation declenchee par un clic ne doit pas
+ * pouvoir casser l'action qui l'a declenchee, et le profil, lui, est deja ecrit.
+ */
+export async function mirrorRemotePosts(
+  siteId: string,
+  remotePosts: GbpLocalPost[],
+): Promise<GbpPostMirrorReport> {
+  const report: GbpPostMirrorReport = { inserted: 0, refreshed: 0, ignored: 0, problems: [] }
+  if (remotePosts.length === 0) return report
+
+  // Un post sans `name` ne peut pas etre ancre — c'est la colonne de
+  // l'idempotence — et un post sans `summary` n'apporte rien au corpus (la
+  // colonne est NOT NULL, et un post-photo n'a aucun texte a comparer). Les deux
+  // sont comptes plutot que jetes en silence : « 3 ignores » est une information,
+  // un tableau plus court n'en est pas une.
+  const usable = remotePosts.filter(post =>
+    typeof post.name === 'string' && post.name.length > 0
+    && typeof post.summary === 'string' && post.summary.trim().length > 0)
+
+  report.ignored = remotePosts.length - usable.length
+  if (usable.length === 0) return report
+
+  try {
+    const supabase = createServiceClient()
+
+    const { data, error } = await supabase
+      .from('gbp_posts')
+      .select('id, remote_name')
+      .eq('site_id', siteId)
+      .not('remote_name', 'is', null)
+
+    if (error) throw new Error(error.message)
+
+    const known = new Map<string, string>()
+    for (const row of (data ?? []) as Array<{ id: string; remote_name: string | null }>) {
+      if (row.remote_name) known.set(row.remote_name, row.id)
+    }
+
+    const fresh = usable.filter(post => !known.has(post.name))
+
+    if (fresh.length > 0) {
+      const { error: insertError } = await supabase.from('gbp_posts').insert(
+        fresh.map(post => ({
+          site_id: siteId,
+          source: 'remote',
+          // NULL, et la base l'autorise (`gbp_posts_engine_needs_angle` ne
+          // contraint que 'engine') : le proprietaire n'a pas choisi dans notre
+          // liste d'angles, et lui en attribuer un occuperait un cooldown qui
+          // n'est pas le sien.
+          angle: null,
+          summary: post.summary,
+          summary_fingerprint: fingerprintSummary(post.summary),
+          language_code: post.languageCode || 'fr',
+          cta_action_type: post.callToAction?.actionType ?? null,
+          cta_url: post.callToAction?.url ?? null,
+          // 'published' : ces posts sont sur la fiche, c'est de la qu'ils
+          // viennent. Aucun autre statut ne serait vrai.
+          status: 'published',
+          remote_name: post.name,
+          remote_search_url: post.searchUrl ?? null,
+          remote_state: post.state ?? null,
+          published_at: post.createTime ?? null,
+        }))
+      )
+
+      if (insertError) {
+        // Y compris un 23505 : une synchronisation concurrente a insere la meme
+        // ligne entre la lecture et l'ecriture. Rien a corriger, rien a
+        // reessayer — le fait EST enregistre, par l'autre passage.
+        report.problems.push(`${fresh.length} post(s) de la fiche non enregistré(s) : ${insertError.message}.`)
+      } else {
+        report.inserted = fresh.length
+      }
+    }
+
+    // Les lignes deja connues : seul l'etat distant bouge. Une par une, parce
+    // que chacune vise un `id` different et qu'un upsert groupe reecrirait les
+    // colonnes que les lignes 'engine' possedent.
+    for (const post of usable) {
+      const rowId = known.get(post.name)
+      if (!rowId) continue
+
+      const { error: updateError } = await supabase
+        .from('gbp_posts')
+        .update({
+          remote_state: post.state ?? null,
+          remote_search_url: post.searchUrl ?? null,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', rowId)
+
+      if (updateError) {
+        report.problems.push(`état distant non rafraîchi pour un post de la fiche : ${updateError.message}.`)
+        continue
+      }
+      report.refreshed++
+    }
+  } catch (err) {
+    report.problems.push(
+      `Les posts de la fiche n'ont pas pu être enregistrés (${err instanceof Error ? err.message : String(err)}) : `
+      + "l'anti-duplication travaillera sans eux jusqu'à la prochaine synchronisation."
+    )
+  }
+
+  return report
 }
 
 /** Boolean form kept for the scheduler and app/api/sites/[id]/google/route.ts. */

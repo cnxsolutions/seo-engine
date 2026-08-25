@@ -29,8 +29,20 @@ import {
   ShieldAlert,
   Send,
 } from 'lucide-react'
-import { EmptyState, PageHeader, StatTile, StatusBadge } from '@/components/ui'
-import { SiteSwitcher, Tabs } from '@/components/charts'
+import {
+  Button,
+  EmptyState,
+  Notice,
+  PageHeader,
+  ReasonList,
+  StatTile,
+  StatusBadge,
+  splitReasons,
+  type NoticeTone,
+} from '@/components/ui'
+import { ConfirmModal, Modal, SiteSwitcher, Tabs } from '@/components/charts'
+import { REFUSAL_TITLES } from '@/lib/publishing/refusal-labels'
+import type { RefreshScope } from '@/src/core/domain/existing/action'
 import type {
   FeedCampaign,
   FeedGeneration,
@@ -38,6 +50,18 @@ import type {
   GenerationCounts,
   GenerationFeedResponse,
 } from '@/app/api/generate/feed-types'
+import type { InventoryResponse, InventorySummary } from '@/app/api/sites/[id]/inventory/types'
+// Un module PARTAGÉ, pas le composant privé de l'autre écran : /publish rend la
+// même ligne et la même preuve de doublon. Deux rendus divergeraient au premier
+// correctif — et un refus sans son objet n'est pas un refus, c'est une énigme.
+import {
+  DuplicateEvidence,
+  DuplicateFlag,
+  RowHead,
+  freshnessNotice,
+  hasDuplicateEvidence,
+  rowStyle,
+} from '@/app/(dashboard)/publish/queue-bits'
 
 const EMPTY_COUNTS: GenerationCounts = {
   pending: 0,
@@ -87,6 +111,7 @@ export default function GeneratePage() {
   const [filter, setFilter] = useState<FilterKey>('all')
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
+  const [inventory, setInventory] = useState<InventorySummary | null>(null)
 
   const [campaignId, setCampaignId] = useState('')
   const [city, setCity] = useState('')
@@ -129,6 +154,37 @@ export default function GeneratePage() {
     const timer = setInterval(load, 15000)
     return () => clearInterval(timer)
   }, [inFlight, load])
+
+  // Le régime de connaissance du SEUL site sélectionné. Hors de `load()`
+  // volontairement : celui-ci se rejoue à chaque filtre et toutes les quinze
+  // secondes tant qu'une génération est en vol, alors que la fraîcheur d'un
+  // inventaire se mesure en jours. `fields=paths` est le mode le plus léger de
+  // la route ; seul `summary` est lu.
+  //
+  // Un échec de lecture laisse `null`, donc aucun bandeau : on ne décrit pas une
+  // cécité qu'on n'a pas mesurée.
+  useEffect(() => {
+    if (!siteId) {
+      setInventory(null)
+      return
+    }
+
+    let cancelled = false
+    fetch(`/api/sites/${siteId}/inventory?fields=paths`)
+      .then((res) => (res.ok ? (res.json() as Promise<InventoryResponse>) : null))
+      .then((data) => {
+        if (!cancelled) setInventory(data?.summary ?? null)
+      })
+      .catch(() => {
+        if (!cancelled) setInventory(null)
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [siteId])
+
+  const freshness = freshnessNotice(inventory)
 
   const eligibleCampaigns = useMemo(
     () => campaigns.filter((c) => !siteId || c.site_id === siteId),
@@ -219,6 +275,22 @@ export default function GeneratePage() {
         <StatTile label="Refusées" value={counts.rejected} icon={ShieldAlert} />
         <StatTile label="Échecs" value={counts.failed} icon={AlertCircle} />
       </div>
+
+      {/*
+        Ce que le moteur ne voit pas de ce site, dit juste au-dessus du bouton
+        qui le lance. Il AVERTIT et ne désactive JAMAIS « Lancer » : le moteur ne
+        refuse pas de produire sur un site qu'il n'a pas vu — il vérifie chaque
+        adresse directement sur le site avant d'écrire — et l'interface n'a pas à
+        refuser à sa place.
+      */}
+      {freshness && (
+        <Notice
+          tone={freshness.tone}
+          title={freshness.title}
+          body={freshness.body}
+          action={{ label: 'Voir les pages connues', href: `/sites/${siteId}/existing` }}
+        />
+      )}
 
       {/* Launch */}
       <div className="panel" style={{ marginBottom: 'var(--space-6)' }}>
@@ -321,7 +393,12 @@ export default function GeneratePage() {
         ) : (
           <div className="panel__body--flush">
             {generations.map((g, index) => (
-              <GenerationRow key={g.id} generation={g} last={index === generations.length - 1} />
+              <GenerationRow
+                key={g.id}
+                generation={g}
+                last={index === generations.length - 1}
+                onChanged={load}
+              />
             ))}
           </div>
         )}
@@ -332,40 +409,37 @@ export default function GeneratePage() {
 
 // ─── Row ─────────────────────────────────────────────────────────────────────
 
-function GenerationRow({ generation: g, last }: { generation: FeedGeneration; last: boolean }) {
+function GenerationRow({
+  generation: g,
+  last,
+  onChanged,
+}: {
+  generation: FeedGeneration
+  last: boolean
+  /** Relit le flux : une bascule en mise à jour change le statut de la ligne. */
+  onChanged: () => void
+}) {
   const reasons = splitReasons(g.error_message)
+
+  // LE STATUT, PAS `refusal_kind`, dit si la page a été refusée.
+  //
+  // `persistDuplicateVerdict` (lib/pipeline/repository.ts) pose
+  // `refusal_kind = 'duplicat'` dès que les preuves BLOQUERAIENT — y compris en
+  // mode observation, sur une page qui part quand même. Brancher le titre de
+  // refus et les actions de reprise sur cette seule colonne, comme le faisait
+  // cette ligne, annoncerait « Publication refusée » et proposerait « Réessayer »
+  // sur une page en ligne : exactement le mensonge que la période d'observation
+  // doit éviter.
   const refused = g.status === 'rejected' || g.status === 'failed'
+  const verdict = g.duplicate_verdict
 
   return (
-    <div
-      style={{
-        padding: 'var(--space-4) var(--space-5)',
-        borderBottom: last ? undefined : '1px solid var(--line)',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: refused && reasons.length > 0 ? 'var(--space-3)' : 0,
-      }}
-    >
+    <div style={rowStyle(last, (refused && reasons.length > 0) || hasDuplicateEvidence(verdict))}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-4)', flexWrap: 'wrap' }}>
-        <div style={{ flex: 1, minWidth: 220 }}>
-          <div style={{ fontWeight: 600, fontSize: 'var(--fs-sm)' }}>
-            {g.title || g.slug || g.focus_keyword || g.city}
-          </div>
-          <div className="meta" style={{ marginTop: 2 }}>
-            {[
-              g.page_type,
-              g.city,
-              g.ai_model,
-              g.campaign?.name,
-              g.site?.name,
-              new Date(g.created_at).toLocaleDateString('fr-FR'),
-            ]
-              .filter(Boolean)
-              .join(' • ')}
-          </div>
-        </div>
+        <RowHead generation={g} extra={new Date(g.created_at).toLocaleDateString('fr-FR')} />
 
         <StatusBadge status={g.status} />
+        <DuplicateFlag verdict={verdict} />
 
         {/*
           "Published" covered four different states and showed one badge. A page
@@ -398,16 +472,25 @@ function GenerationRow({ generation: g, last }: { generation: FeedGeneration; la
         published as a bare article. They used to exist only in a log line.
       */}
       {(g.publish_notes?.length ?? 0) > 0 && (
-        <ReasonList title="À savoir sur cette publication" reasons={g.publish_notes ?? []} />
+        // `tone="info"`: these are notes, not refusals. The local copy this
+        // replaces painted the heading in --status-critical-text with a
+        // ShieldAlert whatever the case, so a stripped JSON-LD block read as a
+        // quality failure.
+        <ReasonList title="À savoir sur cette publication" reasons={g.publish_notes ?? []} tone="info" />
       )}
 
       {refused && reasons.length > 0 && (
         <ReasonList
           title={
-            g.status === 'rejected'
-              ? 'Refusée par le contrôle qualité'
-              : g.refusal_kind
-                ? REFUSAL_TITLE[g.refusal_kind] ?? 'Publication refusée'
+            // Le vocabulaire du refus est traduit dans lib/publishing, une seule
+            // fois. La table locale qui vivait ici était typée
+            // `Record<string, string>` et ne connaissait pas 'duplicat' : elle
+            // aurait rendu `undefined` en guise de titre sur le motif que ce lot
+            // ajoute.
+            g.refusal_kind
+              ? REFUSAL_TITLES[g.refusal_kind]
+              : g.status === 'rejected'
+                ? 'Refusée par le contrôle qualité'
                 : 'Échec'
           }
           reasons={reasons}
@@ -415,104 +498,346 @@ function GenerationRow({ generation: g, last }: { generation: FeedGeneration; la
       )}
 
       {/*
+        CONTRE QUOI cette page a été pesée. Rendu sur toutes les lignes, refusées
+        comme publiées : en mode observation le verdict tombe sur des pages qui
+        SONT parties, et c'est précisément ce volume que le propriétaire doit
+        pouvoir mesurer avant qu'une barrière ne se ferme dessus.
+      */}
+      {hasDuplicateEvidence(verdict) && <DuplicateEvidence verdict={verdict} />}
+
+      {/*
         A refusal is a decision waiting on a human, not an accident waiting on a
         retry. It lands in `failed`, which no job reads and which the publication
         screen does not list — so a slug collision parked a finished page for
         good, with nowhere in the product to act on it.
       */}
-      {g.refusal_kind && <RefusalActions generation={g} />}
+      {refused && g.refusal_kind && <RefusalActions generation={g} onChanged={onChanged} />}
     </div>
   )
 }
 
-const REFUSAL_TITLE: Record<string, string> = {
-  occupe: 'Publication refusée — l’URL est déjà occupée',
-  redirection: 'Publication refusée — l’URL redirige ailleurs',
-  identifiants: 'Publication refusée — identifiants manquants',
+// ─── Les issues d'un refus ───────────────────────────────────────────────────
+//
+// UN REFUS DE DOUBLON N'A AUCUNE ISSUE DESTRUCTRICE, et c'est la règle qui
+// gouverne tout ce bloc. `force: true` écraserait une page du propriétaire —
+// possiblement une page qui ranke — en réponse à un simple avertissement de
+// ressemblance ; l'offrir ici reviendrait à faire du pire résultat possible la
+// sortie la plus rapide. Il reste conditionné à 'occupe', où l'adresse en cause
+// est celle que le moteur avait lui-même réservée, et il passe désormais par une
+// confirmation qui NOMME ce qui sera remplacé.
+
+/** Jusqu'où va la mise à jour proposée. 'metadata' est le défaut : le moins destructeur. */
+const REFRESH_SCOPES: Array<{ value: RefreshScope; label: string }> = [
+  { value: 'metadata', label: 'Titre et description seulement' },
+  { value: 'content', label: 'Contenu complet' },
+]
+
+interface RefusalFeedback {
+  tone: NoticeTone
+  title: string
+  body: string
+  action?: { label: string; href: string }
 }
 
 /**
- * The two ways out of a refusal.
+ * Les pages que ce refus DÉSIGNE — jamais une adresse devinée.
  *
- * Retry is for "I fixed it on the site". Taking over is for "that page is
- * actually mine" — offered only for an occupied slug, and worded as what it
- * does, because it overwrites a page the engine did not write.
+ * Le verdict de doublon les nomme une par une. À défaut, un refus 'occupe' en
+ * connaît exactement une : celle que le slug réservé par cette génération
+ * occupe déjà. Sans l'un ni l'autre, il n'y a rien à rafraîchir et le bouton
+ * n'apparaît pas — proposer une bascule sans page visée serait un bouton mort.
  */
-function RefusalActions({ generation: g }: { generation: FeedGeneration }) {
-  const [busy, setBusy] = useState(false)
-  const [result, setResult] = useState<string | null>(null)
+function refreshTargets(g: FeedGeneration): string[] {
+  const named = (g.duplicate_verdict?.matches ?? []).map((match) => match.entryPath).filter(Boolean)
+  const unique = [...new Set(named)]
+  if (unique.length > 0) return unique
+  if (g.refusal_kind === 'occupe' && g.slug) return [g.slug.startsWith('/') ? g.slug : `/${g.slug}`]
+  return []
+}
 
-  const republish = async (force: boolean) => {
+/** L'URL servie d'une page en cause, telle que le verdict la porte — ou rien. */
+function targetUrlOf(g: FeedGeneration, path: string): string | null {
+  return (g.duplicate_verdict?.matches ?? []).find((match) => match.entryPath === path)?.entryUrl ?? null
+}
+
+/**
+ * Les sorties d'un refus, la destructrice EN DERNIER et jamais sur un doublon.
+ *
+ * Trois actes, trois endpoints, aucun bouton sans destination :
+ *  · « Réécrire le titre et la méta » → POST /api/generate. Le libellé nomme le
+ *    BUT ; la confirmation nomme l'ACTE et son coût, parce qu'aucun endpoint de
+ *    ce dépôt ne réécrit ces deux champs seuls (vérifié : POST /api/generate
+ *    appelle runCampaignNow et refait la page entière). Promettre l'inverse
+ *    ferait cliquer sur une dépense non annoncée.
+ *  · « Basculer en mise à jour de cette page » → POST /api/generations/refresh.
+ *    Le texte déjà payé est CONSERVÉ : ce qui était faux, c'est la destination,
+ *    pas le contenu. Rien n'est publié — la ligne rejoint la file des mises à
+ *    jour à valider, où elle attend un second clic humain.
+ *  · « Écraser la page existante » → POST /api/publish/generation { force }.
+ *    Seule action irréversible de l'écran : en `ghost`, en dernier, derrière une
+ *    ConfirmModal 'danger' dont le libellé répète le verbe.
+ */
+function RefusalActions({ generation: g, onChanged }: { generation: FeedGeneration; onChanged: () => void }) {
+  const [busy, setBusy] = useState(false)
+  const [feedback, setFeedback] = useState<RefusalFeedback | null>(null)
+  const [dialog, setDialog] = useState<'relaunch' | 'refresh' | 'overwrite' | null>(null)
+
+  const targets = useMemo(() => refreshTargets(g), [g])
+  const [targetPath, setTargetPath] = useState(targets[0] ?? '')
+  const [scope, setScope] = useState<RefreshScope>('metadata')
+
+  const duplicate = g.refusal_kind === 'duplicat'
+  const canSwitch = Boolean(g.site_id) && targets.length > 0
+  const canRelaunch = Boolean(g.campaign_id)
+  const chosenPath = targetPath || targets[0] || ''
+  const chosenUrl = chosenPath ? targetUrlOf(g, chosenPath) : null
+
+  /** Une seule lecture de réponse pour les trois appels : même forme, même repli. */
+  const send = async (url: string, body: Record<string, unknown>): Promise<Record<string, unknown> | null> => {
     setBusy(true)
-    setResult(null)
+    setFeedback(null)
     try {
-      const res = await fetch('/api/publish/generation', {
+      const res = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ generationId: g.id, force }),
+        body: JSON.stringify(body),
       })
-      const data = await res.json()
-      setResult(res.ok ? `Publiée : ${data.pageUrl ?? 'sans URL'}` : data.error || 'Nouvelle tentative refusée')
+      const data = (await res.json().catch(() => ({}))) as Record<string, unknown>
+      if (!res.ok) {
+        setFeedback({
+          tone: 'critical',
+          title: 'Action impossible',
+          body: typeof data.error === 'string' ? data.error : `Le serveur a répondu ${res.status}.`,
+        })
+        return null
+      }
+      return data
     } catch {
-      setResult('Impossible de joindre le serveur')
+      setFeedback({ tone: 'critical', title: 'Action impossible', body: 'Impossible de joindre le serveur.' })
+      return null
     } finally {
       setBusy(false)
+      setDialog(null)
     }
   }
 
-  return (
-    <div className="inset" style={{ display: 'grid', gap: 'var(--space-2)' }}>
-      <div style={{ display: 'flex', gap: 'var(--space-2)', flexWrap: 'wrap' }}>
-        <button className="btn-secondary" disabled={busy} onClick={() => republish(false)}>
-          Réessayer
-        </button>
+  const republish = async (force: boolean) => {
+    const data = await send('/api/publish/generation', { generationId: g.id, force })
+    if (!data) return
+    setFeedback({
+      tone: 'good',
+      title: 'Page publiée',
+      body: typeof data.pageUrl === 'string' ? data.pageUrl : 'La publication est passée, sans URL rapportée.',
+    })
+    onChanged()
+  }
 
-        {g.refusal_kind === 'occupe' && (
-          <button
-            className="btn-ghost"
+  const relaunch = async () => {
+    const data = await send('/api/generate', { campaign_id: g.campaign_id, city: g.city || undefined })
+    if (!data) return
+    setFeedback(
+      data.rejected
+        ? {
+            tone: 'warning',
+            title: 'Nouvelle page produite, puis refusée à son tour',
+            body: 'Elle apparaît dans la liste ci-dessous avec ses motifs.',
+          }
+        : {
+            tone: 'good',
+            title: 'Nouvelle génération lancée',
+            body: 'La page vient d’être réécrite, titre et description compris. Elle apparaît dans la liste ci-dessous.',
+          }
+    )
+    onChanged()
+  }
+
+  const switchToRefresh = async () => {
+    if (!g.site_id || !chosenPath) return
+    const data = await send('/api/generations/refresh', {
+      siteId: g.site_id,
+      targetPath: chosenPath,
+      scope,
+      sourceGenerationId: g.id,
+    })
+    if (!data) return
+    setFeedback({
+      tone: 'good',
+      title: `Cette page devient une mise à jour de ${chosenPath}`,
+      body: 'Le texte déjà écrit est conservé. Elle attend votre validation à l’étape 5 : rien n’a été remplacé.',
+      action: { label: 'Voir la file des mises à jour', href: '/publish' },
+    })
+    onChanged()
+  }
+
+  return (
+    <div className="inset" style={{ display: 'grid', gap: 'var(--space-3)' }}>
+      <div style={{ display: 'flex', gap: 'var(--space-2)', flexWrap: 'wrap' }}>
+        {/* « Réessayer » n'a de sens que sur un refus de destination : un
+            doublon ne se dissout pas en republiant le même texte au même
+            endroit, et le proposer ferait tourner l'opérateur en rond. */}
+        {!duplicate && (
+          <Button variant="secondary" disabled={busy} onClick={() => republish(false)}>
+            Réessayer
+          </Button>
+        )}
+
+        {duplicate && canRelaunch && (
+          <Button
+            variant="secondary"
             disabled={busy}
-            onClick={() => republish(true)}
-            title="Écrase la page existante. À n’utiliser que si cette page a bien été produite par le moteur."
+            onClick={() => setDialog('relaunch')}
+            title="Relance une génération complète sur cette commune : de nouveaux jetons sont dépensés."
           >
-            Reprendre la page existante
-          </button>
+            Réécrire le titre et la méta
+          </Button>
+        )}
+
+        {canSwitch && (
+          <Button variant={duplicate ? 'primary' : 'secondary'} icon={RefreshCw} disabled={busy} onClick={() => setDialog('refresh')}>
+            Basculer en mise à jour de cette page
+          </Button>
+        )}
+
+        {/* La seule action irréversible de l'écran : jamais principale, jamais
+            en premier dans l'ordre de lecture, et jamais offerte sur 'duplicat'. */}
+        {g.refusal_kind === 'occupe' && (
+          <Button
+            variant="ghost"
+            disabled={busy}
+            onClick={() => setDialog('overwrite')}
+            title="Remplace le contenu actuel de la page. Le moteur n’en garde aucune copie."
+          >
+            Écraser la page existante
+          </Button>
         )}
       </div>
 
-      {result && <p className="meta">{result}</p>}
+      {duplicate && (
+        <p className="meta" style={{ margin: 0 }}>
+          {canRelaunch || canSwitch
+            ? 'Aucune de ces issues ne remplace la page en cause. Le moteur ne supprime, ne fusionne et ne redirige aucune page.'
+            : 'Ce refus ne nomme aucune page existante et cette génération n’appartient à aucune campagne : il n’y a rien à rafraîchir ni à relancer depuis ici. Les motifs ci-dessus disent ce qui a été relevé.'}
+        </p>
+      )}
+
+      {feedback && (
+        <Notice
+          inline
+          tone={feedback.tone}
+          title={feedback.title}
+          body={feedback.body}
+          action={feedback.action}
+          onDismiss={() => setFeedback(null)}
+        />
+      )}
+
+      {dialog === 'relaunch' && (
+        <ConfirmModal
+          onClose={() => setDialog(null)}
+          onConfirm={relaunch}
+          busy={busy}
+          title="Réécrire le titre et la description ?"
+          body={
+            <>
+              Aucun endpoint de ce moteur ne réécrit ces deux champs seuls&nbsp;: la campagne est relancée sur
+              {g.city ? ` « ${g.city} »` : ' sa commune'} et la page est REDIGÉE ENTIÈREMENT, titre et
+              description compris. De nouveaux jetons sont dépensés, et la page en conflit n’est pas touchée.
+            </>
+          }
+          confirmLabel="Relancer une génération complète"
+        />
+      )}
+
+      {dialog === 'refresh' && (
+        <Modal
+          title={`Mettre à jour ${chosenPath}`}
+          subtitle="Le texte déjà écrit sera proposé comme mise à jour de cette page"
+          onClose={() => setDialog(null)}
+          size="md"
+          footer={
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 'var(--space-3)', flexWrap: 'wrap' }}>
+              <Button variant="ghost" onClick={() => setDialog(null)} disabled={busy}>
+                Annuler
+              </Button>
+              {/* `primary` et non `danger` : basculer en mise à jour n'écrit
+                  rien encore, et peindre en rouge un acte réversible userait
+                  le seul signal qui doit rester rare. */}
+              <Button variant="primary" loading={busy} onClick={switchToRefresh}>
+                Préparer la mise à jour
+              </Button>
+            </div>
+          }
+        >
+          <div className="panel__body" style={{ display: 'grid', gap: 'var(--space-4)' }}>
+            <p style={{ margin: 0, fontSize: 'var(--fs-sm)', color: 'var(--ink-secondary)', lineHeight: 'var(--lh-snug)' }}>
+              Au lieu d’ajouter une page, le contenu déjà écrit sera proposé comme mise à jour de la page
+              existante. Vous validerez l’avant/après à l’étape Publier&nbsp;: rien ne part maintenant.
+            </p>
+
+            <div className="inset" style={{ display: 'grid', gap: 'var(--space-2)' }}>
+              <div className="eyebrow">Page visée</div>
+              {targets.length > 1 ? (
+                <select
+                  className="input mono"
+                  value={chosenPath}
+                  onChange={(event) => setTargetPath(event.target.value)}
+                  aria-label="Page à mettre à jour"
+                  disabled={busy}
+                >
+                  {targets.map((path) => (
+                    <option key={path} value={path}>{path}</option>
+                  ))}
+                </select>
+              ) : (
+                <span className="chip">{chosenPath}</span>
+              )}
+              {chosenUrl ? (
+                <a className="btn-link truncate" href={chosenUrl} target="_blank" rel="noopener noreferrer">
+                  {chosenUrl} <ExternalLink size={12} aria-hidden="true" />
+                </a>
+              ) : (
+                <span className="meta">
+                  Adresse en ligne inconnue — le moteur n’a pas retenu d’URL pour cette page.
+                </span>
+              )}
+            </div>
+
+            <label className="field-label" htmlFor={`refresh-scope-${g.id}`}>Ce qui sera réécrit</label>
+            <select
+              id={`refresh-scope-${g.id}`}
+              className="input"
+              value={scope}
+              onChange={(event) => setScope(event.target.value as RefreshScope)}
+              disabled={busy}
+            >
+              {REFRESH_SCOPES.map((option) => (
+                <option key={option.value} value={option.value}>{option.label}</option>
+              ))}
+            </select>
+            <p className="meta" style={{ margin: 0 }}>
+              La portée est enregistrée sur la demande&nbsp;; c’est le moteur qui l’applique à la rédaction.
+            </p>
+          </div>
+        </Modal>
+      )}
+
+      {dialog === 'overwrite' && (
+        <ConfirmModal
+          tone="danger"
+          onClose={() => setDialog(null)}
+          onConfirm={() => republish(true)}
+          busy={busy}
+          title={`Écraser ${chosenPath || 'la page existante'} ?`}
+          body="Cette adresse est occupée par une page que le moteur n’a pas écrite. La remplacer efface son contenu actuel, et le moteur n’en garde aucune copie. Si cette page vous appartient et qu’elle est positionnée, préférez la mise à jour."
+          confirmLabel="Écraser la page"
+          cancelLabel="Annuler"
+        />
+      )}
     </div>
   )
 }
 
 // ─── Reasons ─────────────────────────────────────────────────────────────────
-
-function ReasonList({ title, reasons }: { title: string; reasons: string[] }) {
-  return (
-    <div className="inset">
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 'var(--space-1)',
-          fontSize: 'var(--fs-2xs)',
-          fontWeight: 650,
-          textTransform: 'uppercase',
-          letterSpacing: 'var(--ls-eyebrow)',
-          color: 'var(--status-critical-text)',
-          marginBottom: 'var(--space-2)',
-        }}
-      >
-        <ShieldAlert size={12} />
-        {title}
-      </div>
-      <ul style={{ margin: 0, paddingLeft: '1.1rem', fontSize: 'var(--fs-xs)', color: 'var(--ink-secondary)', lineHeight: 1.7 }}>
-        {reasons.map((reason, i) => (
-          <li key={i}>{reason}</li>
-        ))}
-      </ul>
-    </div>
-  )
-}
 
 function OutcomeBlock({ outcome }: { outcome: RunOutcome }) {
   return (
@@ -540,18 +865,4 @@ function OutcomeBlock({ outcome }: { outcome: RunOutcome }) {
       )}
     </div>
   )
-}
-
-/**
- * `error_message` is written as `Rejete par le pipeline : CODE: raison | CODE: raison`
- * (lib/pipeline/repository.ts). Split it back into the list it started as, and
- * drop the prefix — the badge already says the page was refused.
- */
-function splitReasons(message: string | null): string[] {
-  if (!message) return []
-  return message
-    .replace(/^Rejete par le pipeline\s*:\s*/i, '')
-    .split('|')
-    .map((part) => part.trim())
-    .filter(Boolean)
 }

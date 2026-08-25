@@ -1,24 +1,31 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
-import { ArrowRight, CalendarCheck, CheckCircle2, Globe2, Loader2, ScanSearch, Target, TriangleAlert } from 'lucide-react'
+import { ArrowRight, CalendarCheck, CheckCircle2, CircleCheck, Globe2, Loader2, ScanSearch, Target } from 'lucide-react'
 import { useRouter } from 'next/navigation'
-import { FormField, PageHeader } from '@/components/ui'
+import { FieldError, FormField, Notice, PageHeader, StatusBadge } from '@/components/ui'
+import { PAGE_TYPE_LABELS, pageTypeLabel } from '@/lib/types'
 import type { AnalysisRun, Campaign, CyclePlan, PageType, PlanItemBrief, Site, SiteType } from '@/lib/types'
+import type { InventoryResponse } from '@/app/api/sites/[id]/inventory/types'
+// LA normalisation qui a ÉCRIT les chemins de `takenPaths` (voir
+// app/api/sites/[id]/inventory/project.ts). Comparer avec une autre — celle de
+// lib/pipeline/internal-links, par exemple — ferait répondre « adresse libre »
+// à propos d'une adresse parfaitement prise. Le module est pur, sans un seul
+// import : il traverse le bundle client sans rien emporter.
+import { normalizeInventoryPath } from '@/src/core/domain/existing/inventory'
 import { AI_MODEL_OPTIONS, DEFAULT_GENERATION_MODEL } from '@/lib/ai/provider'
 
-const PAGE_TYPES: Array<{ value: PageType; label: string }> = [
-  { value: 'pillar', label: 'Pilier' },
-  { value: 'child', label: 'Fille' },
-  { value: 'local_pack', label: 'Local Pack' },
-  { value: 'alternative', label: 'Alternative' },
-  { value: 'comparative', label: 'Comparatif' },
-]
+// The select and the plan table used to read a local label table that said
+// 'Fille' and 'Local Pack' where the calendar and the strategy list said
+// 'Enfant' and 'Local pack'. Both now read PAGE_TYPE_LABELS from lib/types, so
+// the wording of a page type is decided in exactly one place. The ORDER of the
+// select stays here — it is an editorial sequence (pillar first), not a naming.
+const PAGE_TYPE_ORDER: PageType[] = ['pillar', 'child', 'local_pack', 'alternative', 'comparative']
 
-/** Same wording as the strategy list and the calendar — one label per page type. */
-const PAGE_TYPE_LABELS: Record<string, string> = Object.fromEntries(
-  PAGE_TYPES.map((type) => [type.value, type.label])
-)
+const PAGE_TYPES: Array<{ value: PageType; label: string }> = PAGE_TYPE_ORDER.map((value) => ({
+  value,
+  label: PAGE_TYPE_LABELS[value],
+}))
 
 const FREQUENCIES = [
   { value: 'daily', label: 'Tous les jours' },
@@ -28,6 +35,58 @@ const FREQUENCIES = [
 ]
 
 type Step = 0 | 1 | 2 | 3
+
+// ─── Validation des adresses saisies ─────────────────────────────────────────
+//
+// L'ÉTAPE DU PLAN EST LE SEUL ENDROIT DU PARCOURS où un humain retape une URL à
+// la main. Tout le travail de réservation d'adresse fait en amont s'y annule
+// silencieusement : jusqu'ici le champ était confronté à rien, et une adresse
+// déjà prise partait en production pour être refusée à la publication — après
+// avoir été payée.
+//
+// ZÉRO APPEL RÉSEAU PAR FRAPPE. L'inventaire est chargé UNE fois, à l'ouverture
+// de l'étape, par le mode `?fields=paths` qui ne rend que l'ensemble des chemins
+// pris. La comparaison se fait ensuite en mémoire. Un GET par caractère sur une
+// route paginée serait un flood, et un debounce à régler serait une seconde
+// mécanique à maintenir pour le même résultat.
+
+type SlugVerdict = 'empty' | 'checking' | 'unverified' | 'free' | 'taken' | 'duplicate-in-plan'
+
+/**
+ * L'inventaire tel que cette étape en a besoin, et ses trois états.
+ *
+ * 'unavailable' n'est PAS une erreur bloquante : réseau coupé, 500, site
+ * inconnu — on le dit et on laisse passer. Un bouton mort devant un opérateur
+ * qui a un plan à lancer est pire qu'une vérification manquante, et le moteur
+ * vérifiera de toute façon chaque adresse directement sur le site avant
+ * d'écrire.
+ */
+type InventoryCheck =
+  | { state: 'loading' }
+  | { state: 'unavailable' }
+  | { state: 'ready'; taken: Set<string>; blind: boolean }
+
+/**
+ * Ce qu'on peut PROUVER d'une adresse saisie, jamais plus.
+ *
+ * `verified` est faux en régime aveugle : `takenPaths` n'y contient alors que
+ * ce que le moteur a lui-même publié, et rendre « adresse libre » certifierait
+ * une vérification qui n'a pas eu lieu. La collision ENTRE DEUX BRIEFS du même
+ * plan, elle, reste vraie dans tous les régimes — elle ne dépend d'aucun
+ * inventaire, et c'est une collision qui n'existe encore dans aucune base.
+ */
+function slugState(slug: string, taken: Set<string>, otherSlugs: string[], verified: boolean): SlugVerdict {
+  const path = normalizeInventoryPath(slug)
+  if (path === '' || path === '/') return 'empty'
+  if (verified && taken.has(path)) return 'taken'
+  if (otherSlugs.some((other) => normalizeInventoryPath(other) === path)) return 'duplicate-in-plan'
+  return verified ? 'free' : 'unverified'
+}
+
+/** Les deux verdicts qui interdisent de lancer le cycle. */
+function blocks(verdict: SlugVerdict | undefined): boolean {
+  return verdict === 'taken' || verdict === 'duplicate-in-plan'
+}
 
 export default function NewStrategyWorkflowPage() {
   const router = useRouter()
@@ -68,6 +127,7 @@ export default function NewStrategyWorkflowPage() {
   const [items, setItems] = useState<PlanItemBrief[]>([])
   const [loading, setLoading] = useState('')
   const [error, setError] = useState('')
+  const [inventory, setInventory] = useState<InventoryCheck>({ state: 'loading' })
 
   useEffect(() => {
     fetch('/api/sites').then((res) => res.json()).then((data) => {
@@ -80,6 +140,67 @@ export default function NewStrategyWorkflowPage() {
   const selectedSite = useMemo(
     () => sites.find((site) => site.id === selectedSiteId) || null,
     [selectedSiteId, sites]
+  )
+
+  // UN SEUL aller-retour, à l'ouverture de l'étape du plan. Pas à chaque frappe,
+  // pas à chaque rendu : l'ensemble des chemins pris tient en quelques
+  // kilo-octets de chaînes et la comparaison se fait ensuite en mémoire.
+  useEffect(() => {
+    if (step !== 3 || !selectedSiteId) return
+
+    let cancelled = false
+    setInventory({ state: 'loading' })
+
+    fetch(`/api/sites/${selectedSiteId}/inventory?fields=paths`)
+      .then((res) => (res.ok ? (res.json() as Promise<InventoryResponse>) : null))
+      .then((data) => {
+        if (cancelled) return
+        if (!data) {
+          setInventory({ state: 'unavailable' })
+          return
+        }
+        setInventory({
+          state: 'ready',
+          taken: new Set(data.takenPaths ?? []),
+          blind: data.summary.freshness === 'blind',
+        })
+      })
+      .catch(() => {
+        if (!cancelled) setInventory({ state: 'unavailable' })
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [step, selectedSiteId])
+
+  /**
+   * Le verdict de chaque adresse, recalculé À LA FRAPPE mais SANS RÉSEAU.
+   *
+   * Le coût est quadratique en nombre de briefs — une quinzaine par cycle : la
+   * comparaison croisée reste largement sous la milliseconde, et l'écrire ainsi
+   * évite un index à maintenir en parallèle des lignes éditées.
+   */
+  const slugVerdicts = useMemo(() => {
+    const verdicts = new Map<string, SlugVerdict>()
+
+    for (const item of items) {
+      if (inventory.state === 'loading') {
+        verdicts.set(item.id, 'checking')
+        continue
+      }
+      const others = items.filter((other) => other.id !== item.id).map((other) => other.proposed_slug)
+      const taken = inventory.state === 'ready' ? inventory.taken : new Set<string>()
+      const verified = inventory.state === 'ready' && !inventory.blind
+      verdicts.set(item.id, slugState(item.proposed_slug, taken, others, verified))
+    }
+
+    return verdicts
+  }, [items, inventory])
+
+  const collisions = useMemo(
+    () => [...slugVerdicts.values()].filter(blocks).length,
+    [slugVerdicts]
   )
 
   const canContinueSite = createSiteMode
@@ -235,21 +356,9 @@ export default function NewStrategyWorkflowPage() {
 
       <Stepper step={step} />
 
-      {error && (
-        <div
-          className="glass-card"
-          style={{
-            borderLeft: '3px solid var(--status-critical)', marginBottom: 'var(--space-4)',
-            display: 'flex', gap: 'var(--space-3)', alignItems: 'flex-start',
-          }}
-        >
-          <TriangleAlert size={16} color="var(--status-critical)" style={{ flexShrink: 0, marginTop: 2 }} />
-          <div style={{ minWidth: 0 }}>
-            <strong style={{ fontSize: 'var(--fs-sm)' }}>Étape impossible</strong>
-            <p style={{ margin: '0.25rem 0 0', fontSize: 'var(--fs-sm)', color: 'var(--ink-secondary)' }}>{error}</p>
-          </div>
-        </div>
-      )}
+      {/* La quatrième bannière écrite à la main du dépôt, remplacée par
+          l'exemplaire partagé : même ton, même glyphe, une seule définition. */}
+      {error && <Notice tone="critical" title="Étape impossible" body={error} />}
 
       {step === 0 && (
         <div className="glass-card" style={{ display: 'grid', gap: '1rem' }}>
@@ -348,7 +457,18 @@ export default function NewStrategyWorkflowPage() {
       {step === 2 && analysisRun && (
         <div className="glass-card" style={{ display: 'grid', gap: '1rem' }}>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '0.75rem' }}>
-            <Stat label="Pages site" value={analysisRun.analysis_data.site.pagesCrawled} />
+            {/* « 0 pages » sur un site que l'analyse n'a pas su lire annoncerait
+                au propriétaire que son site est vide — au moment précis où le
+                moteur s'apprête à écrire par-dessus ses pages. */}
+            <Stat
+              label="Pages site"
+              value={analysisRun.analysis_data.site.pagesCrawled || 'Aucune page lue'}
+              hint={
+                analysisRun.analysis_data.site.pagesCrawled === 0
+                  ? 'L’analyse n’a extrait aucune page : plan du site introuvable ou accès bloqué. Le moteur produira sans connaître l’existant.'
+                  : undefined
+              }
+            />
             <Stat label="Concurrents" value={analysisRun.analysis_data.competitors.length} />
             <Stat label="Mots-clés manquants" value={analysisRun.analysis_data.gapAnalysis.missingKeywords.length} />
             <Stat label="Opportunités locales" value={analysisRun.analysis_data.gapAnalysis.localOpportunities.length} />
@@ -377,11 +497,24 @@ export default function NewStrategyWorkflowPage() {
             </div>
             <CheckCircle2 size={20} color="var(--status-good)" />
           </div>
+
+          {/* Inventaire illisible : on le DIT, on ne bloque RIEN. Le moteur
+              vérifiera chaque adresse directement sur le site avant d'écrire. */}
+          {inventory.state === 'unavailable' && (
+            <Notice
+              inline
+              tone="warning"
+              title="Vérification des URL impossible"
+              body="L’inventaire du site n’a pas pu être lu : les collisions d’URL ne sont pas vérifiées ici. Le moteur les vérifiera avant d’écrire."
+            />
+          )}
+
           <div className="scroll-x">
             <table className="data-table">
               <thead>
                 <tr>
                   <th>Date</th>
+                  <th>Action</th>
                   <th>Type</th>
                   <th>Intention</th>
                   <th>Titre</th>
@@ -391,23 +524,75 @@ export default function NewStrategyWorkflowPage() {
                 </tr>
               </thead>
               <tbody>
-                {items.map((item) => (
-                  <tr key={item.id}>
-                    <td style={{ whiteSpace: 'nowrap' }}>{item.scheduled_date}</td>
-                    <td><span className="chip">{PAGE_TYPE_LABELS[item.page_type] ?? item.page_type}</span></td>
-                    <td>{item.search_intent || '—'}</td>
-                    <td><input value={item.proposed_title} onChange={(event) => updatePlanItem(item.id, { proposed_title: event.target.value })} className="input" style={{ minWidth: 220 }} /></td>
-                    <td><input value={item.proposed_slug} onChange={(event) => updatePlanItem(item.id, { proposed_slug: event.target.value })} className="input mono" style={{ minWidth: 220 }} /></td>
-                    <td><input value={item.target_keyword} onChange={(event) => updatePlanItem(item.id, { target_keyword: event.target.value })} className="input" style={{ minWidth: 180 }} /></td>
-                    <td className="meta" style={{ minWidth: 220 }}>{item.outline.slice(0, 3).join(' / ')}</td>
-                  </tr>
-                ))}
+                {items.map((item) => {
+                  const action = item.action
+                  const verdict = slugVerdicts.get(item.id)
+
+                  return (
+                    <tr key={item.id}>
+                      <td style={{ whiteSpace: 'nowrap' }}>{item.scheduled_date}</td>
+                      <td><ActionBadge kind={action?.kind ?? 'create'} /></td>
+                      <td><span className="chip">{pageTypeLabel(item.page_type)}</span></td>
+                      <td>{item.search_intent || '—'}</td>
+                      <td><input value={item.proposed_title} onChange={(event) => updatePlanItem(item.id, { proposed_title: event.target.value })} className="input" style={{ minWidth: 220 }} /></td>
+                      <td style={{ minWidth: 240 }}>
+                        {/* On ne choisit PAS l'adresse d'une page qui existe
+                            déjà : une ligne de mise à jour rend son chemin
+                            cible en lecture seule. */}
+                        {action?.kind === 'refresh' ? (
+                          <>
+                            <div className="mono meta">{action.targetPath}</div>
+                            <div className="meta">Adresse existante — elle n’est pas modifiable ici.</div>
+                          </>
+                        ) : (
+                          <>
+                            <input
+                              value={item.proposed_slug}
+                              onChange={(event) => updatePlanItem(item.id, { proposed_slug: event.target.value })}
+                              className="input mono"
+                              style={{ minWidth: 220 }}
+                              aria-invalid={blocks(verdict) || undefined}
+                              aria-describedby={`slug-hint-${item.id}`}
+                            />
+                            <div id={`slug-hint-${item.id}`}>
+                              <SlugHint verdict={verdict} />
+                            </div>
+                          </>
+                        )}
+                      </td>
+                      <td><input value={item.target_keyword} onChange={(event) => updatePlanItem(item.id, { target_keyword: event.target.value })} className="input" style={{ minWidth: 180 }} /></td>
+                      <td className="meta" style={{ minWidth: 220 }}>{item.outline.slice(0, 3).join(' / ')}</td>
+                    </tr>
+                  )
+                })}
               </tbody>
             </table>
           </div>
+
+          {/* La garde est posée à l'endroit exact où l'humain peut la
+              contourner. Laisser passer ici annulerait toute la réservation
+              d'adresse faite en amont : la page serait écrite, payée, puis
+              refusée à la publication. */}
+          {collisions > 0 && (
+            <p className="meta" style={{ margin: 0, color: 'var(--status-critical-text)' }}>
+              {collisions} adresse{collisions > 1 ? 's' : ''} déjà prise{collisions > 1 ? 's' : ''}. Corrigez-les
+              avant de lancer le cycle — sinon la page sera écrite puis refusée à la publication, après avoir
+              été payée.
+            </p>
+          )}
+
           <div style={{ display: 'flex', justifyContent: 'space-between' }}>
             <button onClick={() => setStep(2)} className="btn-ghost">Retour analyse</button>
-            <button onClick={confirmPlan} disabled={loading === 'confirm'} className="btn-primary">
+            <button
+              onClick={confirmPlan}
+              disabled={loading === 'confirm' || collisions > 0}
+              className="btn-primary"
+              title={
+                collisions > 0
+                  ? `${collisions} adresse${collisions > 1 ? 's' : ''} en collision : corrigez-les avant de lancer le cycle.`
+                  : undefined
+              }
+            >
               {loading === 'confirm' ? <Loader2 size={15} className="animate-spin" /> : <CheckCircle2 size={15} />} Confirmer et lancer le cycle
             </button>
           </div>
@@ -415,6 +600,63 @@ export default function NewStrategyWorkflowPage() {
       )}
     </div>
   )
+}
+
+/**
+ * Ce que ce brief fait au site qui existe déjà.
+ *
+ * `StatusBadge` porte déjà 'create' et 'refresh' dans le vocabulaire partagé —
+ * on le lit, on n'écrit pas un second dictionnaire de deux entrées ici. Un plan
+ * antérieur à ce lot ne porte aucun verdict : il s'affiche en « Nouvelle page »,
+ * ce qu'il était, sans qu'on lui invente une décision rétroactive.
+ */
+function ActionBadge({ kind }: { kind: 'create' | 'refresh' | 'skip' }) {
+  if (kind === 'skip') return <span className="badge badge-muted">Écartée</span>
+  return <StatusBadge status={kind} />
+}
+
+/**
+ * Trois états de champ, jamais deux — et le vert n'apparaît que sur une
+ * vérification qui a réellement eu lieu.
+ *
+ * Le message de collision dit ce que la donnée PROUVE : `takenPaths` mélange les
+ * pages en ligne et les adresses réservées par des générations qui n'ont rien
+ * publié. Écrire « cette page existe déjà sur le site » serait faux une fois sur
+ * deux.
+ */
+function SlugHint({ verdict }: { verdict: SlugVerdict | undefined }) {
+  switch (verdict) {
+    case 'taken':
+      return (
+        <FieldError>
+          Cette URL est déjà prise sur ce site (page en ligne ou adresse réservée par une génération).
+          Changez-la, ou laissez le moteur mettre cette page à jour plutôt que d’en créer une nouvelle.
+        </FieldError>
+      )
+    case 'duplicate-in-plan':
+      return <FieldError>Deux briefs de ce plan visent la même URL.</FieldError>
+    case 'empty':
+      return <FieldError>Une adresse est nécessaire : le moteur ne sait pas où écrire cette page.</FieldError>
+    case 'free':
+      // Un glyphe ET un mot : la couleur n'est jamais le seul porteur du verdict.
+      return (
+        <p className="meta" style={{ margin: 'var(--space-1) 0 0', display: 'flex', alignItems: 'center', gap: 4 }}>
+          <CircleCheck size={11} color="var(--status-good)" aria-hidden="true" /> Adresse libre.
+        </p>
+      )
+    case 'checking':
+      return <p className="meta" style={{ margin: 'var(--space-1) 0 0' }}>Vérification…</p>
+    default:
+      // Régime aveugle, ou inventaire illisible. Surtout PAS le badge vert : une
+      // ignorance affichée comme une garantie est le seul mensonge que cet
+      // écran puisse encore dire.
+      return (
+        <p className="meta" style={{ margin: 'var(--space-1) 0 0' }}>
+          Le moteur ne sait pas quelles adresses sont prises sur ce site. Celle-ci sera vérifiée directement
+          sur le site avant l’écriture.
+        </p>
+      )
+  }
 }
 
 function Stepper({ step }: { step: Step }) {
@@ -445,11 +687,15 @@ function Stepper({ step }: { step: Step }) {
   )
 }
 
-function Stat({ label, value }: { label: string; value: number }) {
+/** `value` accepte une chaîne pour qu'un compteur puisse dire l'inconnu au lieu
+ *  de rendre un 0 qui se lirait comme une mesure. Composant local à ce fichier :
+ *  aucun autre appelant n'est concerné par l'élargissement. */
+function Stat({ label, value, hint }: { label: string; value: string | number; hint?: string }) {
   return (
     <div className="stat-card">
       <div className="stat-value" style={{ fontSize: 'var(--fs-xl)' }}>{value}</div>
       <div className="stat-label">{label}</div>
+      {hint && <div className="meta" style={{ marginTop: 'var(--space-1)' }}>{hint}</div>}
     </div>
   )
 }

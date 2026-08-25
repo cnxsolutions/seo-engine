@@ -1,14 +1,24 @@
 // ─────────────────────────────────────────────────────────────────────────────
-// Text Utilities Tests
-// SEO Engine - Unit Tests
+// text-utils — la boite a outils textuelle du domaine
+//
+// Rassemble les deux suites qui existaient de part et d autre du deplacement :
+// celle qui couvrait les fonctions d extraction quand le module vivait dans
+// src/adapters/rag/validation, et celle ecrite au moment ou il est descendu
+// dans le domaine (normalisation francaise, vocabulaire d intention).
+//
+// Un module, un fichier de test. Le shim qui justifiait la separation a ete
+// supprime au lot 5 : le garder aurait laisse deux suites diverger au premier
+// correctif.
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { describe, it, expect } from 'vitest'
 import {
+  INTENT_MARKERS,
   containsKeywordPhrase,
   contentTokens,
   countImages,
   countKeywordOccurrences,
+  detectIntents,
   estimatePixelWidth,
   extractHeadingOutline,
   extractLinks,
@@ -16,11 +26,13 @@ import {
   keywordTokenCoverage,
   normalizeForMatch,
   splitSentences,
+  stripAccents,
   stripHtmlToText,
   tokenizeWords,
   wordShingles,
 } from './text-utils'
 
+// ─── Extraction et mesure (suite historique) ─────────────────────────────────
 describe('stripHtmlToText', () => {
   it('turns block tags into sentence boundaries', () => {
     const text = stripHtmlToText('<h2>Un titre</h2><p>Une phrase</p><p>Une autre</p>')
@@ -153,5 +165,55 @@ describe('shingles and similarity primitives', () => {
       'maison',
       'outils',
     ])
+  })
+})
+
+// ─── Normalisation et intentions (apport du deplacement) ─────────────────────
+
+describe('normalisation', () => {
+  it('retire les accents sans toucher au reste', () => {
+    expect(stripAccents('référencement à Troyes')).toBe('referencement a Troyes')
+  })
+
+  it('retire accents et ponctuation, et rend une forme stable', () => {
+    const once = normalizeForMatch("L'électricité, c'est cher !")
+
+    expect(once).toBe('l electricite c est cher')
+    // Idempotence : la forme normalisee est comparee a d'autres formes
+    // normalisees. Si un second passage la changeait, deux textes identiques
+    // pourraient scorer differemment selon le nombre de normalisations subies.
+    expect(normalizeForMatch(once)).toBe(once)
+  })
+
+  it('rapproche deux ecritures du meme mot-cle', () => {
+    expect(normalizeForMatch('Plomberie à Troyes')).toBe(normalizeForMatch('plomberie a troyes'))
+  })
+})
+
+describe('detectIntents', () => {
+  it('reconnait une intention transactionnelle', () => {
+    const intents = detectIntents(normalizeForMatch('Prix et devis pour un dépannage'))
+
+    expect(intents.has('transactional')).toBe(true)
+  })
+
+  it('reconnait une intention locale', () => {
+    const intents = detectIntents(normalizeForMatch('Un taxi à proximité de la gare'))
+
+    expect(intents.has('local')).toBe(true)
+  })
+
+  it('ne reconnait rien dans un texte qui ne vise aucune intention', () => {
+    expect(detectIntents(normalizeForMatch('Le plombier repare la maison'))).toEqual(new Set())
+  })
+
+  it('rend le meme verdict a chaque appel', () => {
+    // Un marqueur porteur du drapeau `g` conserverait son lastIndex : la
+    // deuxieme detection repartirait du milieu du texte precedent et
+    // manquerait l'intention. Ce test tombe le jour ou quelqu'un ajoute `g`.
+    const text = normalizeForMatch('Tarif du depannage a proximite')
+
+    expect(detectIntents(text)).toEqual(detectIntents(text))
+    expect(INTENT_MARKERS.every(marker => !marker.pattern.global)).toBe(true)
   })
 })

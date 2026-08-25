@@ -95,4 +95,4 @@ export {
   estimatePixelWidth,
   type HeadingNode,
   type ExtractedLinks,
-} from './text-utils'
+} from '@/src/core/domain/text/text-utils'

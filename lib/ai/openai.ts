@@ -1,5 +1,6 @@
 import OpenAI from 'openai'
 import { generateJson } from './provider'
+import { buildPageSlug } from '@/lib/seo/slug'
 
 let client: OpenAI | null = null
 
@@ -431,7 +432,18 @@ export async function generateLocalSeoPage(opts: GeneratePageOptions): Promise<G
   return {
     title: title || `${businessType} ${city} | ${businessName}`,
     metaDescription: metaDescription || `${businessType} ${city} avec ${businessName}.`,
-    slug: firstNonEmpty(parsed.slug) || slugify(`${businessType}-${city}`),
+    // Through the factory, never verbatim. `parsed.slug` used to be taken as
+    // written whenever it was non-empty, so /api/optimize was a way round every
+    // rule the other paths obey — the seven-word cap, the 75-character cap, the
+    // town at the end, the page_type tokens stripped out. A rule one caller can
+    // skip is not a rule, it is a habit.
+    slug: buildPageSlug({
+      proposed: firstNonEmpty(parsed.slug),
+      focusKeyword: firstNonEmpty(parsed.focusKeyword),
+      title: firstNonEmpty(parsed.title),
+      city,
+      businessType,
+    }),
     focusKeyword: firstNonEmpty(parsed.focusKeyword) || `${businessType} ${city}`,
     secondaryKeywords: parsed.secondaryKeywords ?? [],
     ogTitle: firstNonEmpty(parsed.ogTitle, parsed.title) || `${businessType} ${city}`,
@@ -540,6 +552,10 @@ sections trop courtes avec du contenu utile ; ne rallonge jamais par de la repet
 `.trim()
 }
 
-function slugify(value: string) {
-  return value.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
-}
+// The private `slugify` that used to live here is gone.
+//
+// It was the second slug factory in the repository, and a second factory is a
+// second policy: this one knew nothing of the word cap, the character cap, the
+// town at the end or the `page_type` tokens that must never reach a URL. As
+// long as it existed, any rule added to lib/seo/slug.ts was one caller away
+// from being optional. One address, one factory.

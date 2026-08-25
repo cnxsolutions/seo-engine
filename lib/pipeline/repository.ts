@@ -10,100 +10,19 @@
 // pipeline-internal data access, and lib/db.ts is a shared surface.
 
 import { createServiceClient } from '@/lib/supabase'
-import type { Generation, PageType } from '@/lib/types'
-import { buildKnownPathSet } from './internal-links'
-import type { InternalLinkTarget } from '@/lib/seo/internal-linking'
+import { isBlocking, type DuplicateVerdict } from '@/src/core/domain/existing/verdict'
 
-/**
- * How many published pages may be offered to the linker as candidates.
- *
- * The linker only injects an anchor when its text already appears in the page,
- * so a long list costs a few regex passes and nothing else — but it is still a
- * list that gets rendered into a navigation block, and a hundred "see also"
- * entries is not internal linking, it is a sitemap.
- */
-const MAX_LINK_CANDIDATES = 40
-
-export interface SiteLinkContext {
-  /**
-   * Normalised paths of every page that really exists on the site: crawled
-   * pages plus already published generations.
-   */
-  knownPaths: Set<string>
-  /** Published generations, enough of each row for `buildLinkGraph`. */
-  publishedGenerations: Generation[]
-  /** Real, existing destinations the linker may propose. */
-  candidates: InternalLinkTarget[]
-  counts: { crawledPages: number; publishedGenerations: number }
-}
-
-/**
- * Read what exists on the site, once, before any link is validated.
- *
- * `site_pages` is the crawl of the client's own site; `generations` in
- * `published` are the pages this engine put online. Anything outside those two
- * sets does not exist as far as this site is concerned, whatever the model
- * believed when it wrote the href.
- */
-export async function loadSiteLinkContext(siteId: string): Promise<SiteLinkContext> {
-  const supabase = createServiceClient()
-
-  const [pagesResult, generationsResult] = await Promise.all([
-    supabase.from('site_pages').select('path,title,updated_at').eq('site_id', siteId),
-    supabase
-      .from('generations')
-      .select('id,slug,title,focus_keyword,page_type,parent_generation_id,updated_at')
-      .eq('site_id', siteId)
-      .eq('status', 'published')
-      .not('slug', 'is', null)
-      .order('updated_at', { ascending: false }),
-  ])
-
-  if (pagesResult.error) throw new Error(pagesResult.error.message)
-  if (generationsResult.error) throw new Error(generationsResult.error.message)
-
-  const crawled = (pagesResult.data ?? []) as Array<{ path: string; title?: string | null }>
-  const published = (generationsResult.data ?? []) as Array<{
-    id: string
-    slug: string
-    title?: string | null
-    focus_keyword?: string | null
-    page_type?: PageType | null
-    parent_generation_id?: string | null
-  }>
-
-  const knownPaths = buildKnownPathSet([
-    ...crawled.map(page => page.path),
-    ...published.map(generation => generation.slug),
-  ])
-
-  const candidates: InternalLinkTarget[] = []
-  const seenHrefs = new Set<string>()
-
-  const pushCandidate = (anchor: string | null | undefined, href: string) => {
-    const text = (anchor || '').trim()
-    // An anchor shorter than this matches half the page by accident; the linker
-    // would turn a stray "eau" into a link.
-    if (text.length < 8) return
-    if (seenHrefs.has(href)) return
-    seenHrefs.add(href)
-    candidates.push({ anchor: text, href })
-  }
-
-  for (const generation of published) {
-    pushCandidate(generation.title || generation.focus_keyword, `/${generation.slug.replace(/^\//, '')}`)
-  }
-  for (const page of crawled) {
-    pushCandidate(page.title, page.path.startsWith('/') ? page.path : `/${page.path}`)
-  }
-
-  return {
-    knownPaths,
-    publishedGenerations: published as unknown as Generation[],
-    candidates: candidates.slice(0, MAX_LINK_CANDIDATES),
-    counts: { crawledPages: crawled.length, publishedGenerations: published.length },
-  }
-}
+// `loadSiteLinkContext`, `SiteLinkContext` and `MAX_LINK_CANDIDATES` used to
+// live here.
+//
+// Its two queries hit exactly the population of rows `loadSiteInventory` had
+// just read: it was the fourth concurrent reader of what the site already
+// carries. The SHAPE survives untouched in lib/existing/inventory.ts, where
+// `deriveLinkContext` computes it from the inventory already in hand — what
+// disappears is the round-trip, not the contract.
+//
+// No re-export was left behind on purpose: a second import path is how two
+// definitions of "what exists on this site" start diverging again.
 
 // ─── Rejection ──────────────────────────────────────────────────────────────
 
@@ -147,4 +66,43 @@ export async function markGenerationRejected(
 
   if (fallbackError) throw new Error(fallbackError.message)
   return { status: 'failed', message }
+}
+
+// ─── Duplicate verdict ──────────────────────────────────────────────────────
+
+/**
+ * Persist what the duplicate check concluded, blocking or not.
+ *
+ * A verdict is written even when nothing blocked, and that is the point: the
+ * trace that the check RAN is what tells "no duplicate was found" apart from
+ * "no duplicate was looked for". Reading a rejection rate off rows that only
+ * exist when they blocked would report 100 % every time.
+ *
+ * `refusal_kind` is only set when a blocking code is present, because that
+ * column means "the engine declined on purpose" and an observation is not a
+ * decision. While DUPLICATE_ENFORCEMENT stays at 'observe' the row therefore
+ * keeps its verdict and its status, which is exactly what a measurement period
+ * needs.
+ *
+ * Never throws: this is bookkeeping ABOUT a page that already exists, and
+ * losing the page because its evidence could not be filed would be the worse
+ * failure of the two.
+ */
+export async function persistDuplicateVerdict(
+  generationId: string,
+  verdict: DuplicateVerdict
+): Promise<void> {
+  const supabase = createServiceClient()
+
+  const { error } = await supabase
+    .from('generations')
+    .update({
+      duplicate_verdict: verdict,
+      ...(isBlocking(verdict) ? { refusal_kind: 'duplicat' as const } : {}),
+    })
+    .eq('id', generationId)
+
+  if (error) {
+    console.warn(`[pipeline] verdict de duplicat non enregistre (generation ${generationId}) : ${error.message}`)
+  }
 }

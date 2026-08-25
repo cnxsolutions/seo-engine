@@ -12,7 +12,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createWpClient, looksLikeApplicationPassword, WpError } from './rest'
 import { detectDialect, metaFor } from './dialect'
-import { decideTarget } from './target'
+import { decideTarget, refusalKindFor } from './target'
 import { wordPressConnector } from './index'
 import type { GeneratedPage } from '@/lib/ai/openai'
 import type { Site } from '@/lib/types'
@@ -181,6 +181,28 @@ describe('decideTarget', () => {
     const target = await decideTarget(CLIENT(), { slug: 'taxi-troyes' })
     expect(target.action).toBe('refuser')
     expect(target.action === 'refuser' && target.reason).toContain('redirection')
+    // And it is filed as a REDIRECTION, not as an occupancy. The two call for
+    // different sentences to the operator, and `generations.refusal_kind` is
+    // what the screen branches on.
+    expect(target.action === 'refuser' && refusalKindFor(target.reason)).toBe('redirection')
+  })
+
+  it('classe les deux refus de decideTarget, et une seule fois pour ses deux appelants', () => {
+    // The connector stores this in `refusal_kind`; the occupancy probe returns
+    // it as a `ProbeReason`. Both used to carry their own copy of the test, and
+    // a third refusal reason would have been filed under two different kinds.
+    // Fed with the exact sentences `decideTarget` writes.
+    expect(
+      refusalKindFor(
+        '/taxi-troyes est une source de redirection sur ce site (HTTP 301 vers /). ' +
+          'La page publiee serait inatteignable — changer le slug.'
+      )
+    ).toBe('redirection')
+    expect(
+      refusalKindFor(
+        '/taxi-troyes existe deja sur ce site (page 7, statut publish) et le moteur ne l a pas ecrite.'
+      )
+    ).toBe('occupe')
   })
 
   it('ne prend pas « je ne peux pas lire » pour « rien la »', async () => {
@@ -193,6 +215,47 @@ describe('decideTarget', () => {
     wp([{ match: /pages\?/, body: [{ id: 7, link: `${SITE_URL}/x/`, status: 'publish', slug: 'x' }] }])
     const target = await decideTarget(CLIENT(), { slug: 'x', force: true })
     expect(target.action).toBe('mettre-a-jour')
+  })
+
+  it('replaces n ouvre QUE la page qu il nomme', async () => {
+    // The whole safety property of the targeted override, in one test. A key
+    // that opens the named door is useful; a key that opens any door is `force`
+    // under another name, and the owner of this site has pages that rank.
+    //
+    // Both assertions live here on purpose: proving the door opens proves
+    // nothing about the lock. Only the mismatch, refused with the sentence it
+    // has always been refused with, proves the target is load-bearing.
+    const owned = { id: 7, link: `${SITE_URL}/tarifs/`, status: 'publish', slug: 'tarifs' }
+
+    wp([{ match: /pages\?/, body: [owned] }])
+    const named = await decideTarget(CLIENT(), { slug: 'tarifs', replaces: { path: '/tarifs' } })
+    expect(named.action).toBe('mettre-a-jour')
+    expect(named.action === 'mettre-a-jour' && named.reason).toContain('demande explicite')
+
+    wp([{ match: /pages\?/, body: [owned] }])
+    const elsewhere = await decideTarget(CLIENT(), { slug: 'tarifs', replaces: { path: '/contact' } })
+    expect(elsewhere.action).toBe('refuser')
+    expect(elsewhere.action === 'refuser' && elsewhere.reason).toContain('ecraser une page du proprietaire')
+  })
+
+  it('compare le chemin nomme sans se laisser arreter par un slash ou une majuscule', async () => {
+    // `/Tarifs/` and `tarifs` come from two different screens and mean the same
+    // page. Refusing on the spelling would push the operator towards `force`,
+    // which is the one outcome this feature exists to avoid.
+    wp([{ match: /pages\?/, body: [{ id: 7, link: `${SITE_URL}/tarifs/`, status: 'publish', slug: 'tarifs' }] }])
+
+    const target = await decideTarget(CLIENT(), { slug: 'tarifs', replaces: { path: '/Tarifs/' } })
+    expect(target.action).toBe('mettre-a-jour')
+  })
+
+  it('sans replaces, le refus est mot pour mot celui d avant', async () => {
+    // The default path must be untouched by the addition: a request that names
+    // nothing behaves exactly as it did.
+    wp([{ match: /pages\?/, body: [{ id: 7, link: `${SITE_URL}/tarifs/`, status: 'publish', slug: 'tarifs' }] }])
+
+    const target = await decideTarget(CLIENT(), { slug: 'tarifs' })
+    expect(target.action).toBe('refuser')
+    expect(target.action === 'refuser' && refusalKindFor(target.reason)).toBe('occupe')
   })
 })
 
@@ -310,6 +373,40 @@ describe('connecteur WordPress', () => {
     expect(outcome.refusal?.kind).toBe('occupe')
     expect(outcome.written).toBe(false)
     expect(sent.filter((call) => call.method === 'POST')).toHaveLength(0)
+  })
+
+  it('fait DESCENDRE `replaces` jusqu a la decision de destination', async () => {
+    // LA COUTURE. `decideTarget` savait deja lire `replaces` et `target.ts` etait
+    // teste ; le connecteur, lui, ne le lui passait pas. Une reprise validee a la
+    // main dans /publish repartait donc en refus 'occupe', et le seul geste qui
+    // restait a l'operateur pour ecrire sur cette page etait `force` — c'est-a-
+    // dire l'ecrasement en aveugle que `replaces` existe pour remplacer.
+    //
+    // Le test precedent tient l'autre moitie : SANS `replaces`, meme fixture,
+    // meme slug, le refus est intact.
+    const owned = { id: 7, link: `${SITE_URL}/contact/`, status: 'publish', slug: 'contact' }
+    const sent = wp([
+      { match: /pages\/7/, body: { ...owned, content: { raw: '<h1>Taxi</h1>' } } },
+      { match: /pages\?|posts\?/, body: [owned] },
+      { match: /wp-json\/$|wp-json$/, body: { namespaces: ['wp/v2'] } },
+    ])
+
+    const outcome = await wordPressConnector.publish({
+      site: SITE,
+      page: { ...PAGE, slug: 'contact' } as GeneratedPage,
+      intent: 'publie',
+      replaces: { path: '/contact' },
+    })
+
+    expect(outcome.refusal).toBeUndefined()
+    expect(outcome.written).toBe(true)
+    expect(outcome.remoteId).toBe('7')
+
+    // Ecrit SUR la page nommee, et jamais a cote : une creation supplementaire
+    // laisserait la page du proprietaire intacte et poserait un doublon.
+    const writes = sent.filter((call) => call.method === 'POST')
+    expect(writes.map((call) => call.url).some((url) => /\/pages\/7$/.test(url))).toBe(true)
+    expect(writes.map((call) => call.url).some((url) => /\/pages$/.test(url))).toBe(false)
   })
 })
 

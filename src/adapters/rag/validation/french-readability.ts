@@ -4,7 +4,7 @@
 // Syllable counting and Flesch reading ease adapted to French
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { splitSentences, tokenizeWords } from './text-utils'
+import { splitSentences, tokenizeWords } from '@/src/core/domain/text/text-utils'
 
 /**
  * Vowel letters, accents included. 'y' counts as a vowel: in French it always

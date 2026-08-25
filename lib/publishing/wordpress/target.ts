@@ -52,6 +52,16 @@ export interface TargetOptions {
   knownRemoteId?: number
   /** Skip the occupancy and redirect guards. An admission, not a solution. */
   force?: boolean
+  /**
+   * Authorise the takeover of ONE named page, and only that one.
+   *
+   * The difference with `force` is the whole point: `force` says "whatever is
+   * there, take it", this says "the page at THIS path, which a human looked at".
+   * A `path` that does not match the slug about to be written gets the ordinary
+   * occupancy refusal, unchanged. Without this field nothing below behaves
+   * differently.
+   */
+  replaces?: { path: string; remoteId?: number }
   /** A previous attempt on this page was interrupted mid-publish. */
   recovering?: boolean
   /** Used only to recognise a half-written page during a recovery. */
@@ -133,6 +143,23 @@ export async function decideTarget(client: WpClient, options: TargetOptions): Pr
     }
   }
 
+  // A takeover the operator asked for, on the page the operator was shown.
+  //
+  // Before `force`, deliberately: this is the narrow key and `force` is the
+  // blunt one, so the narrow one must get the chance to describe what happened.
+  // The comparison is an EXACT path match — a `replaces.path` pointing anywhere
+  // else falls through to the refusal below, word for word. Anything looser
+  // would make the named target decorative, and the target is the only thing
+  // standing between this branch and overwriting a page that ranks.
+  if (options.replaces && samePath(options.replaces.path, slug)) {
+    return {
+      action: 'mettre-a-jour',
+      type: found!.type,
+      page: existing,
+      reason: `page ${existing.id} remplacee sur demande explicite (mise a jour validee par un operateur)`,
+    }
+  }
+
   if (force) {
     return {
       action: 'mettre-a-jour',
@@ -149,6 +176,27 @@ export async function decideTarget(client: WpClient, options: TargetOptions): Pr
       `ne l'a pas ecrite. Publication annulee pour ne pas ecraser une page du proprietaire — ` +
       `changer le slug, ou forcer si cette page est bien la notre.`,
   }
+}
+
+/**
+ * Which KIND of refusal a `refuser` reason is.
+ *
+ * `WpTarget` carries a sentence and no discriminant, because the sentence is
+ * what the operator reads and there was, for a while, only one caller to
+ * classify it. There are now two — the connector, which stores the kind in
+ * `generations.refusal_kind`, and the occupancy probe — and they were about to
+ * hold two copies of the same `includes('redirection')` test. Two copies of a
+ * classification drift the day a third refusal reason is written: one caller
+ * would file it under 'occupe' and the other would not.
+ *
+ * Deliberately narrower than `RefusalKind`: `decideTarget` produces exactly two
+ * refusals, and neither is 'identifiants' (credentials fail by throwing, before
+ * a target is ever decided) nor 'duplicat' (an editorial verdict, decided
+ * upstream of any connector). Widening the return type would force both callers
+ * to handle cases this function cannot produce.
+ */
+export function refusalKindFor(reason: string): 'occupe' | 'redirection' {
+  return reason.includes('redirection') ? 'redirection' : 'occupe'
 }
 
 function titleOf(page: WpPage): string {
@@ -217,12 +265,31 @@ async function redirectedAway(client: WpClient, slug: string): Promise<string | 
   // and on the scheduler that refusal came back every fifteen minutes.
   //
   // Only a redirect that lands somewhere ELSE counts.
-  if (samePath(location, slug, client.origin)) return null
+  if (sameDestination(location, slug, client.origin)) return null
 
   return (
     `/${slug} est une source de redirection sur ce site (HTTP ${status} vers ${location}). ` +
     `La page publiee serait inatteignable — changer le slug.`
   )
+}
+
+/**
+ * `/x`, `x`, `/x/` and `X` are the same address here.
+ *
+ * Local on purpose. `normalizePath` from lib/pipeline/internal-links would do,
+ * and importing it would give this module its second dependency after `./rest` —
+ * the absence of that coupling is what lets the guard be tested on its own.
+ *
+ * Leading slashes are stripped on both sides, not required on either: a caller
+ * naming the page to replace writes `/taxi-troyes` or `taxi-troyes` depending on
+ * where the value came from, and neither spelling should decide whether a page
+ * that ranks gets overwritten.
+ */
+function samePath(a: string, b: string): boolean {
+  const normalise = (value: string) =>
+    value.split(/[?#]/)[0].replace(/^\/+/, '').replace(/\/+$/, '').toLowerCase()
+
+  return normalise(a) === normalise(b)
 }
 
 /**
@@ -233,9 +300,7 @@ async function redirectedAway(client: WpClient, slug: string): Promise<string | 
  * the same host, so a redirect to `https://concurrent.fr/taxi-gare` produced a
  * path that happened to match and the guard waved it through.
  */
-function samePath(location: string, slug: string, origin: string): boolean {
-  const normalise = (value: string) => value.split(/[?#]/)[0].replace(/\/+$/, '').toLowerCase()
-
+function sameDestination(location: string, slug: string, origin: string): boolean {
   let path = location
   if (/^https?:\/\//i.test(location)) {
     try {
@@ -246,5 +311,5 @@ function samePath(location: string, slug: string, origin: string): boolean {
       return false
     }
   }
-  return normalise(path) === normalise(`/${slug}`)
+  return samePath(path, slug)
 }

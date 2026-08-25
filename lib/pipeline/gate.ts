@@ -4,12 +4,17 @@
 // The single place that answers "does this page ship?"
 // ─────────────────────────────────────────────────────────────────────────────
 //
-// Two sources feed the verdict:
+// Three sources feed the verdict:
 //
 //  1. The structural checks in structure.ts and word-count.ts — length, H1,
 //     JSON-LD — which are the defects the audit actually found in production.
 //  2. `ValidationPipelineOrchestrator` (src/adapters/rag/validation), called
 //     through its published API and never modified from here.
+//  3. What the site ALREADY has online — the third source, and the newest. Two
+//     independent comparisons feed it: `DuplicateDetector`, which weighs BODIES
+//     lexically, and `judgeEditorialIdentity`, which weighs the three things a
+//     searcher sees before clicking — address, title, meta description. Both are
+//     HANDED their candidates; neither goes looking for them.
 //
 // The orchestrator's own `canPublish` is deliberately NOT used as the verdict.
 // It fails a page as soon as any validator reports a single error, including
@@ -19,11 +24,36 @@
 // this gate exists to fix. So the orchestrator's findings are read, and only the
 // codes listed below stop a publication. Everything else is recorded as a
 // warning, visible in the logs, and ships.
+//
+// THE DUPLICATE GATE SHIPS IN OBSERVATION MODE, and that is the whole point of
+// this delivery. Its findings are computed, persisted in
+// `generations.duplicate_verdict` and displayed — and the page still ships. The
+// measurement has to come before the barrier: nobody can size a blocking rule
+// that has never run, and a gate delivered blocking would cut production by an
+// amount no one could name afterwards. `DUPLICATE_ENFORCEMENT` and
+// `GateInput.duplicateMode` govern the CLASSIFICATION of those findings, never
+// their COMPUTATION — if observation measured less than enforcement, the figures
+// that must justify flipping the switch would describe something other than what
+// is about to be blocked.
 
 import type { PageAnomaly } from '@/lib/ai/openai'
+import type { DuplicateGateMode } from '@/lib/existing/mode'
+import { MAX_SLUG_CHARS } from '@/lib/seo/slug'
 import type { ContentQualityConfig } from '@/src/adapters/rag/validation/ContentQualityValidator'
+import type { ContentToCheck, DuplicateMatch } from '@/src/adapters/rag/validation/DuplicateDetector'
 import type { SeoValidationConfig } from '@/src/adapters/rag/validation/SeoValidator'
 import { ValidationPipelineOrchestrator } from '@/src/adapters/rag/validation'
+import {
+  judgeEditorialIdentity,
+  type IdentityBlockingCode,
+  type IdentityComparison,
+} from '@/src/core/domain/existing/identity'
+import {
+  buildDuplicateVerdict,
+  isBlocking,
+  type DuplicateMatchEvidence,
+  type DuplicateVerdict,
+} from '@/src/core/domain/existing/verdict'
 import { checkAllJsonLd, censusHeadings } from './structure'
 import { MAX_LENGTH_RATIO, MIN_LENGTH_RATIO, type LengthMeasurement } from './word-count'
 
@@ -114,9 +144,47 @@ export const BLOCKING_ANOMALY_FIELDS = [
   'metaDescription',
 ] as const
 
+/**
+ * The fourth list, and the only one this module does NOT own.
+ *
+ * Which duplicate codes hold a page back is a rule about editorial identity, not
+ * about this pipeline: `src/core/domain/existing/verdict.ts` declares it next to
+ * the shape of the persisted jsonb, and `isBlocking()` is the only reader. It is
+ * re-exported here so that a reader looking for "the list next to the other
+ * three" finds it — a second declaration would guarantee that a sixth blocking
+ * code lands in one copy and not the other.
+ */
+export { BLOCKING_DUPLICATE_CODES } from '@/src/core/domain/existing/verdict'
+
+/**
+ * What the gate DOES with its duplicate verdict, by default.
+ *
+ * 'observe': every finding is computed, persisted and shown — and the page
+ * ships. Deliberate. The site owner has to see the real volume of near
+ * duplicates his site already carries BEFORE a barrier closes on it; a gate that
+ * started out blocking would cut production by an amount nobody could name.
+ *
+ * THIS IS ONLY A DEFAULT. The real mode arrives through `GateInput.duplicateMode`
+ * and the product's single environment read (`duplicateGateMode()`,
+ * lib/existing/mode.ts) belongs to the CALLER. Reading `process.env` here would
+ * make the one function every publication goes through depend on an ambient a
+ * test can only reach by polluting the process — and a test that pollutes the
+ * process leaks into the next one.
+ *
+ * HANDOVER, so the switch is not born dead: `lib/pipeline/index.ts` must pass
+ * `duplicateMode: duplicateGateMode()`. Without that one line, `SEO_DUPLICATE_GATE`
+ * has no reader and flipping to enforcement in a later wave would mean editing
+ * this file instead of an environment variable.
+ */
+export const DUPLICATE_ENFORCEMENT: DuplicateGateMode = 'observe'
+
 // ─── Findings ───────────────────────────────────────────────────────────────
 
-export type FindingSource = 'length' | 'structure' | 'links' | 'quality' | 'seo' | 'duplicate' | 'generator'
+// 'gbp' is declared for lib/publishing/gbp/gate.ts, whose findings need a source
+// of their own: reusing 'seo' or 'quality' would file a Google Business Profile
+// defect under a page validator and make both unreadable in a log.
+export type FindingSource =
+  | 'length' | 'structure' | 'links' | 'quality' | 'seo' | 'duplicate' | 'generator' | 'gbp'
 
 export interface GateFinding {
   code: string
@@ -133,6 +201,16 @@ export interface GateVerdict {
   grade?: string
   /** Set when the external validators failed and only the structural checks ran. */
   degraded?: string
+  /**
+   * What the page was weighed against, and what came out — ready for
+   * `generations.duplicate_verdict`.
+   *
+   * Absent means NOT COMPARED (no candidate was supplied), which is a different
+   * fact from "compared and found original": the latter is a verdict with an
+   * empty `matches`, and the replay that has to size the future barrier counts
+   * both.
+   */
+  duplicateVerdict?: DuplicateVerdict
   durationMs: number
 }
 
@@ -142,6 +220,16 @@ export interface GateInput {
   metaDescription: string
   focusKeyword: string
   html: string
+  /**
+   * The address the page will take, site excluded.
+   *
+   * Required, and it is the central gesture of this delivery: the gate used to
+   * receive only a derived `url`, so it could not answer a question about the
+   * address itself. It is also what guarantees `SeoValidator` always has a real
+   * last segment to measure — an optional `url` meant the URL rules silently did
+   * not run whenever a caller omitted it.
+   */
+  slug: string
   url?: string
   schemaLocalBusiness?: string
   schemaFaqPage?: string
@@ -151,6 +239,31 @@ export interface GateInput {
   deadInternalLinks?: number
   /** Defects the generator itself reported on this page. */
   anomalies?: PageAnomaly[]
+  /**
+   * Pages already online, BODY included, to compare lexically against.
+   *
+   * Carried in, never fetched here — see `runValidationGate`. An empty or absent
+   * list means no comparison happens at all, and the detector is not even
+   * instantiated.
+   */
+  existingContents?: ContentToCheck[]
+  /**
+   * The same neighbours, already weighed on what a SERP shows.
+   *
+   * Measured by `compareEditorialIdentity` in the domain, because it needs the
+   * campaign's city tokens and the inventory entries — two things this module
+   * has no business knowing.
+   */
+  identity?: IdentityComparison[]
+  /** `SiteInventory.truncated`: a sampled inventory hardens the identity thresholds. */
+  inventoryTruncated?: boolean
+  /**
+   * Taking a new address, or rewriting the one we already occupy. Defaults to
+   * 'create': a caller that says nothing is asking for the stricter reading.
+   */
+  intent?: 'create' | 'refresh'
+  /** Defaults to `DUPLICATE_ENFORCEMENT`. Never read from the environment here. */
+  duplicateMode?: DuplicateGateMode
   quality?: ContentQualityConfig
   seo?: SeoValidationConfig
 }
@@ -198,20 +311,41 @@ export function buildSeoConfig(): SeoValidationConfig {
     keywordDensityMax: 4,
     checkSchema: true,
     checkOpenGraph: false, // Open Graph lives in the payload, not in the HTML.
-    urlMaxLength: 120,     // Long-tail slugs are a deliberate strategy here.
+    // Aligned on MAX_SLUG_CHARS instead of an invented 120, so ONE number
+    // governs both the length a slug is built to and the length it is judged at.
+    //
+    // Not to be over-read: `validateUrl` (SeoValidator.ts:527) measures the LAST
+    // SEGMENT of the path and `capLength` already caps every slug coming out of
+    // `buildPageSlug` at this same figure. The rule bites only on a slug that
+    // never went through the factory — one typed by hand, or a single word too
+    // long to shorten. What changes is that the threshold can no longer be
+    // silently unreachable by construction.
+    urlMaxLength: MAX_SLUG_CHARS,
   }
 }
 
 // ─── Gate ───────────────────────────────────────────────────────────────────
 
 /**
- * Run every check and return a verdict. Never throws, never touches the network:
- * duplicate detection is left off, so the orchestrator runs entirely in memory.
+ * Run every check and return a verdict. Never throws, and never touches the
+ * network.
+ *
+ * That second property no longer rests on duplicate detection being switched
+ * off — it is ON as of this delivery. It rests on WHERE the comparison happens.
+ * `DuplicateDetector` is purely lexical (its only import is `./text-utils`),
+ * `judgeEditorialIdentity` is pure domain, and both are handed their candidates
+ * through `GateInput`. Nothing here may import `loadSiteInventory`,
+ * `nearestExistingEntries`, `createServiceClient` or `SupabaseVectorStore`:
+ * loading the neighbours is `lib/pipeline/index.ts`'s job, and it costs a
+ * database read plus an embedding round trip. Paying that from inside the one
+ * function every publication path calls would make the gate unusable from a
+ * test, a script or a route handler.
  */
 export async function runValidationGate(input: GateInput): Promise<GateVerdict> {
   const startedAt = Date.now()
   const blocking: GateFinding[] = []
   const warnings: GateFinding[] = []
+  const duplicates: DuplicateObservation[] = []
 
   // ─── 1. Length ────────────────────────────────────────────────────────
   if (!input.measurement.meetsTarget) {
@@ -305,7 +439,17 @@ export async function runValidationGate(input: GateInput): Promise<GateVerdict> 
     else warnings.push(finding)
   }
 
-  // ─── 6. Existing validation pipeline ──────────────────────────────────
+  // ─── 6. Editorial identity: the part that needs no score ──────────────
+  //
+  // Address, title, meta description. Run BEFORE the validators, and outside
+  // their try/catch, for the same reason as the anomalies above: these findings
+  // are deterministic and must survive a validator crash. A path collision in
+  // particular is a binary fact — two pages cannot share one address — and
+  // making it depend on a lexical detector would be inventing a measurement for
+  // something already known.
+  duplicates.push(...observeIdentity(input))
+
+  // ─── 7. Existing validation pipeline ──────────────────────────────────
   let score: number | undefined
   let grade: string | undefined
   let degraded: string | undefined
@@ -313,12 +457,17 @@ export async function runValidationGate(input: GateInput): Promise<GateVerdict> 
   try {
     const orchestrator = new ValidationPipelineOrchestrator({
       validators: {
-        // No ContentSchema is declared for generated pages, and the detector
-        // would need every published page's body loaded to say anything.
+        // No ContentSchema is declared for generated pages.
         schema: false,
         contentQuality: true,
         seo: true,
-        duplicate: false,
+        // TWO switches were off, and they only mean something together: this
+        // flag, and the `existingContents` handed to validate() below. The
+        // orchestrator skips the whole step when the candidate list is empty
+        // (ValidationPipelineOrchestrator.ts:262), so turning this one on alone
+        // would produce no observable effect whatsoever — and leave everyone
+        // believing duplicate detection was live.
+        duplicate: (input.existingContents?.length ?? 0) > 0,
       },
       contentQuality: input.quality,
       seo: input.seo,
@@ -326,6 +475,8 @@ export async function runValidationGate(input: GateInput): Promise<GateVerdict> 
     })
 
     const result = await orchestrator.validate({
+      // The other half of the switch. Empty list, no comparison, no detector.
+      existingContents: input.existingContents ?? [],
       content: {
         fields: {},
         contentType: input.pageType,
@@ -333,7 +484,7 @@ export async function runValidationGate(input: GateInput): Promise<GateVerdict> 
         metaTitle: input.title,
         metaDescription: input.metaDescription,
         content: input.html,
-        url: input.url,
+        url: pageUrl(input),
         focusKeyword: input.focusKeyword,
         schemaMarkup: input.schemaLocalBusiness,
         // All three generated payloads, not just LocalBusiness.
@@ -412,12 +563,39 @@ export async function runValidationGate(input: GateInput): Promise<GateVerdict> 
         message: `${issue.node} : ${issue.message}`,
       })
     }
+
+    // The third switch, and the least visible of the three: until now nothing
+    // READ `results.duplicate`. The loop above consumes contentQuality, seo and
+    // jsonLd only, so a detector wired in without this would have computed
+    // verdicts straight into the bin — the exact bug the generator's anomalies
+    // lived with until BLOCKING_ANOMALY_FIELDS gave them a reader.
+    duplicates.push(...observeContentDuplicates(result.results.duplicate?.result.duplicates ?? [], input))
   } catch (error) {
     // The validators are the part of this gate that is being rebuilt elsewhere.
     // If they break, the structural checks above still stand and the page is
     // judged on those alone — a broken validator must not silently become a
     // blanket rejection of everything the engine produces.
     degraded = error instanceof Error ? error.message : String(error)
+  }
+
+  // ─── 8. What the duplicate findings are worth, and where they land ────
+  //
+  // The measurement above is identical in both modes; only this classification
+  // changes. That is the whole contract of the observation period — figures
+  // gathered under 'observe' have to describe exactly what 'block' will refuse,
+  // otherwise the replay that must justify the switch measures a different rule.
+  const duplicateVerdict = summarizeDuplicates(duplicates, input)
+
+  // `isBlocking` rather than a second membership test against
+  // BLOCKING_DUPLICATE_CODES: the list has one reader, and the question is asked
+  // of the object that will actually be persisted, not of a local array.
+  const enforced = duplicateVerdict !== undefined
+    && duplicateVerdict.mode === 'block'
+    && isBlocking(duplicateVerdict)
+
+  for (const observation of duplicates) {
+    if (observation.holdsPage && enforced) blocking.push(observation.finding)
+    else warnings.push(observation.finding)
   }
 
   return {
@@ -427,6 +605,7 @@ export async function runValidationGate(input: GateInput): Promise<GateVerdict> 
     score,
     grade,
     degraded,
+    duplicateVerdict,
     durationMs: Date.now() - startedAt,
   }
 }
@@ -434,4 +613,217 @@ export async function runValidationGate(input: GateInput): Promise<GateVerdict> 
 /** One-line reasons, ready for `generations.error_message`. */
 export function formatBlockingReasons(findings: GateFinding[]): string[] {
   return findings.map(finding => `${finding.code}: ${finding.message}`)
+}
+
+// ─── Duplicate observations ─────────────────────────────────────────────────
+
+/**
+ * One duplicate observation, before anyone decides what to do with it.
+ *
+ * `holdsPage` is set AT THE SOURCE, where the code is a literal. Deriving it
+ * here by testing membership of BLOCKING_DUPLICATE_CODES would turn
+ * `isBlocking()` into dead code and give that list a second reader — which is
+ * precisely what moving it into the domain was meant to prevent.
+ */
+interface DuplicateObservation {
+  finding: GateFinding
+  /** Absent when the observation has no domain code worth persisting. */
+  evidence?: DuplicateMatchEvidence
+  holdsPage: boolean
+}
+
+/**
+ * The address the validators are given.
+ *
+ * An explicit `url` still wins — callers that know the absolute address pass it
+ * — but a caller that gives only a slug no longer silently disables every URL
+ * rule in `SeoValidator`, which reads the last path segment and finds nothing
+ * when `url` is undefined.
+ */
+function pageUrl(input: GateInput): string {
+  return input.url ?? `/${input.slug.replace(/^\/+/, '')}`
+}
+
+/**
+ * The documentary key of an existing page, written the way vector indexing
+ * writes it (`page:<path>`). It is the only key that spans the lexical and the
+ * vector side, which is why `DuplicateMatchEvidence` insists on it rather than
+ * on the uuid of an embedding row.
+ */
+function pageKey(path: string): string {
+  return `page:${path}`
+}
+
+/** Deterministic identity findings, from comparisons measured in the domain. */
+function observeIdentity(input: GateInput): DuplicateObservation[] {
+  const comparisons = input.identity ?? []
+  if (comparisons.length === 0) return []
+
+  const verdict = judgeEditorialIdentity(comparisons, {
+    intent: input.intent ?? 'create',
+    truncated: input.inventoryTruncated ?? false,
+  })
+
+  return [
+    ...verdict.blocking.map(item => identityObservation(item.code, item.comparison, true)),
+    ...verdict.warnings.map(item => identityObservation(item.code, item.comparison, false)),
+  ]
+}
+
+const IDENTITY_HEADLINES: Record<IdentityBlockingCode | 'CANNIBALIZATION', string> = {
+  TITLE_NEAR_DUPLICATE: 'Titre quasi identique a celui de',
+  META_NEAR_DUPLICATE: 'Meta description quasi identique a celle de',
+  SLUG_COLLISION: 'Adresse deja occupee par',
+  CANNIBALIZATION: 'Meme requete visee que',
+}
+
+function identityObservation(
+  code: IdentityBlockingCode | 'CANNIBALIZATION',
+  comparison: IdentityComparison,
+  holdsPage: boolean,
+): DuplicateObservation {
+  const evidence: DuplicateMatchEvidence = {
+    entryKey: pageKey(comparison.entryPath),
+    entryPath: comparison.entryPath,
+    code,
+    similarity: identitySimilarity(code, comparison),
+    partial: comparison.comparisonIsPartial,
+  }
+  if (comparison.entryUrl) evidence.entryUrl = comparison.entryUrl
+
+  return { finding: duplicateFinding(evidence, IDENTITY_HEADLINES[code]), evidence, holdsPage }
+}
+
+function identitySimilarity(
+  code: IdentityBlockingCode | 'CANNIBALIZATION',
+  comparison: IdentityComparison,
+): number {
+  switch (code) {
+    case 'META_NEAR_DUPLICATE':
+      return comparison.metaSimilarity
+    // A collision is not measured, it is observed. `DuplicateMatchEvidence`
+    // fixes its similarity at 1 by convention so the field stays comparable.
+    case 'SLUG_COLLISION':
+      return 1
+    default:
+      return comparison.titleSimilarity
+  }
+}
+
+/** Lexical findings, from bodies the detector actually compared. */
+function observeContentDuplicates(
+  matches: readonly DuplicateMatch[],
+  input: GateInput,
+): DuplicateObservation[] {
+  if (matches.length === 0) return []
+
+  const urlById = new Map((input.existingContents ?? []).map(candidate => [candidate.id, candidate.url]))
+  const partialByPath = new Map(
+    (input.identity ?? []).map(comparison => [comparison.entryPath, comparison.comparisonIsPartial]),
+  )
+
+  const observations: DuplicateObservation[] = []
+
+  for (const match of matches) {
+    // `findDuplicatesFor` compares OUR page (source) against each candidate
+    // (target), so `targetId` names the CANDIDATE. Reading `sourceId` here would
+    // show the operator the address of the page he is writing, accused of
+    // duplicating itself — a report nobody could act on.
+    const entryPath = match.targetId
+    const evidence: DuplicateMatchEvidence = {
+      entryKey: pageKey(entryPath),
+      entryPath,
+      code: match.matchType === 'exact' ? 'DUPLICATE_EXACT' : 'DUPLICATE_NEAR',
+      similarity: match.similarity,
+      // Without an identity comparison for this entry we do NOT know whether the
+      // body we compared was the whole page. Admitting it beats promising a
+      // complete comparison that was never made — and it only ever understates
+      // confidence, never manufactures a duplicate.
+      partial: partialByPath.get(entryPath) ?? true,
+    }
+    const url = urlById.get(entryPath)
+    if (url) evidence.entryUrl = url
+
+    if (match.matchType === 'exact' || match.matchType === 'near') {
+      const headline = match.matchType === 'exact'
+        ? 'Contenu identique a celui de'
+        : 'Contenu quasi identique a celui de'
+      observations.push({ finding: duplicateFinding(evidence, headline), evidence, holdsPage: true })
+      continue
+    }
+
+    if (match.reason === 'cannibalization') {
+      const warning: DuplicateMatchEvidence = { ...evidence, code: 'CANNIBALIZATION' }
+      observations.push({
+        finding: duplicateFinding(warning, IDENTITY_HEADLINES.CANNIBALIZATION),
+        evidence: warning,
+        holdsPage: false,
+      })
+      continue
+    }
+
+    // A partial overlap carries no domain code, and none is invented for it:
+    // `DUPLICATE_CODES` is ordered by severity and the UI reads that order, so a
+    // seventh member would silently renumber every existing one. The finding is
+    // reported without an evidence line — visible in the logs, absent from the
+    // persisted verdict, where `parseDuplicateVerdict` would drop it anyway.
+    observations.push({
+      holdsPage: false,
+      finding: {
+        code: 'DUPLICATE_PARTIAL',
+        source: 'duplicate',
+        message: `Recoupement partiel avec ${evidence.entryUrl ?? entryPath} `
+          + `(${percent(match.similarity)})`,
+      },
+    })
+  }
+
+  return observations
+}
+
+function duplicateFinding(evidence: DuplicateMatchEvidence, headline: string): GateFinding {
+  const where = evidence.entryUrl ?? evidence.entryPath
+
+  // An unmeasured fact gets neither a score nor a caveat about the measurement:
+  // printing "100 %" and "partial comparison" under a path collision would make
+  // a binary fact read like a fragile estimate.
+  const detail = evidence.code === 'SLUG_COLLISION'
+    ? ''
+    : ` (${percent(evidence.similarity)})`
+      + (evidence.partial ? ` — comparaison partielle, une des deux pages n'a pas ete vue en entier` : '')
+
+  return { code: evidence.code, source: 'duplicate', message: `${headline} ${where}${detail}` }
+}
+
+function percent(similarity: number): string {
+  return `${Math.round(similarity * 100)} %`
+}
+
+/**
+ * The verdict as it will be persisted.
+ *
+ * Built as soon as ANY candidate was supplied, even when nothing matched: an
+ * absent verdict has to keep meaning "not compared". Confusing the two would
+ * make a site nobody crawled look exactly like a site with no duplicates.
+ *
+ * `reasons` lists the findings that WOULD hold the page, whatever the mode. In
+ * observation they read as would-be refusals, which is what the replay needs to
+ * count before the barrier closes.
+ */
+function summarizeDuplicates(
+  observations: readonly DuplicateObservation[],
+  input: GateInput,
+): DuplicateVerdict | undefined {
+  const compared = (input.existingContents?.length ?? 0) > 0 || (input.identity?.length ?? 0) > 0
+  if (!compared) return undefined
+
+  return buildDuplicateVerdict(
+    {
+      decidedBy: 'policy',
+      mode: input.duplicateMode ?? DUPLICATE_ENFORCEMENT,
+      reasons: observations.filter(o => o.holdsPage).map(o => o.finding.message),
+      matches: observations.flatMap(o => (o.evidence ? [o.evidence] : [])),
+    },
+    new Date(),
+  )
 }

@@ -10,7 +10,7 @@ import { ContentQualityValidator, type ContentQualityConfig } from './ContentQua
 import { SeoValidator, type SeoValidationConfig, type SocialMetaInput } from './SeoValidator'
 import { DuplicateDetector, type DuplicateDetectionConfig } from './DuplicateDetector'
 import { JsonLdValidator, type JsonLdValidationConfig } from './JsonLdValidator'
-import { extractHeadingOutline, extractLinks } from './text-utils'
+import { extractHeadingOutline, extractLinks } from '@/src/core/domain/text/text-utils'
 
 /**
  * Configuration globale du pipeline

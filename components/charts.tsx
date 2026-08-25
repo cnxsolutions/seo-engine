@@ -1,10 +1,10 @@
 'use client'
 
-import { Check, ChevronsUpDown, Globe, Table2 } from 'lucide-react'
+import { Check, ChevronsUpDown, Globe, Table2, TriangleAlert, X } from 'lucide-react'
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import type { KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent, ReactNode } from 'react'
 import { useRouter } from 'next/navigation'
-import { formatMetric, type ValueFormat } from './ui'
+import { Button, formatMetric, type ValueFormat } from './ui'
 
 /* ═══════════════════════════════════════════════════════════════════════════
    Charts & interactive chrome — dependency-free SVG.
@@ -1060,5 +1060,255 @@ export function SiteSwitcher({
         </ul>
       )}
     </div>
+  )
+}
+
+// ═══ Modal ═══════════════════════════════════════════════════════════
+/**
+ * The one dialog. Three hand-written boxes preceded it — the slot detail of
+ * /calendar, the cycle plan of /strategy, the extractor wizard of ui.tsx —
+ * each with its own Escape listener, its own z-index constant and its own idea
+ * of where the focus goes. It lives here and not in ui.tsx for the reason that
+ * file's header states: ui.tsx has no 'use client' so server pages can pass
+ * `icon={Globe}` straight in, and a dialog needs state, the keyboard and focus.
+ *
+ * No portal: nothing in this repo uses react-dom/createPortal, and the scrim is
+ * already `position: fixed` at the modal layer, so a portal would buy nothing.
+ */
+
+/**
+ * The scrim pads itself by --space-6 on each side and --space-12 is exactly
+ * twice that, so the panel can never claim more room than the scrim leaves it.
+ */
+const MODAL_MAX_HEIGHT = 'calc(100vh - var(--space-12))'
+
+/** `md` is the slot detail of /calendar; `lg` the cycle plan, whose body is a table. */
+const MODAL_SIZES = { md: 580, lg: 1000 } as const
+
+/** When the caller names no width at all. */
+const MODAL_DEFAULT_WIDTH = 720
+
+/**
+ * Tab order inside the panel. `:not([disabled])` earns its place: while a
+ * confirmation is in flight both footer buttons are disabled, and the trap must
+ * cycle past them instead of parking the focus on a dead control.
+ */
+const FOCUSABLE =
+  'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+
+export interface ModalProps {
+  /** Absent means open: a caller that mounts the dialog conditionally already said so. */
+  open?: boolean
+  onClose: () => void
+  title: string
+  subtitle?: ReactNode
+  /** Stays put while the body scrolls — this is where a confirming button belongs. */
+  footer?: ReactNode
+  size?: 'md' | 'lg'
+  /**
+   * One-off width in pixels. `maxWidth` is the same knob under the name the
+   * call sites of this lot were written against; a shared dialog that fails to
+   * compile at one of them is worse than one alias.
+   */
+  width?: number
+  maxWidth?: number
+  /**
+   * Unpadded on purpose: wrap in `.panel__body` for the standard padding, or
+   * pad your own regions when the body holds a `.scroll-x` that must reach the
+   * panel edges, as the cycle plan does.
+   */
+  children: ReactNode
+}
+
+export function Modal({ open = true, onClose, title, subtitle, footer, size, width, maxWidth, children }: ModalProps) {
+  const uid = useId()
+  const titleId = `${uid}-title`
+  const panelRef = useRef<HTMLDivElement | null>(null)
+  const closeRef = useRef<HTMLButtonElement | null>(null)
+
+  /**
+   * Focus in, then focus back out to whatever opened the dialog. Without the
+   * second half the keyboard user lands back at the top of the document, which
+   * is how a "close" gesture turns into losing your place in a long table.
+   */
+  useEffect(() => {
+    if (!open) return
+    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    closeRef.current?.focus()
+    return () => opener?.focus()
+  }, [open])
+
+  useEffect(() => {
+    if (!open) return
+    const onKey = (event: KeyboardEvent) => { if (event.key === 'Escape') onClose() }
+    document.addEventListener('keydown', onKey)
+    // The page behind must not scroll under the scrim: a wheel gesture that
+    // moves the page while a dialog is up reads as a broken dialog.
+    const previousOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return () => {
+      document.removeEventListener('keydown', onKey)
+      document.body.style.overflow = previousOverflow
+    }
+  }, [open, onClose])
+
+  const onPanelKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (event.key !== 'Tab') return
+    const panel = panelRef.current
+    if (!panel) return
+    const stops = Array.from(panel.querySelectorAll<HTMLElement>(FOCUSABLE))
+    if (stops.length === 0) return
+    const first = stops[0]
+    const last = stops[stops.length - 1]
+    const active = document.activeElement
+    if (event.shiftKey && (active === first || !panel.contains(active))) {
+      event.preventDefault()
+      last.focus()
+    } else if (!event.shiftKey && active === last) {
+      event.preventDefault()
+      first.focus()
+    }
+  }
+
+  if (!open) return null
+
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        // The token itself, not a copy of its value: the two `MODAL_Z = 100`
+        // constants this replaces were justified by a comment claiming csstype
+        // refuses a custom property here. The installed version does not — its
+        // ZIndex union carries `(string & {})`, verified against node_modules.
+        position: 'fixed', inset: 0, zIndex: 'var(--z-modal)',
+        background: 'var(--surface-scrim)', padding: 'var(--space-6)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+      }}
+    >
+      <div
+        ref={panelRef}
+        className="panel"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        onClick={(event) => event.stopPropagation()}
+        onKeyDown={onPanelKeyDown}
+        style={{
+          width: '100%',
+          maxWidth: width ?? maxWidth ?? (size ? MODAL_SIZES[size] : MODAL_DEFAULT_WIDTH),
+          // Flex column with the body as the ONLY scroller. An overflow on the
+          // panel itself would carry the header and the confirming button out
+          // of sight on a short screen, and cancel the body's own .scroll-x.
+          maxHeight: MODAL_MAX_HEIGHT,
+          display: 'flex',
+          flexDirection: 'column',
+          boxShadow: 'var(--shadow-lg)',
+        }}
+      >
+        <div className="panel__header" style={{ flexShrink: 0 }}>
+          <div style={{ minWidth: 0 }}>
+            <h2 className="card-title" id={titleId}>{title}</h2>
+            {subtitle && <div className="meta">{subtitle}</div>}
+          </div>
+          <button ref={closeRef} type="button" className="btn-icon" onClick={onClose} aria-label="Fermer">
+            <X size={15} />
+          </button>
+        </div>
+
+        <div style={{ overflowY: 'auto', minHeight: 0, flex: 1 }}>{children}</div>
+
+        {footer && <div className="panel__footer" style={{ flexShrink: 0 }}>{footer}</div>}
+      </div>
+    </div>
+  )
+}
+
+// ═══ ConfirmModal ════════════════════════════════════════════════════
+/** A label that does not say what is about to happen. Refused in development. */
+const GENERIC_CONFIRM_LABELS = ['confirmer', 'ok', 'valider', 'oui']
+
+export interface ConfirmModalProps {
+  open?: boolean
+  onClose: () => void
+  onConfirm: () => void | Promise<void>
+  title: string
+  body: ReactNode
+  /**
+   * Repeats the VERB of the act — « Remplacer le contenu de cette page ».
+   * « Confirmer », « OK », « Valider » and « Oui » are refused: a generic verb
+   * in front of an irreversible write is how a page nobody meant to lose is lost.
+   */
+  confirmLabel: string
+  cancelLabel?: string
+  /**
+   * `danger` means something the owner already has is about to be overwritten.
+   * It is the tone that has to name what gets replaced, in `title` and `body`.
+   */
+  tone?: 'neutral' | 'danger'
+  /** The caller's own in-flight flag. Disables both buttons. */
+  busy?: boolean
+  /** Controls that qualify the act — a scope choice, for instance. */
+  children?: ReactNode
+}
+
+export function ConfirmModal({
+  open = true, onClose, onConfirm, title, body,
+  confirmLabel, cancelLabel = 'Annuler', tone = 'neutral', busy = false, children,
+}: ConfirmModalProps) {
+  const [pending, setPending] = useState(false)
+  const danger = tone === 'danger'
+  const inFlight = busy || pending
+
+  // Same idea as seriesColor above: the rule is stated where it is broken,
+  // in development, rather than discovered on a screenshot after release.
+  useEffect(() => {
+    if (!open || process.env.NODE_ENV === 'production') return
+    if (GENERIC_CONFIRM_LABELS.includes(confirmLabel.trim().toLowerCase())) {
+      console.warn(`[ConfirmModal] « ${confirmLabel} » ne dit pas ce qui va se passer. Reprenez le verbe de l'acte, par exemple « Remplacer le contenu de cette page ».`)
+    }
+  }, [open, confirmLabel])
+
+  return (
+    <Modal
+      open={open}
+      onClose={onClose}
+      title={title}
+      size="md"
+      footer={
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 'var(--space-3)', flexWrap: 'wrap' }}>
+          <Button variant="secondary" onClick={onClose} disabled={inFlight}>{cancelLabel}</Button>
+          {/* The destructive act carries a glyph as well as the red: colour
+              alone is not a warning for a reader who cannot see it. */}
+          <Button
+            variant={danger ? 'danger' : 'primary'}
+            icon={danger ? TriangleAlert : undefined}
+            loading={inFlight}
+            onClick={async () => {
+              setPending(true)
+              try { await onConfirm() } finally { setPending(false) }
+            }}
+          >
+            {confirmLabel}
+          </Button>
+        </div>
+      }
+    >
+      <div className="panel__body" style={{ display: 'grid', gap: 'var(--space-4)' }}>
+        {danger ? (
+          <div
+            className="inset"
+            style={{ borderLeft: '3px solid var(--status-critical)', display: 'flex', gap: 'var(--space-3)', alignItems: 'flex-start' }}
+          >
+            <TriangleAlert size={16} color="var(--status-critical)" style={{ flexShrink: 0, marginTop: 2 }} aria-hidden="true" />
+            {/* --ink-secondary, not .meta: --ink-muted on --surface-inset is
+                4,42:1, under AA, and this is the text the decision rests on. */}
+            <div style={{ color: 'var(--ink-secondary)' }}>{body}</div>
+          </div>
+        ) : (
+          <div style={{ color: 'var(--ink-secondary)' }}>{body}</div>
+        )}
+        {children}
+      </div>
+    </Modal>
   )
 }

@@ -127,6 +127,98 @@ export function buildPageSlug(input: SlugInput): string {
   return capLength(dedupe(words).slice(0, MAX_SLUG_WORDS)).join('-') || 'page'
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Resolving a slug against the addresses the site already occupies
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// buildPageSlug says what a page SHOULD be called. It knows nothing of what the
+// site already publishes, so two sibling briefs produce the same address and the
+// second page ends up competing with the first — a page that ranks, that the
+// owner did not ask us to touch.
+//
+// resolveFreeSlug is the other half of that sentence: the same single factory,
+// read against the paths already taken. It runs BEFORE the first token is
+// generated, so a collision costs a decision instead of a page.
+
+/**
+ * The outcome of confronting a proposed slug with what is already online.
+ *
+ * `slug` is a slug — no leading slash, this is what goes into `generations.slug`.
+ * `from` and `occupiedBy` are paths, because both name an ADDRESS that is
+ * already taken: one gets struck through in the plan, the other gets linked.
+ */
+export type SlugResolution =
+  | { status: 'free'; slug: string }
+  | { status: 'disambiguated'; slug: string; from: string; token: string }
+  | { status: 'collision'; occupiedBy: string }
+
+/**
+ * Compare on paths: `taken` carries normalized paths, not bare slugs.
+ *
+ * Local on purpose. This module imports nothing, which is what makes its tests
+ * runnable without a database, without a network and without a pipeline — and
+ * a slug decision is not a reason to give that up.
+ */
+function asPath(slug: string): string {
+  return `/${slug}`.toLowerCase()
+}
+
+/** The phrase buildPageSlug would build from, in the same order of preference. */
+function subjectOf(input: SlugInput): string {
+  return (
+    [input.proposed, input.focusKeyword, input.title]
+      .map((candidate) => (candidate ?? '').trim())
+      .find((candidate) => candidate.length > 0) ?? ''
+  )
+}
+
+/**
+ * Find an address for this page that no existing one already holds.
+ *
+ * NO NUMERIC SUFFIX, EVER. `-2` is not a disambiguation, it is a confession:
+ * it states in the URL itself that the two pages are the same page. It would
+ * also always succeed, which is exactly the failure — a page with nothing new
+ * to say must be refused before it is written, not renamed until it fits.
+ *
+ * So the only way out of a collision is a word that carries meaning: a
+ * district, a service angle, a trade precision. They are tried in the order
+ * they were given, because that order is editorial and not technical, and the
+ * first one that frees the address wins.
+ */
+export function resolveFreeSlug(
+  input: SlugInput,
+  taken: ReadonlySet<string>,
+  disambiguators: readonly string[],
+): SlugResolution {
+  const base = buildPageSlug(input)
+  if (!taken.has(asPath(base))) return { status: 'free', slug: base }
+
+  const subject = subjectOf(input)
+
+  for (const token of disambiguators) {
+    // Same factory, never a second one: the candidate goes back through
+    // buildPageSlug and comes out with the same word cap, the same character
+    // cap and the same town at the end.
+    const candidate = buildPageSlug({ ...input, proposed: `${token} ${subject}` })
+
+    // A candidate identical to the base is not a candidate. dedupe() absorbs a
+    // token the slug already carries — a disambiguator equal to the town is the
+    // ordinary case — and it would report the occupied address as free.
+    if (candidate === base) continue
+
+    // Freedom is checked on the TRUNCATED result, never on the phrase we asked
+    // for. Adding a word at the front pushes the last one past the seven-word
+    // cap, and the word that fell may be the only one that told this page apart
+    // from a sibling: `taxi-…-assis-professionnalise-troyes` and
+    // `…-assis-troyes` are two different addresses right up to the cap.
+    if (!taken.has(asPath(candidate))) {
+      return { status: 'disambiguated', slug: candidate, from: asPath(base), token }
+    }
+  }
+
+  return { status: 'collision', occupiedBy: asPath(base) }
+}
+
 function dedupe(words: string[]): string[] {
   const seen = new Set<string>()
   return words.filter((word) => {

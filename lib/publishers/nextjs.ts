@@ -39,6 +39,18 @@ export interface NextJsPublishOptions {
    * is set, since publication already targets production.
    */
   autoPromote?: boolean
+  /**
+   * Authorise overwriting ONE named page the engine did not write.
+   *
+   * The symmetric key to WordPress's `TargetOptions.replaces`, with the same
+   * rule: the guard below lifts only when `path` matches the slug about to be
+   * committed, exactly. Any other value and `/slug` is refused as 'occupe',
+   * unchanged. Absent, nothing here behaves differently.
+   *
+   * No `remoteId`: a Next.js repository has no remote id, and inventing one to
+   * mirror the WordPress shape would be a field nobody could fill.
+   */
+  replaces?: { path: string }
 }
 
 /**
@@ -51,6 +63,21 @@ export interface NextJsPublishOptions {
 function withRef(url: string, branch?: string): string {
   if (!branch) return url
   return `${url}${url.includes('?') ? '&' : '?'}ref=${encodeURIComponent(branch)}`
+}
+
+/**
+ * `/taxi-troyes`, `taxi-troyes` and `/Taxi-Troyes/` name the same page.
+ *
+ * The only comparison in this file that decides whether an existing file may be
+ * overwritten, so it is deliberately narrow: slashes and case, nothing else. No
+ * prefix match, no "starts with", no route-group awareness — a looser rule here
+ * turns a named target back into a blanket permission.
+ */
+function samePagePath(a: string, b: string): boolean {
+  const normalise = (value: string) =>
+    value.split(/[?#]/)[0].replace(/^\/+/, '').replace(/\/+$/, '').toLowerCase()
+
+  return normalise(a) === normalise(b)
 }
 
 /**
@@ -140,14 +167,20 @@ export async function publishToNextJs(opts: NextJsPublishOptions): Promise<NextJ
     const pagePath = `${profile.pageFolder}/${page.slug}/page.tsx`
     const existing = await readExistingPage(repoApi, headers, pagePath, branch)
 
-    // Never overwrite a page a human wrote.
+    // Never overwrite a page a human wrote — unless a human named that page.
     //
     // The commit is an upsert on a path derived from a generated slug, so a slug
     // that happens to match an existing route replaces that route's source. It
     // nearly happened: a pillar page's cleaned-up slug came out as
     // `/taxi-troyes`, which the site already served as a hand-written page. The
     // engine would have destroyed it and reported a successful publication.
-    if (existing && !existing.content.includes(GENERATED_MARKER)) {
+    //
+    // `replaces` is the one way past this, and it is a KEY, not a switch: it has
+    // to name the very path being written. A mismatch is refused exactly as
+    // before, because a target that could point elsewhere would authorise
+    // exactly the overwrite this guard exists to prevent.
+    const authorised = opts.replaces !== undefined && samePagePath(opts.replaces.path, page.slug)
+    if (existing && !authorised && !existing.content.includes(GENERATED_MARKER)) {
       return {
         success: false,
         refusal: 'occupe',
@@ -224,6 +257,79 @@ export async function publishToNextJs(opts: NextJsPublishOptions): Promise<NextJ
       success: false,
       error: error instanceof Error ? error.message : 'Erreur réseau GitHub',
     }
+  }
+}
+
+export interface NextJsProbeOptions {
+  githubRepo: string
+  githubToken: string
+  /** Read from this branch, so the answer describes the tree we would write to. */
+  branch?: string
+  /**
+   * The profile the analyzer stored, when there is one. Absent, the probe pays
+   * for a `detectProfileLite` — it cannot know where pages live otherwise, and
+   * guessing `src/app` would report every slug free on a repo using `app/(seo)`.
+   */
+  repoProfile?: RepoProfile | null
+  slug: string
+}
+
+export interface NextJsProbe {
+  /** The site sends this path somewhere else: a page committed here is unreachable. */
+  redirected: boolean
+  /** A `page.tsx` already exists at this path. */
+  occupied: boolean
+  /**
+   * The occupying file carries the generation marker.
+   *
+   * Reported, never acted on here: whether being ours makes an address writable
+   * is the caller's question, and `publishToNextJs` and `probeSlugFree` answer
+   * it differently on purpose.
+   */
+  ours: boolean
+}
+
+/**
+ * Is `/slug` free in this repository — asked WITHOUT writing anything.
+ *
+ * The same two guards `publishToNextJs` applies before it commits (steps 2 and
+ * 3), lifted out so they can be asked before a single token is spent. They were
+ * previously reachable only by attempting a publication, which meant a page had
+ * to be generated and paid for to discover that its address was taken.
+ *
+ * The guards are not re-implemented: `isRedirectSource` and `GENERATED_MARKER`
+ * are the very same ones the publisher uses. A second definition of "occupied"
+ * would let the probe say free and the publisher refuse minutes later.
+ *
+ * Throws whatever the network or GitHub throws. The caller decides what an
+ * unanswerable question means — `probeSlugFree` treats it as "learned nothing",
+ * which is not the same as "free".
+ */
+export async function probeNextJsPath(opts: NextJsProbeOptions): Promise<NextJsProbe> {
+  const { githubRepo, githubToken, branch, slug } = opts
+  const repoApi = `https://api.github.com/repos/${githubRepo}`
+  const headers = {
+    Authorization: `token ${githubToken}`,
+    Accept: 'application/vnd.github+json',
+    'Content-Type': 'application/json',
+  }
+
+  const profile = opts.repoProfile || (await detectProfileLite(repoApi, headers, branch))
+
+  // Checked first, and separately from the file, because a route group makes the
+  // two disagree: `src/app/(seo)/taxi-troyes/page.tsx` serves `/taxi-troyes`,
+  // and the rule intercepting that URL lives in middleware, not in the tree.
+  if (isRedirectSource(slug, profile.redirectSources)) {
+    return { redirected: true, occupied: false, ours: false }
+  }
+
+  const existing = await readExistingPage(repoApi, headers, `${profile.pageFolder}/${slug}/page.tsx`, branch)
+  if (!existing) return { redirected: false, occupied: false, ours: false }
+
+  return {
+    redirected: false,
+    occupied: true,
+    ours: existing.content.includes(GENERATED_MARKER),
   }
 }
 

@@ -22,6 +22,7 @@ import type { ReactNode } from 'react'
 import { EmptyState, IconBox, PageHeader, StatusBadge, formatMetric } from '@/components/ui'
 import { listSites } from '@/lib/db'
 import { createServiceClient } from '@/lib/supabase'
+import { freshnessOf, type BlindReason, type InventoryFreshness } from '@/src/core/domain/existing/inventory'
 import { AnalyzeRepoButton } from './AnalyzeRepoButton'
 
 export const dynamic = 'force-dynamic'
@@ -50,9 +51,35 @@ interface SiteFacts {
   publishedPages: number
   /** Editorial slots still waiting: what the site is about to produce. */
   plannedSlots: number
+  /**
+   * Pages the crawler has actually seen — the same figure /sites/[id]/existing
+   * serves as `summary.crawledCount`, so the two screens can never disagree.
+   *
+   * `null`, never 0, when no analysis has ever completed AND nothing was read:
+   * "no crawl, so nothing to count" and "zero page" are two different facts, and
+   * a card that prints 0 for the first one is a card that lies.
+   */
+  crawledCount: number | null
+  /** Same derivation as the inventory, so 'fresh' / 'stale' / 'blind' mean one thing. */
+  freshness: InventoryFreshness
 }
 
-const NO_FACTS: SiteFacts = { campaigns: 0, publishedPages: 0, plannedSlots: 0 }
+/**
+ * The shape of "we read nothing at all". The domain answers that question
+ * itself; writing the blind state by hand here would be one more place in the
+ * repo deciding what an empty inventory is.
+ *
+ * The date passed is never read: with no timestamp there is no age to compute,
+ * so `freshnessOf` returns on its first branch. Handing it a real clock would
+ * suggest this constant depends on when the module was loaded.
+ */
+const NO_FACTS: SiteFacts = {
+  campaigns: 0,
+  publishedPages: 0,
+  plannedSlots: 0,
+  crawledCount: null,
+  freshness: freshnessOf(null, false, 0, new Date(0)),
+}
 
 /**
  * Counted server-side, one exact count per site rather than one big select.
@@ -66,6 +93,7 @@ async function readSiteFacts(siteIds: string[]): Promise<Map<string, SiteFacts>>
   if (siteIds.length === 0) return facts
 
   const supabase = createServiceClient()
+  const now = new Date()
   const { data: campaignRows, error } = await supabase.from('campaigns').select('id,site_id').in('site_id', siteIds)
   if (error) throw new Error(error.message)
 
@@ -80,7 +108,7 @@ async function readSiteFacts(siteIds: string[]): Promise<Map<string, SiteFacts>>
     siteIds.map(async (siteId) => {
       const campaignIds = campaignsBySite.get(siteId) ?? []
 
-      const [published, planned] = await Promise.all([
+      const [published, planned, crawled, completedRun] = await Promise.all([
         supabase
           .from('generations')
           .select('id', { count: 'exact', head: true })
@@ -93,12 +121,55 @@ async function readSiteFacts(siteIds: string[]): Promise<Map<string, SiteFacts>>
             .in('campaign_id', campaignIds)
             .eq('status', 'planned')
           : null,
+        /*
+         * One read, two facts: how many pages the crawler saw, and when it last
+         * saw one. `head: true` is impossible here — the date is the payload —
+         * but `limit(1)` keeps the transfer to a single row while `count:
+         * 'exact'` still counts the whole set server-side.
+         *
+         * `origin = 'crawl'` is not optional. An 'engine' row carries its
+         * PUBLICATION date in `crawled_at` (lib/existing/inventory.ts:653-660),
+         * so including those rows would report "analysed yesterday" about a site
+         * nobody has ever crawled — the exact lie freshness exists to prevent.
+         */
+        supabase
+          .from('site_pages')
+          .select('crawled_at', { count: 'exact' })
+          .eq('site_id', siteId)
+          .eq('origin', 'crawl')
+          // nullsFirst: false, or PostgreSQL sorts NULLS FIRST descending and a
+          // row with no date would hide the real latest crawl.
+          .order('crawled_at', { ascending: false, nullsFirst: false })
+          .limit(1),
+        // The one fact the pages themselves cannot express: "analysed and found
+        // nothing" versus "never analysed". Two different sentences on screen,
+        // and two different things for the operator to go and fix.
+        supabase
+          .from('analysis_runs')
+          .select('id', { count: 'exact', head: true })
+          .eq('site_id', siteId)
+          .eq('status', 'completed'),
       ])
+
+      const crawledCount = crawled.count ?? 0
+      const lastCrawlAt = (crawled.data as Array<{ crawled_at: string | null }> | null)?.[0]?.crawled_at ?? null
+      const hasCompletedRun = (completedRun.count ?? 0) > 0
+      const freshness = freshnessOf(lastCrawlAt, hasCompletedRun, crawledCount, now)
 
       facts.set(siteId, {
         campaigns: campaignIds.length,
         publishedPages: published.count ?? 0,
         plannedSlots: planned?.count ?? 0,
+        /*
+         * The rule the inventory API already applies, applied identically here:
+         * a count of 0 on a site that was never analysed is not a measurement,
+         * it is the absence of one. A crawl that ran and reported nothing keeps
+         * its 0 — that IS a measurement, and it points at a sitemap, not at a
+         * missing analysis.
+         */
+        crawledCount:
+          crawledCount === 0 && freshness.blindReason === 'jamais-analyse' ? null : crawledCount,
+        freshness,
       })
     })
   )
@@ -155,6 +226,24 @@ function nextStep(site: SiteRow, facts: SiteFacts | null): NextStep | null {
   // Beyond this point every rung is a count. Without them, saying "create a
   // campaign" could be plain wrong — better to say nothing than to invent zero.
   if (!facts) return null
+
+  /*
+   * The only point in the journey where a blind inventory is named BEFORE any
+   * token is spent. It is a rung, not a barrier: the engine keeps producing on a
+   * site it has never read — it just checks each address against the live site
+   * instead of against what it knows.
+   *
+   * The trigger is "the engine knows no page", which covers both blind reasons
+   * that matter here: never analysed, and analysed without finding anything. A
+   * crawl merely gone stale is not one of them — those pages are still known.
+   */
+  if ((facts.crawledCount ?? 0) === 0) {
+    return {
+      label: 'Analyser le site',
+      href: '/strategy/new',
+      why: 'Le moteur ne connaît aucune page de ce site : il générera sans savoir ce qui est déjà en ligne, et peut doubler une page qui vous positionne.',
+    }
+  }
 
   if (facts.campaigns === 0) {
     return {
@@ -271,6 +360,7 @@ function SiteCard({ site, facts }: { site: SiteRow; facts: SiteFacts | null }) {
         <div style={{ display: 'grid', gap: 'var(--space-2)' }}>
           <FactRow label="Connecteur" value={<span className="chip">{connector.label}</span>} />
           {site.type === 'wordpress' ? <WordPressFacts site={site} /> : <NextJsFacts site={site} />}
+          <FactRow label="Pages connues" value={<KnownPages siteId={site.id} facts={facts} />} />
           <FactRow
             label="Google"
             value={
@@ -366,6 +456,69 @@ function NextJsFacts({ site }: { site: SiteRow }) {
         }
       />
     </>
+  )
+}
+
+/**
+ * Only the 'blind' labels are overridden.
+ *
+ * `STATUS_STYLES.blind` reads "Site jamais analysé", which is true of exactly
+ * one of the three ways to be blind and false of the other two: a crawl that ran
+ * and found nothing, and a crawl too old to describe today's site, both send the
+ * operator to a completely different place. 'fresh' and 'stale' keep the shared
+ * wording — a screen that renames every badge is a translation table growing
+ * back.
+ */
+const BLIND_LABELS: Record<BlindReason, string> = {
+  'jamais-analyse': 'Site jamais analysé',
+  'aucune-page-trouvee': 'Analysé, aucune page trouvée',
+  'crawl-trop-vieux': 'Inventaire trop ancien',
+}
+
+/** The sentence behind the badge — a greyed fact with no explanation is a dead end. */
+function freshnessTitle(freshness: InventoryFreshness): string {
+  const age = freshness.ageDays === null ? null : `analysé il y a ${freshness.ageDays} jour${freshness.ageDays > 1 ? 's' : ''}`
+
+  switch (freshness.blindReason) {
+    case 'jamais-analyse':
+      return 'Aucune analyse enregistrée : le moteur ne sait rien de ce qui est déjà en ligne.'
+    case 'aucune-page-trouvee':
+      return 'Une analyse a bien tourné et n’a rapporté aucune page — sitemap injoignable, ou site rendu entièrement côté client.'
+    case 'crawl-trop-vieux':
+      return `${age ?? 'Analysé il y a longtemps'} : ces pages ne décrivent plus le site d’aujourd’hui.`
+    default:
+      return age ? `Inventaire ${age}.` : 'Inventaire à jour.'
+  }
+}
+
+/**
+ * What the engine knows of this site, and how to go and look at it.
+ *
+ * The link stays reachable in every case, including when the count could not be
+ * read: /sites/[id]/existing says "never analysed" better than a card can, and
+ * removing the only way in would make an unreadable counter look like a broken
+ * site.
+ */
+function KnownPages({ siteId, facts }: { siteId: string; facts: SiteFacts | null }) {
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 'var(--space-2)', justifyContent: 'flex-end' }}>
+      {facts === null ? (
+        <span className="meta">comptage indisponible</span>
+      ) : (
+        <>
+          {/* No number at all rather than a 0 nobody measured. The badge beside
+              it carries the reason, so the row still says something. */}
+          {facts.crawledCount !== null && <span className="num">{formatMetric(facts.crawledCount, 'compact')}</span>}
+          <span title={freshnessTitle(facts.freshness)}>
+            <StatusBadge
+              status={facts.freshness.state}
+              label={facts.freshness.blindReason ? BLIND_LABELS[facts.freshness.blindReason] : undefined}
+            />
+          </span>
+        </>
+      )}
+      <Link href={`/sites/${siteId}/existing`} className="btn-link">Voir</Link>
+    </span>
   )
 }
 

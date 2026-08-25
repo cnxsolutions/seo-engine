@@ -1,7 +1,13 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // Text Utilities
-// SEO Engine - Validation Pipeline
-// Shared HTML / French text helpers used by every validator
+// SEO Engine - Domain
+// Shared HTML / French text helpers, and the search-intent vocabulary
+//
+// Ce module vit dans le domaine, et PAS dans src/adapters/rag/validation, parce
+// que les politiques pures (identite editoriale, rotation de posts) s'appuient
+// dessus : une regle de domaine qui importerait un adaptateur inverserait la
+// dependance et viderait le mot « domaine » de son sens. Le deplacement est sans
+// risque : ce fichier n'a AUCUN import, donc aucun cycle ne peut naitre.
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
@@ -322,4 +328,44 @@ export function cosineSimilarityOfTokens(tokensA: string[], tokensB: string[]): 
   // Clamped: floating-point error makes two identical vectors score
   // 1.0000000000000002, which then leaks into every threshold comparison.
   return Math.min(1, dot / (Math.sqrt(magA) * Math.sqrt(magB)))
+}
+
+// ─── Search intent ───────────────────────────────────────────────────────────
+
+/**
+ * Search-intent markers. Two pages that target the same intent with the same
+ * title cannibalise each other even when their prose differs — which is exactly
+ * the failure mode of a generator producing one page per city.
+ *
+ * Vocabulaire DEPLACE depuis src/adapters/rag/validation/DuplicateDetector.ts,
+ * ou il etait un `const` module-prive. Deux politiques le lisent desormais : la
+ * detection de duplicat et la comparaison d'identite editoriale. En recopier une
+ * seconde liste serait garantir que les deux divergent silencieusement.
+ *
+ * Aucun de ces motifs ne porte le drapeau `g` : un RegExp global garde son
+ * `lastIndex` entre deux appels a `.test()`, donc une detection sur deux
+ * repartirait du milieu du texte precedent et manquerait l'intention.
+ */
+export const INTENT_MARKERS: ReadonlyArray<{ name: string; pattern: RegExp }> = [
+  { name: 'question', pattern: /\b(comment|pourquoi|quand|quel|quelle|quels|quelles|combien)\b/ },
+  { name: 'transactional', pattern: /\b(prix|tarif|tarifs|devis|cout|couts|acheter|commander|reserver|urgence|depannage|pas cher)\b/ },
+  { name: 'comparison', pattern: /\b(comparatif|comparaison|meilleur|meilleure|meilleurs|top|versus|alternative|alternatives)\b/ },
+  { name: 'local', pattern: /\b(pres de moi|a proximite|proximite|quartier|autour de moi|alentours)\b/ },
+  { name: 'informational', pattern: /\b(guide|definition|etapes|conseils|astuces|tout savoir|checklist)\b/ },
+]
+
+/**
+ * Detects which search intents a normalized text targets.
+ *
+ * L'entree DOIT etre passee par normalizeForMatch : les motifs sont ecrits sans
+ * accent et en minuscules ("cout", "a proximite"). Un texte brut ferait manquer
+ * « coût » et « à proximité », c'est-a-dire precisement les formes que le modele
+ * ecrit.
+ */
+export function detectIntents(normalizedText: string): Set<string> {
+  const intents = new Set<string>()
+  for (const marker of INTENT_MARKERS) {
+    if (marker.pattern.test(normalizedText)) intents.add(marker.name)
+  }
+  return intents
 }

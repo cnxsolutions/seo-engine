@@ -25,24 +25,32 @@
 
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import {
-  CalendarDays, CheckCircle2, Eye, Info, Loader2, Plus, RefreshCw, Search, Target, TriangleAlert, X,
+  CalendarDays, CheckCircle2, Eye, Info, Loader2, Plus, RefreshCw, Search, Target, TriangleAlert,
   type LucideIcon,
 } from 'lucide-react'
 import Link from 'next/link'
-import { Button, EmptyState, PageHeader, StatusBadge, formatMetric } from '@/components/ui'
-import type { Campaign, CyclePlan, PlanPreviewItem } from '@/lib/types'
+import { Button, EmptyState, Notice, PageHeader, StatusBadge, formatDay, formatMetric, shortenUrl } from '@/components/ui'
+import { Modal } from '@/components/charts'
+import {
+  PAGE_TYPE_LABELS,
+  type Campaign,
+  type CyclePlan,
+  type PlanItemAction,
+  type PlanPreviewItem,
+  type SlugResolutionDto,
+} from '@/lib/types'
+// `import type`, effacé à la compilation : rien de lib/google/ n'atteint ce
+// bundle client. La forme est celle que `detectCannibalization` produit déjà et
+// que `getGscPlanningSignals` transporte — on l'affiche, on ne la recopie pas
+// sous un second nom qui divergerait.
+import type { CannibalizedQuery } from '@/lib/google/performance'
 
 const CYCLE_DURATIONS = [7, 14, 21, 30]
 
-/** Mirrors the `--z-modal` token: csstype rejects a custom property here. */
-const MODAL_Z = 100
-
-const PAGE_TYPE_LABELS: Record<string, string> = {
-  pillar: 'Pilier',
-  child: 'Fille',
-  alternative: 'Alternative',
-  comparative: 'Comparatif',
-  local_pack: 'Local Pack',
+/** The shared dictionary, with the passthrough a stored plan needs: `page_type`
+ *  comes back from the database as text and may name a type the union dropped. */
+function pageTypeLabel(pageType: string): string {
+  return PAGE_TYPE_LABELS[pageType as keyof typeof PAGE_TYPE_LABELS] ?? pageType
 }
 
 const PLAN_STATUS_LABELS: Record<string, { label: string; badge: string }> = {
@@ -98,7 +106,16 @@ interface GscProof {
   strikingDistance: MeasuredQuery[]
   lowCtrPages: number
   deadPages: number
-  cannibalized: number
+  /**
+   * LES COUPLES, pas leur nombre.
+   *
+   * « 3 requêtes cannibalisées » ne permet aucune décision : ni laquelle, ni
+   * quelle page tient la place, ni lesquelles la lui disputent. Et le compteur
+   * valait 0 dans deux situations opposées — « rien de disputé » et « Search
+   * Console n'est pas connectée » — ce qui est exactement la façon dont un
+   * tableau de bord finit par rassurer sur ce qu'il n'a pas mesuré.
+   */
+  cannibalized: CannibalizedQuery[]
 }
 
 interface PlanProvenance {
@@ -145,6 +162,40 @@ function parseSerp(raw: unknown): SerpProof[] {
   }))
 }
 
+/**
+ * La cannibalisation, relue défensivement comme le reste de ce panneau.
+ *
+ * Une forme absente retombe sur une liste vide, jamais sur une erreur de rendu :
+ * ce bloc décrit ce que le plan a mesuré, et il ne doit pas pouvoir casser
+ * l'écran qui montre le plan lui-même.
+ */
+function parseCannibalized(raw: unknown): CannibalizedQuery[] {
+  if (!Array.isArray(raw)) return []
+  return raw
+    .filter(isRecord)
+    .map((entry) => ({
+      query: str(entry.query) ?? '',
+      impressions: num(entry.impressions) ?? 0,
+      clicks: num(entry.clicks) ?? 0,
+      pages: (Array.isArray(entry.pages) ? entry.pages : [])
+        .filter(isRecord)
+        .map((page) => ({
+          pageUrl: str(page.pageUrl) ?? '',
+          impressions: num(page.impressions) ?? 0,
+          clicks: num(page.clicks) ?? 0,
+          position: num(page.position) ?? 0,
+        }))
+        .filter((page) => page.pageUrl),
+      winner: str(entry.winner) ?? '',
+      losers: (Array.isArray(entry.losers) ? entry.losers : [])
+        .map(str)
+        .filter((value): value is string => value !== null),
+    }))
+    // Un conflit dont on ne sait nommer ni la requête ni la page gagnante n'est
+    // pas affichable : le taire vaut mieux qu'une ligne à trous.
+    .filter((entry) => entry.query !== '' && entry.winner !== '')
+}
+
 function parseGsc(raw: unknown): GscProof | null {
   if (!isRecord(raw)) return null
   // `available: false` is the module's way of saying "draw no conclusion".
@@ -166,7 +217,7 @@ function parseGsc(raw: unknown): GscProof | null {
     strikingDistance,
     lowCtrPages: size(raw.lowCtrPages),
     deadPages: size(raw.deadPages),
-    cannibalized: size(raw.cannibalized),
+    cannibalized: parseCannibalized(raw.cannibalized),
   }
 }
 
@@ -464,7 +515,7 @@ function CampaignRow({
           </div>
           <div className="meta" style={{ marginTop: 'var(--space-1)' }}>
             {campaign.site?.name ?? 'site inconnu'} · {campaign.business_type} · {campaign.communes.length} commune
-            {campaign.communes.length > 1 ? 's' : ''} · {(campaign.page_types ?? ['child']).map((type) => PAGE_TYPE_LABELS[type] ?? type).join(', ')}
+            {campaign.communes.length > 1 ? 's' : ''} · {(campaign.page_types ?? ['child']).map(pageTypeLabel).join(', ')}
           </div>
           <div className="meta" style={{ marginTop: 'var(--space-1)' }}>
             {plan === undefined
@@ -512,13 +563,13 @@ function PlanModal({
   const [days, setDays] = useState(plan.cycle_duration_days || 14)
   const [confirming, setConfirming] = useState(false)
 
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) => { if (event.key === 'Escape') onClose() }
-    document.addEventListener('keydown', onKey)
-    return () => document.removeEventListener('keydown', onKey)
-  }, [onClose])
-
   const words = useMemo(() => items.reduce((sum, item) => sum + (item.estimated_word_count || 0), 0), [items])
+
+  // CE QUE CE PLAN FAIT À L'EXISTANT, vu AVANT le premier jeton. Un plan relu
+  // depuis la base ne porte pas `action` : ses briefs tombent tous dans
+  // « Nouvelles pages » et aucun verdict n'est inventé pour eux.
+  const groups = useMemo(() => groupByAction(items), [items])
+  const hasVerdicts = useMemo(() => items.some((item) => item.action !== undefined), [items])
 
   // A brief is backed by Search Console when it links to a page the data showed
   // ranking 5-20. That is a join on two real values, not a guess at intent.
@@ -532,96 +583,44 @@ function PlanModal({
   const running = plan.status === 'executing' || plan.status === 'confirmed'
 
   return (
-    <div
-      role="dialog"
-      aria-modal="true"
-      aria-label={`Plan du cycle ${plan.cycle_number} — ${campaign.name}`}
-      onClick={onClose}
-      style={{
-        position: 'fixed', inset: 0, zIndex: MODAL_Z,
-        background: 'var(--surface-scrim)', padding: 'var(--space-6)',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-      }}
-    >
-      <div
-        className="panel"
-        onClick={(event) => event.stopPropagation()}
-        style={{ width: '100%', maxWidth: 1000, maxHeight: '86vh', display: 'flex', flexDirection: 'column', boxShadow: 'var(--shadow-lg)' }}
-      >
-        <div className="panel__header">
-          <div style={{ minWidth: 0 }}>
-            <h2 className="card-title">Plan du cycle {plan.cycle_number} — {campaign.name}</h2>
-            <div className="meta">
+    <Modal
+      title={`Plan du cycle ${plan.cycle_number} — ${campaign.name}`}
+      subtitle={
+        <>
+          {hasVerdicts ? (
+            <>
+              <span className="num">{groups.create.length}</span> nouvelle
+              {groups.create.length > 1 ? 's' : ''} page{groups.create.length > 1 ? 's' : ''} ·{' '}
+              <span className="num">{groups.refresh.length}</span> mise
+              {groups.refresh.length > 1 ? 's' : ''} à jour ·{' '}
+              <span className="num">{groups.skip.length}</span> écartée{groups.skip.length > 1 ? 's' : ''} sur{' '}
+              {items.length} sujet{items.length > 1 ? 's' : ''} ·{' '}
+            </>
+          ) : (
+            <>
               {items.length} page{items.length > 1 ? 's' : ''} sur {plan.cycle_duration_days} jours ·{' '}
-              {formatMetric(words, 'compact')} mots estimés · plan créé le {formatDate(plan.created_at)}
-            </div>
-          </div>
-          <button type="button" className="btn-icon" onClick={onClose} aria-label="Fermer">
-            <X size={15} />
-          </button>
-        </div>
-
-        <div style={{ overflow: 'auto', flex: 1 }}>
-          <div style={{ padding: 'var(--space-5) var(--space-5) 0' }}>
-            <ProvenancePanel provenance={provenance} items={items} />
-          </div>
-
-          <div className="scroll-x" style={{ padding: 'var(--space-5)' }}>
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th>Date</th>
-                  <th>Type</th>
-                  <th>Requête cible</th>
-                  <th>Intention</th>
-                  <th>Titre proposé</th>
-                  <th style={{ textAlign: 'right' }}>Longueur</th>
-                </tr>
-              </thead>
-              <tbody>
-                {items.map((item, index) => {
-                  const measured = (item.internal_link_targets ?? [])
-                    .map((target) => measuredByUrl.get(target))
-                    .find(Boolean)
-
-                  return (
-                    <tr key={item.id || index}>
-                      <td style={{ whiteSpace: 'nowrap' }}>{formatDay(item.scheduled_date)}</td>
-                      <td><span className="chip">{PAGE_TYPE_LABELS[item.page_type] ?? item.page_type}</span></td>
-                      <td>
-                        <div className="cell-strong">{item.target_keyword}</div>
-                        <div className="meta">
-                          {item.target_city}
-                          {measured && (
-                            <span
-                              className="badge badge-success"
-                              style={{ marginLeft: 'var(--space-2)' }}
-                              title={`Search Console : "${measured.query}" en position ${measured.position.toFixed(1)}, ${measured.impressions} impressions sur ${measured.pageUrl}`}
-                            >
-                              mesuré
-                            </span>
-                          )}
-                        </div>
-                      </td>
-                      <td>{item.search_intent || '—'}</td>
-                      <td style={{ maxWidth: 280 }}>
-                        <div className="truncate" title={item.proposed_title}>{item.proposed_title}</div>
-                        <div className="meta truncate" title={item.proposed_slug}>/{item.proposed_slug}</div>
-                      </td>
-                      <td className="cell-num">~{formatMetric(item.estimated_word_count, 'number')} mots</td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        <div className="panel__footer" style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)', flexWrap: 'wrap' }}>
+            </>
+          )}
+          {formatMetric(words, 'compact')} mots estimés · plan créé le {formatDate(plan.created_at)}
+        </>
+      }
+      onClose={onClose}
+      size="lg"
+      footer={
+        <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)', flexWrap: 'wrap' }}>
           <span style={{ flex: 1, minWidth: 260 }}>
             {running
               ? 'Ce cycle tourne déjà : génération, publication et re-crawl sont automatiques jusqu’à sa date de fin.'
               : 'Confirmer remplace les créneaux encore planifiés de cette campagne. Les pages déjà générées ou publiées ne bougent pas.'}
+            {/* La ligne qui manquait avant le bouton : confirmer un plan qui
+                contient des mises à jour ne déclenche AUCUN remplacement. */}
+            {groups.refresh.length > 0 && (
+              <>
+                {' '}
+                {groups.refresh.length} de ces lignes mettront à jour une page existante — elles ne partiront
+                jamais sans votre validation à l’étape 5.
+              </>
+            )}
           </span>
 
           {confirmable && (
@@ -658,9 +657,268 @@ function PlanModal({
             </Link>
           )}
         </div>
+      }
+    >
+      {/* The body pads its own regions rather than sitting in a `.panel__body`:
+          the plan table is a `.scroll-x` that must reach the panel edges. */}
+      <div style={{ padding: 'var(--space-5) var(--space-5) 0' }}>
+        <ProvenancePanel provenance={provenance} items={items} />
       </div>
-    </div>
+
+      {/* TROIS GROUPES, ORDRE FIXE. Un tableau unique cachait la seule chose que
+          l'opérateur doit voir avant de dépenser : combien de ces lignes vont
+          toucher à une page qui existe déjà, et lesquelles ne partiront pas. */}
+      <PlanSection
+        title="Nouvelles pages"
+        count={groups.create.length}
+        lede="Aucune page existante ne couvre ces sujets. L’adresse de chacune a été vérifiée au moment du plan."
+        show
+      >
+        <table className="data-table">
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Type</th>
+              <th>Requête cible</th>
+              <th>Intention</th>
+              <th>Titre proposé</th>
+              <th style={{ textAlign: 'right' }}>Longueur</th>
+            </tr>
+          </thead>
+          <tbody>
+            {groups.create.map((item, index) => {
+              const measured = (item.internal_link_targets ?? [])
+                .map((target) => measuredByUrl.get(target))
+                .find(Boolean)
+
+              return (
+                <tr key={item.id || index}>
+                  <td style={{ whiteSpace: 'nowrap' }}>{formatDay(item.scheduled_date)}</td>
+                  <td><span className="chip">{pageTypeLabel(item.page_type)}</span></td>
+                  <td>
+                    <div className="cell-strong">{item.target_keyword}</div>
+                    <div className="meta">
+                      {item.target_city}
+                      {measured && (
+                        <span
+                          className="badge badge-success"
+                          style={{ marginLeft: 'var(--space-2)' }}
+                          title={`Search Console : "${measured.query}" en position ${measured.position.toFixed(1)}, ${measured.impressions} impressions sur ${measured.pageUrl}`}
+                        >
+                          mesuré
+                        </span>
+                      )}
+                    </div>
+                  </td>
+                  <td>{item.search_intent || '—'}</td>
+                  <td style={{ maxWidth: 280 }}>
+                    <div className="truncate" title={item.proposed_title}>{item.proposed_title}</div>
+                    <div
+                      style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', flexWrap: 'wrap', marginTop: 2 }}
+                    >
+                      <span className="meta truncate mono" title={item.proposed_slug}>/{item.proposed_slug}</span>
+                      <SlugState action={item.action} />
+                    </div>
+                  </td>
+                  <td className="cell-num">~{formatMetric(item.estimated_word_count, 'number')} mots</td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </PlanSection>
+
+      <PlanSection
+        title="Pages à rafraîchir"
+        count={groups.refresh.length}
+        lede="Une page couvre déjà ce sujet. Le moteur propose de la mettre à jour plutôt que d’en ajouter une. Rien ne sera remplacé sans votre accord au moment de la publication."
+        show={hasVerdicts}
+        emptyText={
+          provenance.gsc === null
+            ? 'Aucune mise à jour proposée. Search Console n’est pas connectée : le moteur ne voit pas quelles pages sont déjà positionnées, il ne peut juger que sur les titres et les adresses.'
+            : 'Aucune mise à jour proposée : aucun sujet de ce cycle ne recoupe une page déjà en ligne.'
+        }
+      >
+        <table className="data-table">
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Page visée</th>
+              <th>Portée</th>
+              <th>Pourquoi</th>
+              <th>Titre proposé</th>
+            </tr>
+          </thead>
+          <tbody>
+            {groups.refresh.map(({ item, action }, index) => (
+              <tr key={item.id || index}>
+                <td style={{ whiteSpace: 'nowrap' }}>{formatDay(item.scheduled_date)}</td>
+                <td>
+                  <span className="chip mono">{action.targetPath}</span>
+                </td>
+                <td><span className="badge badge-info">{REFRESH_SCOPE_LABELS[action.scope]}</span></td>
+                {/* Les phrases du domaine, RECOPIÉES TELLES QUELLES : elles
+                    portent déjà les chiffres qui ont décidé, et les reformuler
+                    couperait le seul lien entre la décision et sa mesure. */}
+                <td style={{ maxWidth: 340 }}>
+                  {action.evidence.length > 0 ? (
+                    <ul className="meta" style={{ margin: 0, paddingLeft: '1.1rem' }}>
+                      {action.evidence.map((line, i) => <li key={i}>{line}</li>)}
+                    </ul>
+                  ) : (
+                    <span className="meta">Aucun motif enregistré.</span>
+                  )}
+                </td>
+                <td style={{ maxWidth: 260 }}>
+                  <div className="truncate" title={item.proposed_title}>{item.proposed_title}</div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </PlanSection>
+
+      <PlanSection
+        title="Écartées"
+        count={groups.skip.length}
+        lede="Ces sujets n’ont pas été retenus, et voici pourquoi. Une ligne écartée sans motif serait une décision invisible."
+        show={hasVerdicts}
+        emptyText="Aucun sujet écarté : les créneaux de ce cycle produiront tous quelque chose."
+      >
+        <table className="data-table">
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Requête</th>
+              <th>Motifs</th>
+            </tr>
+          </thead>
+          <tbody>
+            {groups.skip.map(({ item, action }, index) => (
+              <tr key={item.id || index}>
+                <td style={{ whiteSpace: 'nowrap' }}>{formatDay(item.scheduled_date)}</td>
+                <td>
+                  <div className="cell-strong">{item.target_keyword}</div>
+                  <div className="meta">{item.target_city}</div>
+                </td>
+                <td style={{ maxWidth: 420 }}>
+                  {action.reasons.length > 0 ? (
+                    <ul className="meta" style={{ margin: 0, paddingLeft: '1.1rem' }}>
+                      {action.reasons.map((reason, i) => <li key={i}>{reason}</li>)}
+                    </ul>
+                  ) : (
+                    <span className="meta">Aucun motif enregistré.</span>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </PlanSection>
+    </Modal>
   )
+}
+
+// ─── Les trois groupes d'un plan ─────────────────────────────────────────────
+
+const REFRESH_SCOPE_LABELS: Record<'metadata' | 'content', string> = {
+  metadata: 'Titre et description',
+  content: 'Contenu complet',
+}
+
+type RefreshAction = Extract<PlanItemAction, { kind: 'refresh' }>
+type SkipAction = Extract<PlanItemAction, { kind: 'skip' }>
+
+interface PlanGroups {
+  create: PlanPreviewItem[]
+  refresh: Array<{ item: PlanPreviewItem; action: RefreshAction }>
+  skip: Array<{ item: PlanPreviewItem; action: SkipAction }>
+}
+
+/**
+ * `item.action?.kind ?? 'create'` — et rien d'autre.
+ *
+ * Un plan écrit avant ce lot ne porte aucun verdict : ses briefs tombent
+ * intégralement dans « Nouvelles pages », ce qui est ce qu'ils étaient. Leur
+ * inventer un verdict rétroactif ferait afficher une décision que personne n'a
+ * prise.
+ */
+function groupByAction(items: PlanPreviewItem[]): PlanGroups {
+  const groups: PlanGroups = { create: [], refresh: [], skip: [] }
+
+  for (const item of items) {
+    const action = item.action
+    if (action?.kind === 'refresh') groups.refresh.push({ item, action })
+    else if (action?.kind === 'skip') groups.skip.push({ item, action })
+    else groups.create.push(item)
+  }
+
+  return groups
+}
+
+/**
+ * Un groupe du plan, ou la phrase qui explique qu'il est vide.
+ *
+ * `show` distingue « ce plan n'a rien à mettre à jour » de « ce plan ne sait
+ * rien de ce qu'il fait à l'existant » : sur un plan relu depuis la base, les
+ * deux sections de verdict ne s'affichent pas du tout, parce qu'un « 0 mise à
+ * jour » y serait une mesure jamais faite.
+ */
+function PlanSection({
+  title, count, lede, show, emptyText, children,
+}: {
+  title: string
+  count: number
+  lede: string
+  show: boolean
+  emptyText?: string
+  children: ReactNode
+}) {
+  if (!show) return null
+
+  return (
+    <section style={{ padding: 'var(--space-5) var(--space-5) 0' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', flexWrap: 'wrap' }}>
+        <h3 className="card-title">{title}</h3>
+        <span className="badge badge-muted">{count}</span>
+      </div>
+      <p className="meta" style={{ margin: 'var(--space-1) 0 var(--space-3)' }}>{lede}</p>
+      {count === 0
+        ? <p className="meta" style={{ margin: 0 }}>{emptyText}</p>
+        : <div className="scroll-x">{children}</div>}
+    </section>
+  )
+}
+
+/**
+ * Ce que la résolution d'adresse a RÉELLEMENT pu prouver.
+ *
+ * Trois états et pas deux : le badge vert n'apparaît que sur une vérification
+ * qui a eu lieu. En régime aveugle, `takenPaths` ne contient que les adresses
+ * posées par ce plan-ci, et écrire « adresse vérifiée libre » ferait passer une
+ * ignorance pour une garantie. Un plan sans verdict n'affiche RIEN.
+ */
+function SlugState({ action }: { action: PlanItemAction | undefined }) {
+  if (action?.kind !== 'create') return null
+
+  const slug: SlugResolutionDto = action.slug
+
+  if (slug.status === 'free') {
+    return <span className="badge badge-success">adresse vérifiée libre</span>
+  }
+
+  if (slug.status === 'disambiguated') {
+    return (
+      <span
+        className="badge badge-info"
+        title={`L’adresse proposée était déjà prise (/${slug.from}). Le moteur a ajouté « ${slug.token} » pour la distinguer.`}
+      >
+        adresse ajustée
+      </span>
+    )
+  }
+
+  return <span className="badge badge-muted" title={slug.reason}>adresse non vérifiée</span>
 }
 
 // ─── Provenance panel ────────────────────────────────────────────────────────
@@ -744,11 +1002,86 @@ function ProvenancePanel({ provenance, items }: { provenance: PlanProvenance; it
                 </li>
                 <li>{provenance.gsc.strikingDistance.length} requêtes en position 5-20 exploitables</li>
                 <li>{provenance.gsc.lowCtrPages} pages vues sans clic · {provenance.gsc.deadPages} sujets sans demande</li>
-                <li>{provenance.gsc.cannibalized} requêtes cannibalisées, interdites de nouvelle page</li>
               </>
             )}
           </SourceBlock>
         </div>
+      )}
+
+      {provenance.reported && <CannibalizationBlock gsc={provenance.gsc} />}
+    </div>
+  )
+}
+
+/**
+ * Les requêtes que deux pages du site se disputent — TROIS ÉTATS, TROIS PHRASES.
+ *
+ * Le compteur qui vivait ici valait 0 dans deux situations opposées : « aucun
+ * conflit » et « Search Console n'est pas connectée, donc on n'en sait rien ».
+ * Un zéro qui rassure sur ce qui n'a pas été mesuré est pire que pas de chiffre
+ * du tout.
+ *
+ * AUCUN BOUTON sur les pages perdantes, et ce n'est pas un oubli : le moteur ne
+ * supprime, ne fusionne et ne redirige aucune page. Un bouton « Fusionner » ici
+ * promettrait une opération qui n'existe nulle part dans ce dépôt.
+ */
+function CannibalizationBlock({ gsc }: { gsc: GscProof | null }) {
+  return (
+    <div>
+      <div style={{ fontSize: 'var(--fs-xs)', fontWeight: 600, marginBottom: 'var(--space-1)' }}>
+        Requêtes que deux pages du site se disputent
+      </div>
+
+      {gsc === null ? (
+        <p className="meta" style={{ margin: 0 }}>
+          Search Console n’est pas connectée&nbsp;: impossible de dire si deux pages du site se disputent une
+          requête.
+        </p>
+      ) : gsc.cannibalized.length === 0 ? (
+        <p className="meta" style={{ margin: 0 }}>Aucune requête disputée sur les 28 derniers jours.</p>
+      ) : (
+        <>
+          <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'grid', gap: 'var(--space-2)' }}>
+            {gsc.cannibalized.map((conflict) => (
+              <li key={conflict.query}>
+                <ConflictLine conflict={conflict} />
+              </li>
+            ))}
+          </ul>
+          <p className="meta" style={{ margin: 'var(--space-2) 0 0' }}>
+            Le moteur ne supprime, ne fusionne et ne redirige aucune page. Ces conflits sont signalés pour que
+            vous décidiez.
+          </p>
+        </>
+      )}
+    </div>
+  )
+}
+
+/** Un couple requête/pages : qui tient la place, et qui la lui dispute. */
+function ConflictLine({ conflict }: { conflict: CannibalizedQuery }) {
+  const winner = conflict.pages.find((page) => page.pageUrl === conflict.winner)
+  const rivals = conflict.losers.length
+
+  return (
+    <div>
+      <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--ink-secondary)', lineHeight: 'var(--lh-snug)' }}>
+        <span style={{ color: 'var(--ink-primary)' }}>«&nbsp;{conflict.query}&nbsp;»</span> —{' '}
+        <a href={conflict.winner} target="_blank" rel="noopener noreferrer" className="btn-link" title={conflict.winner}>
+          {shortenUrl(conflict.winner)}
+        </a>{' '}
+        tient la place
+        {winner ? ` (position ${formatMetric(winner.position, 'position')}, ${winner.clicks} clic${winner.clicks > 1 ? 's' : ''})` : ''}.{' '}
+        {rivals === 0
+          ? 'Aucune autre page du site ne vise cette requête.'
+          : `${rivals} autre${rivals > 1 ? 's' : ''} page${rivals > 1 ? 's' : ''} du site vise${rivals > 1 ? 'nt' : ''} la même requête.`}
+      </div>
+      {conflict.losers.length > 0 && (
+        <ul className="meta" style={{ margin: 'var(--space-1) 0 0', paddingLeft: '1.1rem' }}>
+          {conflict.losers.map((url) => (
+            <li key={url} className="truncate" title={url}>{shortenUrl(url)}</li>
+          ))}
+        </ul>
       )}
     </div>
   )
@@ -788,46 +1121,6 @@ function LoadingPanel({ label }: { label: string }) {
       <span className="meta">{label}</span>
     </div>
   )
-}
-
-function Notice({
-  tone, title, body, action, onDismiss,
-}: {
-  tone: 'good' | 'critical'
-  title: string
-  body: string
-  action?: { label: string; href: string }
-  onDismiss?: () => void
-}) {
-  const color = tone === 'good' ? 'var(--status-good)' : 'var(--status-critical)'
-  const Icon = tone === 'good' ? CheckCircle2 : TriangleAlert
-
-  return (
-    <div
-      className="glass-card"
-      style={{
-        borderLeft: `3px solid ${color}`, marginBottom: 'var(--space-5)',
-        display: 'flex', gap: 'var(--space-3)', alignItems: 'flex-start',
-      }}
-    >
-      <Icon size={16} color={color} style={{ flexShrink: 0, marginTop: 2 }} />
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <strong style={{ fontSize: 'var(--fs-sm)' }}>{title}</strong>
-        <p style={{ fontSize: 'var(--fs-sm)', color: 'var(--ink-secondary)', margin: '0.25rem 0 0', lineHeight: 1.55 }}>{body}</p>
-      </div>
-      {action && <Link href={action.href} className="btn-secondary btn-sm">{action.label}</Link>}
-      {onDismiss && (
-        <button type="button" className="btn-icon" onClick={onDismiss} aria-label="Fermer">
-          <X size={14} />
-        </button>
-      )}
-    </div>
-  )
-}
-
-function formatDay(date: string): string {
-  const [year, month, day] = date.split('-')
-  return day && month && year ? `${day}/${month}/${year}` : date
 }
 
 function formatDate(iso: string): string {

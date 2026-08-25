@@ -32,6 +32,17 @@ const rejected: string[] = []
 let gateVerdict = { publishable: true, reasons: [] as string[] }
 let gateRuns = 0
 
+/**
+ * What the connector was handed, kept.
+ *
+ * The doubles used to ignore their argument entirely, so nothing verified that
+ * the request reached the connector unchanged. `publish.ts` builds the call with
+ * a spread — `connector.publish({ ...opts, page })` — and that spread is what
+ * makes a new request field cost nothing. These captures are what stop someone
+ * from replacing it with a field-by-field construction that silently drops one.
+ */
+const published: Array<Record<string, unknown>> = []
+
 vi.mock('@/lib/db', () => ({
   updateGeneration: vi.fn(async (id: string, patch: Record<string, unknown>) => {
     updated.push({ id, ...patch })
@@ -54,6 +65,7 @@ vi.mock('@/lib/pipeline', () => ({
   markGenerationRejected: vi.fn(async (id: string) => {
     rejected.push(id)
   }),
+  persistDuplicateVerdict: vi.fn(async () => undefined),
   runPrePublishGate: vi.fn(async (context: { page: GeneratedPage }) => {
     gateRuns += 1
     return {
@@ -76,7 +88,10 @@ vi.mock('./nextjs', () => ({
     label: 'Next.js',
     credentialColumns: ['github_repo', 'github_token'],
     describe: async () => ({ ok: true, message: '' }),
-    publish: async () => nextJsAnswer,
+    publish: async (request: Record<string, unknown>) => {
+      published.push(request)
+      return nextJsAnswer
+    },
   },
 }))
 
@@ -85,7 +100,10 @@ vi.mock('./wordpress', () => ({
     label: 'WordPress',
     credentialColumns: ['wp_username', 'wp_app_password'],
     describe: async () => ({ ok: true, message: '' }),
-    publish: async () => wordPressAnswer,
+    publish: async (request: Record<string, unknown>) => {
+      published.push(request)
+      return wordPressAnswer
+    },
   },
 }))
 
@@ -131,6 +149,7 @@ beforeEach(() => {
   indexedUrls.length = 0
   vectorIndexed.length = 0
   rejected.length = 0
+  published.length = 0
   gateVerdict = { publishable: true, reasons: [] }
   gateRuns = 0
   nextJsAnswer = outcome({ pageUrl: 'https://taxidriver10.fr/taxi-gare-troyes', mode: 'contrat' })
@@ -306,5 +325,103 @@ describe('anti-doublon', () => {
 
     expect(updated[0].status).toBe('failed')
     expect(updated[0].error_message).toBe('Auth refusee')
+  })
+})
+
+// ─── 6. Le remplacement cible ────────────────────────────────────────────────
+//
+// `replaces` names ONE page of the owner's and authorises writing over that one.
+// Everything below is about what it must NOT become: a second `force`.
+
+describe('remplacement cible', () => {
+  it('transmet `replaces` intact au connecteur', async () => {
+    // The transmission is mechanical — publish.ts spreads the request into
+    // `connector.publish`. This locks the spread: rebuild the call field by
+    // field and the page a human validated is replaced by a blind creation.
+    await publishPage({
+      site: NEXTJS_SITE,
+      page: PAGE,
+      intent: 'publie',
+      replaces: { path: '/taxi-troyes', remoteId: 42 },
+    })
+
+    expect(published).toHaveLength(1)
+    expect(published[0].replaces).toEqual({ path: '/taxi-troyes', remoteId: 42 })
+  })
+
+  it('ne leve PAS la barriere qualite, exactement comme `force`', async () => {
+    // The two flags lift the DESTINATION guards. Neither says anything about
+    // whether the article is good enough, and a refresh is not a licence to
+    // replace a page that ranks with something the gate refused.
+    gateVerdict = { publishable: false, reasons: ['Trop court'] }
+
+    const { outcome: result } = await publishPage({
+      site: NEXTJS_SITE,
+      page: PAGE,
+      intent: 'publie',
+      generationId: 'gen-1',
+      replaces: { path: '/taxi-troyes' },
+    })
+
+    expect(result.ok).toBe(false)
+    expect(result.error).toContain('Trop court')
+    expect(rejected).toEqual(['gen-1'])
+    // And nothing left the building.
+    expect(published).toHaveLength(0)
+  })
+
+  it('REFUSE `replaces` et `force` ensemble, sans rien tenter', async () => {
+    // They contradict each other: one authorises a named page, the other
+    // whatever is found. Together `force` wins by construction and the named
+    // target is decoration — the caller believes it constrained the write and
+    // it did not.
+    const { outcome: result } = await publishPage({
+      site: NEXTJS_SITE,
+      page: PAGE,
+      intent: 'publie',
+      generationId: 'gen-1',
+      replaces: { path: '/taxi-troyes' },
+      force: true,
+    })
+
+    expect(result.ok).toBe(false)
+    expect(result.written).toBe(false)
+    expect(result.error).toContain('replaces')
+    expect(result.error).toContain('force')
+    // Refused before anything: no gate, no connector, no row touched.
+    expect(gateRuns).toBe(0)
+    expect(published).toHaveLength(0)
+    expect(updated).toHaveLength(0)
+  })
+})
+
+// ─── 7. Les barrieres d'architecture ─────────────────────────────────────────
+//
+// Chantier A must be deliverable without touching the publication core. These
+// two make that independence verifiable rather than promised.
+
+describe('surface du contrat Connector', () => {
+  it('n admet toujours que deux connecteurs, indexes par SiteType', () => {
+    // Asserted through the error message rather than by exporting `CONNECTORS`:
+    // widening a module's public surface to write a test that protects that
+    // surface has already taken the first step of what it claims to forbid. The
+    // message interpolates `Object.keys(CONNECTORS).join(', ')`, so this fails
+    // the day a third connector enters the table — which is the point.
+    expect(() => connectorFor('gbp')).toThrow(UnknownConnectorError)
+    expect(new UnknownConnectorError('gbp').message).toContain('nextjs, wordpress')
+  })
+
+  it('ne lit que des colonnes de `sites` pour juger les identifiants', () => {
+    // `missingCredentials` reads `credentialColumns` off the site row. A
+    // connector needing credentials stored elsewhere — the Google connection
+    // table, say — cannot be served by this contract, and pretending otherwise
+    // would report a perfectly configured site as missing everything.
+    const elsewhere = ['gbp_account_id', 'gbp_location_id', 'scopes', 'access_token', 'refresh_token']
+
+    for (const type of ['nextjs', 'wordpress'] as const) {
+      const columns = connectorFor(type).credentialColumns
+      expect(columns.length).toBeGreaterThan(0)
+      for (const column of elsewhere) expect(columns).not.toContain(column)
+    }
   })
 })

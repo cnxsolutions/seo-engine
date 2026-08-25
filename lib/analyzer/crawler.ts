@@ -3,12 +3,22 @@
  * Extracts: URLs, titles, H1s, meta descriptions, internal links, keywords, geo signals.
  */
 
+import { normalizePath } from '@/lib/pipeline/internal-links'
+
 export interface CrawlResult {
   siteUrl: string
   pages: CrawledPage[]
   sitemap: string[]
   totalPages: number
   crawledAt: string
+  /**
+   * The cap cut the inventory short: more URLs were known than were crawled.
+   *
+   * Everything downstream must read this as "what you did not see may
+   * contradict you". A partial inventory makes the engine MORE careful — it
+   * never lets it conclude that a path is free or a topic uncovered.
+   */
+  truncated: boolean
 }
 
 export interface CrawledPage {
@@ -36,6 +46,24 @@ export interface CrawledPage {
    * a table of contents, which retrieves badly.
    */
   textExcerpt: string
+  /**
+   * Path declared by `<link rel="canonical">`, normalised like every other path
+   * in the engine — never the raw href.
+   *
+   * Tells "this URL is taken" apart from "this URL is taken by something that
+   * counts": a page canonicalised elsewhere holds its address without holding a
+   * ranking. Persisted to `site_pages.canonical_path` since migration 018.
+   * Null when the page declares nothing.
+   */
+  canonicalPath: string | null
+  /**
+   * `<meta name="robots">` carries noindex.
+   *
+   * A de-indexed page cannibalises nothing, so it must not weigh in a duplicate
+   * verdict the way a ranking page does. Persisted to
+   * `site_pages.robots_noindex`.
+   */
+  robotsNoindex: boolean
 }
 
 /**
@@ -54,19 +82,49 @@ export interface CrawlOptions {
   respectRobots?: boolean
 }
 
+/** One `<url>` of a sitemap, with the date the site claims for it. */
+export interface SitemapEntry {
+  url: string
+  /** Whatever `<lastmod>` carried, null when the sitemap omits it. */
+  lastmod: string | null
+}
+
+/**
+ * Fetches one sitemap file and returns its body, or null when it cannot be read.
+ *
+ * Injected rather than called directly so the extraction can be exercised
+ * offline: the sitemap-index bug below survived precisely because nothing could
+ * observe it without a network.
+ */
+export type SitemapFetcher = (url: string) => Promise<string | null>
+
+/**
+ * How many child sitemaps of a `<sitemapindex>` we are willing to fetch.
+ *
+ * Yoast and RankMath split at 1 000 URLs per file, so ten files cover 10 000
+ * pages — an order of magnitude above any cap a caller passes. The ceiling is
+ * not there for coverage: it is there so a site listing hundreds of child
+ * sitemaps cannot turn one crawl into hundreds of HTTP round trips.
+ */
+export const MAX_NESTED_SITEMAPS = 10
+
 export async function crawlWebsite(opts: CrawlOptions): Promise<CrawlResult> {
   const { siteUrl, maxPages = 50, followLinks = true } = opts
   let baseUrl = siteUrl.replace(/\/$/, '')
   const visited = new Set<string>()
   const pages: CrawledPage[] = []
-  const sitemap: string[] = []
 
   // 0. Resolve actual base URL (handle redirects like http->https, www->non-www)
   baseUrl = await resolveBaseUrl(baseUrl)
 
   // 1. Try to fetch sitemap
-  const sitemapUrls = await fetchSitemap(baseUrl)
-  sitemap.push(...sitemapUrls)
+  const sitemapEntries = await fetchSitemap(baseUrl)
+  const sitemapUrls = sitemapEntries.map((entry) => entry.url)
+
+  // The list arrives newest-first, so the cap cuts the tail: a 300-page ceiling
+  // on a 2 000-page site keeps the 300 pages most likely to still rank, instead
+  // of the 300 the generator happened to write first — usually the oldest.
+  let truncated = sitemapEntries.length > maxPages
 
   // 2. Build URL queue from sitemap + homepage
   const queue: string[] = []
@@ -78,7 +136,13 @@ export async function crawlWebsite(opts: CrawlOptions): Promise<CrawlResult> {
 
   // 3. Crawl pages
   for (const url of queue) {
-    if (visited.size >= maxPages) break
+    if (visited.size >= maxPages) {
+      // Stopped with URLs still queued. Said out loud, because an inventory that
+      // admits being partial is the only kind entitled to answer "this path is
+      // free".
+      truncated = true
+      break
+    }
     if (visited.has(url)) continue
     const normalizedUrl = url.replace(/\/$/, '')
     if (!normalizedUrl.startsWith(baseUrl)) continue
@@ -104,6 +168,7 @@ export async function crawlWebsite(opts: CrawlOptions): Promise<CrawlResult> {
     sitemap: sitemapUrls,
     totalPages: sitemapUrls.length || pages.length,
     crawledAt: new Date().toISOString(),
+    truncated,
   }
 }
 
@@ -125,54 +190,180 @@ async function resolveBaseUrl(baseUrl: string): Promise<string> {
   }
 }
 
-async function fetchSitemap(baseUrl: string): Promise<string[]> {
-  const sitemapUrls = [
+const fetchSitemapXml: SitemapFetcher = async (url) => {
+  try {
+    const res = await fetch(url, {
+      signal: AbortSignal.timeout(10000),
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (compatible; SEOEngine/1.0; +https://seoengine.app)',
+        'Accept': 'application/xml,text/xml,text/html,*/*;q=0.5',
+      },
+    })
+    if (!res.ok) return null
+    return await res.text()
+  } catch {
+    return null
+  }
+}
+
+async function fetchSitemap(baseUrl: string): Promise<SitemapEntry[]> {
+  const candidates = [
     `${baseUrl}/sitemap.xml`,
     `${baseUrl}/sitemap_index.xml`,
     `${baseUrl}/wp-sitemap.xml`,
   ]
 
-  for (const url of sitemapUrls) {
-    try {
-      const res = await fetch(url, {
-        signal: AbortSignal.timeout(10000),
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (compatible; SEOEngine/1.0; +https://seoengine.app)',
-          'Accept': 'application/xml,text/xml,text/html,*/*;q=0.5',
-        },
-      })
-      if (!res.ok) continue
-      const xml = await res.text()
-      return extractUrlsFromSitemap(xml, baseUrl)
-    } catch {
-      continue
-    }
+  for (const url of candidates) {
+    const xml = await fetchSitemapXml(url)
+    if (!xml) continue
+    const entries = await extractUrlsFromSitemap(xml, baseUrl)
+    // An empty result is not an answer. Returning on the first 200 meant a stub
+    // /sitemap.xml stopped the search before wp-sitemap.xml was ever tried.
+    if (entries.length > 0) return entries
   }
 
   return []
 }
 
-function extractUrlsFromSitemap(xml: string, baseUrl: string): string[] {
-  const urls: string[] = []
+/**
+ * URLs declared by a sitemap, child sitemaps included, most recently modified
+ * first.
+ *
+ * Exported because this function carried the bug that blinded the whole
+ * inventory: it detected a `<sitemapindex>`, did nothing with it, then dropped
+ * every `.xml` `<loc>` on the way out. On an index — what every WordPress
+ * equipped with Yoast or RankMath serves — the only `<loc>` present point at
+ * other .xml files, so the function returned ZERO url, site_pages stayed empty,
+ * and every consumer of the inventory read "this site has no pages".
+ *
+ * Child sitemaps are followed ONE level and no further. Not a limitation: a
+ * sitemap that lists itself, directly or through a cycle, must not be able to
+ * spin the crawl forever.
+ */
+export async function extractUrlsFromSitemap(
+  xml: string,
+  baseUrl: string,
+  fetcher: SitemapFetcher = fetchSitemapXml,
+): Promise<SitemapEntry[]> {
+  const entries = extractUrlsetEntries(xml, baseUrl)
 
-  // Check if it's a sitemap index (contains other sitemaps)
-  const sitemapLocs = xml.match(/<sitemap>\s*<loc>([^<]+)<\/loc>/g)
-  if (sitemapLocs) {
-    // For now just extract direct URLs, skip nested sitemaps
+  for (const child of extractIndexLocs(xml, baseUrl).slice(0, MAX_NESTED_SITEMAPS)) {
+    const childXml = await fetcher(child)
+    if (!childXml) continue
+    // Only the `<urlset>` of the child is read: recursing here would be the
+    // second level this function refuses to take.
+    entries.push(...extractUrlsetEntries(childXml, baseUrl))
   }
 
-  // Extract <loc> from urlset
-  const locMatches = xml.match(/<loc>([^<]+)<\/loc>/g)
-  if (locMatches) {
-    for (const match of locMatches) {
-      const url = match.replace(/<\/?loc>/g, '').trim()
-      if (url.startsWith(baseUrl) || url.startsWith('http')) {
-        urls.push(url)
-      }
+  return sortByLastmodDesc(dedupeByUrl(entries))
+}
+
+/** The `<loc>` of each `<sitemap>` block, i.e. the children of an index. */
+function extractIndexLocs(xml: string, baseUrl: string): string[] {
+  const locs: string[] = []
+  // `<sitemap\b` and not `<sitemap` alone: without the word boundary the opening
+  // `<sitemapindex>` tag matches too, and the first block would start at the
+  // document root instead of at a child.
+  for (const block of xml.match(/<sitemap\b[^>]*>[\s\S]*?<\/sitemap>/gi) || []) {
+    const loc = extractLoc(block, baseUrl)
+    if (loc) locs.push(loc)
+  }
+  return [...new Set(locs)]
+}
+
+/** The pages of a `<urlset>`, with their declared modification date. */
+function extractUrlsetEntries(xml: string, baseUrl: string): SitemapEntry[] {
+  // The `<sitemap>` blocks are cut out first so a child-sitemap `<loc>` can
+  // never be mistaken for a page. Telling the two apart by hand is what the old
+  // `.filter(u => !u.endsWith('.xml'))` was attempting — and it took the pages
+  // with it.
+  const urlset = xml.replace(/<sitemap\b[^>]*>[\s\S]*?<\/sitemap>/gi, ' ')
+  const entries: SitemapEntry[] = []
+
+  for (const block of urlset.match(/<url\b[^>]*>[\s\S]*?<\/url>/gi) || []) {
+    const url = extractLoc(block, baseUrl)
+    if (url) entries.push({ url, lastmod: extractFirst(block, /<lastmod\b[^>]*>([^<]+)<\/lastmod>/i) })
+  }
+
+  if (entries.length === 0) {
+    // A generator that emits `<loc>` outside any `<url>` is out of spec, but
+    // losing its pages would trade one silent zero for another.
+    for (const loc of urlset.match(/<loc\b[^>]*>[^<]+<\/loc>/gi) || []) {
+      const url = extractLoc(loc, baseUrl)
+      if (url) entries.push({ url, lastmod: null })
     }
   }
 
-  return urls.filter((u) => !u.endsWith('.xml'))
+  // Inside a `<urlset>`, a .xml address is a child sitemap that leaked out of a
+  // malformed index — never a page.
+  return entries.filter((entry) => !entry.url.toLowerCase().endsWith('.xml'))
+}
+
+/**
+ * Absolute, fetchable form of the `<loc>` held by a block, or null.
+ *
+ * Resolved against the site base because the protocol allows a relative `<loc>`,
+ * and because the previous prefix test (`url.startsWith(baseUrl)`) returned
+ * nothing at all on a site serving https://www.example.fr while its sitemap
+ * lists https://example.fr.
+ *
+ * Anchoring on `<loc` also keeps `<image:loc>` out: a Yoast image sitemap
+ * carries one per page, and counting those would fill the cap with .jpg
+ * addresses.
+ */
+function extractLoc(block: string, baseUrl: string): string | null {
+  const loc = extractFirst(block, /<loc\b[^>]*>([^<]+)<\/loc>/i)
+  if (!loc) return null
+
+  // An unusable base must not cost us the absolute URLs: `new URL` throws on a
+  // malformed base even when the address it is given needs no base at all.
+  const base = /^https?:\/\//i.test(baseUrl) ? `${baseUrl}/` : undefined
+  try {
+    const url = new URL(loc, base)
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return null
+    return url.toString()
+  } catch {
+    return null
+  }
+}
+
+function dedupeByUrl(entries: SitemapEntry[]): SitemapEntry[] {
+  // Two child sitemaps listing the same page would otherwise burn two slots of
+  // a cap that is supposed to buy coverage.
+  const seen = new Set<string>()
+  const unique: SitemapEntry[] = []
+  for (const entry of entries) {
+    if (seen.has(entry.url)) continue
+    seen.add(entry.url)
+    unique.push(entry)
+  }
+  return unique
+}
+
+/**
+ * Most recently modified first, undated pages last.
+ *
+ * The cap truncates AFTER this sort, so what survives is the freshest slice of
+ * the site. A page with no `<lastmod>` is not evidence of freshness, so it never
+ * outranks one that carries a date.
+ */
+function sortByLastmodDesc(entries: SitemapEntry[]): SitemapEntry[] {
+  return [...entries].sort((a, b) => {
+    const left = timeOf(a.lastmod)
+    const right = timeOf(b.lastmod)
+    // Compared, never subtracted: `-Infinity - -Infinity` is NaN, and a NaN
+    // comparator scrambles the order of every undated page instead of leaving
+    // them where the sitemap put them.
+    if (left === right) return 0
+    return right > left ? 1 : -1
+  })
+}
+
+/** -Infinity for a missing or unparsable date: it sorts last without a special case. */
+function timeOf(lastmod: string | null): number {
+  if (!lastmod) return -Infinity
+  const parsed = Date.parse(lastmod.trim())
+  return Number.isNaN(parsed) ? -Infinity : parsed
 }
 
 /**
@@ -209,12 +400,36 @@ export async function crawlPage(url: string, baseUrl: string): Promise<CrawledPa
 }
 
 function parsePage(html: string, url: string, baseUrl: string): CrawledPage {
-  const path = url.replace(baseUrl, '') || '/'
+  // LE CHEMIN PASSE PAR LA MEME REGLE QUE TOUT LE RESTE.
+  //
+  // Ce calcul etait `url.replace(baseUrl, '') || '/'` : un remplacement de
+  // chaine, qui gardait le slash final, la casse, la requete et l'ancre. Or
+  // `canonicalPath`, quinze lignes plus bas, passe par normalizePath. Les deux
+  // valeurs etaient donc mesurees sur deux regles differentes — et elles sont
+  // ensuite COMPAREES.
+  //
+  // Ce que cela produisait, constate sur un WordPress reel : « /about/ » avec
+  // pour canonique « /about ». La page se declarait canonisee AILLEURS alors
+  // qu'elle se canonisait vers elle-meme, et `isComparable` l'ecartait de la
+  // detection de duplicats. Sur ce site, 24 pages sur 26 etaient dans ce cas :
+  // l'anti-duplication y aurait tourne a vide, sans erreur et sans test rouge.
+  //
+  // Passer par l'URL plutot que par un replace corrige au passage le doublon de
+  // page d'accueil : « https://exemple.fr/ » et « https://www.exemple.fr/ »
+  // rendent desormais le meme chemin.
+  const path = normalizePath(safePathname(url, baseUrl))
 
   const title = extractFirst(html, /<title[^>]*>([^<]+)<\/title>/i) || ''
   const metaDescription = extractMeta(html, 'description')
   const h1 = extractFirst(html, /<h1[^>]*>([\s\S]*?)<\/h1>/i) || ''
   const h2s = extractAll(html, /<h2[^>]*>([\s\S]*?)<\/h2>/gi)
+
+  // The two declarations that separate "this URL is taken" from "this URL is
+  // taken by a page that competes". Both are read here rather than in a second
+  // parser: every field the inventory needs is extracted on the same ruler as
+  // the ones competitor measurement already uses.
+  const canonicalPath = extractCanonicalPath(html, baseUrl)
+  const robotsNoindex = /\bnoindex\b/i.test(extractMeta(html, 'robots'))
 
   // Word count and readable text.
   // Scripts and styles are removed FIRST: stripping tags alone leaves their
@@ -281,6 +496,51 @@ function parsePage(html: string, url: string, baseUrl: string): CrawledPage {
     geoSignals,
     keywords,
     textExcerpt,
+    canonicalPath,
+    robotsNoindex,
+  }
+}
+
+/**
+ * The canonical as a normalised path, never the raw href.
+ *
+ * `new URL(href, base)` and not a prefix replacement: the tag is written
+ * absolute on some sites and relative on others, and a site that canonicalises
+ * to another host would otherwise produce a path made of its own domain name.
+ *
+ * The href is looked for in both attribute orders, like extractMeta already
+ * does — `<link href="…" rel="canonical">` is legal HTML and half the themes
+ * emit it.
+ */
+/**
+ * Le chemin d'une URL, sans jamais jeter.
+ *
+ * Une URL que `new URL` refuse ne doit pas faire echouer le crawl de la page :
+ * on retombe alors sur l'ancien retrait de prefixe, qui a le merite de rendre
+ * quelque chose de comparable plutot que rien.
+ */
+function safePathname(url: string, baseUrl: string): string {
+  try {
+    return new URL(url).pathname
+  } catch {
+    return url.replace(baseUrl, '') || '/'
+  }
+}
+
+function extractCanonicalPath(html: string, baseUrl: string): string | null {
+  const href =
+    extractFirst(html, /<link\b[^>]*rel=["']canonical["'][^>]*href=["']([^"']+)["']/i) ||
+    extractFirst(html, /<link\b[^>]*href=["']([^"']+)["'][^>]*rel=["']canonical["']/i)
+  if (!href) return null
+
+  const base = /^https?:\/\//i.test(baseUrl) ? `${baseUrl}/` : undefined
+  try {
+    // normalizePath is the same function the link auditor and the inventory
+    // use. A canonical stored in any other shape would never match a takenPath.
+    return normalizePath(new URL(href, base).pathname)
+  } catch {
+    // A canonical we cannot parse is no canonical at all, never a crashed crawl.
+    return null
   }
 }
 

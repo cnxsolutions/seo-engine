@@ -22,11 +22,16 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getCampaignById } from '@/lib/db'
 import { runCampaignNow } from '@/lib/scheduler/cron'
+import { isRefusalKind } from '@/lib/publishing/refusal-labels'
 import { createServiceClient } from '@/lib/supabase'
 import type { GenerationStatus, PageType } from '@/lib/types'
-import type { GenerationCounts } from './feed-types'
+import { parseDuplicateVerdict } from '@/src/core/domain/existing/verdict'
+import type { FeedGeneration, GenerationCounts } from './feed-types'
 
 // ─── Projection ──────────────────────────────────────────────────────────────
+
+/** Every field of the contract that is a column here; the rest are embeds. */
+type ProjectedColumn = Exclude<keyof FeedGeneration, 'site' | 'campaign'>
 
 /**
  * Every column the two views render, and nothing more.
@@ -35,15 +40,53 @@ import type { GenerationCounts } from './feed-types'
  * JSON-LD blocks) are deliberately absent: a feed of fifty pages would weigh
  * megabytes and neither view displays a single character of them.
  *
+ * `duplicate_verdict` is here despite being jsonb, and it was measured before
+ * being let in: a verdict holds a mode, a date, its reasons and its matches, and
+ * the matches are bounded by the candidates the gate is given —
+ * `MAX_PROMPT_NEIGHBOURS` is 8 (lib/existing/prompt-block.ts:47). At roughly
+ * 200 bytes per match that is well under a kilobyte on a normal row and a few
+ * kilobytes in the worst case, two orders of magnitude below the page bodies
+ * kept out above. It also cannot be rebuilt client-side: it is the evidence of
+ * a decision, not a derivation.
+ *
  * `error_message` is the one that matters — it is where the quality gate writes
  * why a page was refused, and the only way to find out why something never
- * shipped.
+ * shipped. `tokens_used` is absent for a different reason again: no code path in
+ * this repository has ever written it, so it is NULL on every row.
+ *
+ * ONE string literal, deliberately — neither an array joined at runtime nor a
+ * concatenation of shorter literals. TypeScript widens both to `string`, and
+ * supabase-js parses this argument AT THE TYPE LEVEL: a widened value makes that
+ * parse fail and hands back rows typed `ParserError`, which nothing in a
+ * `NextResponse.json()` call ever complains about.
  */
-// `tokens_used` is absent for a different reason: no code path in this
-// repository has ever written it, so it is NULL on every row.
 const FEED_COLUMNS =
-  'id,campaign_id,site_id,city,slug,title,focus_keyword,page_type,status,' +
-  'published_url,published_at,publish_mode,publish_live,publish_notes,refusal_kind,ai_model,error_message,created_at,updated_at'
+  'id,campaign_id,site_id,city,slug,title,focus_keyword,page_type,status,published_url,published_at,publish_mode,publish_live,publish_notes,refusal_kind,ai_model,error_message,created_at,updated_at,intent,refresh_target_path,refresh_target_generation_id,duplicate_verdict'
+
+/** `'a,b'` → `['a', 'b']`. The only way to check a projection that is a string. */
+type SplitOnComma<S extends string> = S extends `${infer Head},${infer Rest}`
+  ? [Head, ...SplitOnComma<Rest>]
+  : [S]
+
+/**
+ * The trap this closes, in both directions.
+ *
+ * Declaring a field on `FeedGeneration` without adding it here compiles, renders
+ * empty in both views, and raises no error anywhere — the column is simply never
+ * asked of PostgREST. The reverse, a name misspelt above, costs a 400 from
+ * PostgREST at runtime and an empty feed.
+ *
+ * Neither is left to a reviewer's eye: this alias resolves to `never` the moment
+ * the two lists differ either way, and the assignment below stops compiling.
+ */
+type _ProjectionMatchesContract = [
+  | Exclude<ProjectedColumn, SplitOnComma<typeof FEED_COLUMNS>[number]>
+  | Exclude<SplitOnComma<typeof FEED_COLUMNS>[number], ProjectedColumn>,
+] extends [never]
+  ? true
+  : never
+const _projectionMatchesContract: _ProjectionMatchesContract = true
+void _projectionMatchesContract
 
 /** Sites embedded here carry no `wp_app_password` and no `github_token`. */
 const SITE_EMBED = 'site:sites(id,name,type,url)'
@@ -103,7 +146,15 @@ export async function GET(req: NextRequest) {
     })
 
     const [feed, sites, campaigns, ...tallies] = await Promise.all([
-      filtered.order('created_at', { ascending: false }).limit(limit),
+      // `overrideTypes` rather than a cast: without a generated `Database` type,
+      // supabase-js infers every column as `any` and every embedded resource as
+      // an ARRAY — it cannot know that `site_id` and `campaign_id` are to-one
+      // foreign keys, for which PostgREST returns a single object. Stating the
+      // row shape here is what lets `toFeedGeneration` be type-checked at all.
+      filtered
+        .order('created_at', { ascending: false })
+        .limit(limit)
+        .overrideTypes<FeedRow[], { merge: false }>(),
       supabase.from('sites').select('id,name,type,url').order('name'),
       supabase
         .from('campaigns')
@@ -119,7 +170,7 @@ export async function GET(req: NextRequest) {
     const counts = tallyStatuses(tallies)
 
     return NextResponse.json({
-      generations: feed.data ?? [],
+      generations: (feed.data ?? []).map(toFeedGeneration),
       counts,
       sites: sites.data ?? [],
       campaigns: campaigns.data ?? [],
@@ -194,6 +245,44 @@ export async function POST(req: NextRequest) {
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
+
+/**
+ * A row as PostgREST hands it over: three of its fields are looser than the
+ * contract, and the contract is what both views believe.
+ */
+type FeedRow = Omit<FeedGeneration, 'intent' | 'refusal_kind' | 'duplicate_verdict'> & {
+  intent: string | null
+  refusal_kind: string | null
+  duplicate_verdict: unknown
+}
+
+/**
+ * Settle the three fields the database cannot promise.
+ *
+ * Not decoration: `FeedGeneration` declares `intent` non-nullable and
+ * `refusal_kind` as a closed union, and a DTO that says more than the table can
+ * back is a lie the views act on.
+ */
+function toFeedGeneration(row: FeedRow): FeedGeneration {
+  return {
+    ...row,
+    // PostgREST has no `coalesce()` in a select list, so the column default is
+    // reapplied here rather than in the projection. A row read before migration
+    // 018 landed would otherwise reach the views as `intent: undefined` while
+    // the contract swears it is always one of two strings — and a view that
+    // separates refreshes from new pages does it by comparing this exact value.
+    intent: row.intent === 'refresh' ? 'refresh' : 'create',
+    // 016 created this column nude and 018's CHECK is NOT VALID, so the rows
+    // already in the table were never verified against the union. Anything it
+    // does not name is dropped rather than forwarded, because the views index
+    // REFUSAL_TITLES with it and would print `undefined` as a heading.
+    refusal_kind: isRefusalKind(row.refusal_kind) ? row.refusal_kind : null,
+    // jsonb arrives untyped and may have been written by an older version of the
+    // engine, or by hand. This is the domain's only door for it: it never throws
+    // and drops every match it cannot recognise.
+    duplicate_verdict: parseDuplicateVerdict(row.duplicate_verdict),
+  }
+}
 
 function parseStatuses(raw: string | null): GenerationStatus[] {
   if (!raw) return []

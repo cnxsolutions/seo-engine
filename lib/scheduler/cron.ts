@@ -7,12 +7,26 @@
 import cron from 'node-cron'
 import { createServiceClient } from '@/lib/supabase'
 import { generateSeoPage } from '@/lib/ai/page-types'
-import { createGeneration, getPlanItemBrief, getSiteContext, listDueCampaigns, listPendingPublishGenerations, updateCampaignSchedule, updateGeneration } from '@/lib/db'
+import { createGeneration, getPlanItemBrief, listDueCampaigns, listPendingPublishGenerations, updateCampaignSchedule, updateGeneration } from '@/lib/db'
+import { loadSiteInventory, nearestExistingEntries } from '@/lib/existing/inventory'
+import { runGbpPostNow } from '@/lib/gbp/posts/run'
+import {
+  decideGbpSlotOutcome,
+  gbpPostsBySlot,
+  gbpWeeklyCapReached,
+  planDueGbpPostSlots,
+  type GbpSlotPatch,
+} from '@/lib/gbp/posts/schedule'
+import { probeSlugFree } from '@/lib/existing/probe'
+import { MAX_PROMPT_NEIGHBOURS } from '@/lib/existing/prompt-block'
+import { reserveSlug } from '@/lib/existing/reservation'
+import { blindInventory, type SiteInventory } from '@/src/core/domain/existing/inventory'
 import { getGoogleContext } from '@/lib/google/context'
 import { syncAllGbp, syncAllGsc } from '@/lib/google/sync'
 import {
   countHtmlWords,
   markGenerationRejected,
+  persistDuplicateVerdict,
   runPostGenerationPipeline,
   runPrePublishGate,
   type PipelineReport,
@@ -199,6 +213,19 @@ export function initScheduler(): void {
     })
   })
 
+  // Google Business Profile post slots - daily at 3:30 AM
+  //
+  // UNE FOIS PAR JOUR, ET NON A CHAQUE TICK. L'horizon de planification se
+  // compte en semaines : reposer la question tous les quarts d'heure couterait
+  // quatre requetes par campagne consentante, quatre-vingt-seize fois par jour,
+  // pour repondre « rien de neuf » a chaque fois. La planification est
+  // idempotente, donc un jour saute se rattrape tout seul au suivant.
+  cron.schedule('30 3 * * *', async () => {
+    await runWithConcurrencyControl('gbpPlan', async () => {
+      await planGbpPostSlotsForAll()
+    })
+  })
+
   // Cleanup old logs - daily
   cron.schedule('0 0 * * *', () => {
     cleanupOldLogs()
@@ -320,6 +347,16 @@ async function reapStaleSlots(): Promise<void> {
     stale.map(slot => slot.generation_id).filter((id): id is string => Boolean(id))
   ).catch(() => new Map<string, string>())
 
+  // Le meme raisonnement, pour l'autre genre d'artefact. Un creneau de post
+  // abandonne dont le run a DEJA ouvert sa ligne ne doit pas etre rejoue : cote
+  // page un rejeu coutait un second article, ici il coute un second post sur la
+  // fiche d'un client, devant ses prospects, et rien dans ce produit ne sait le
+  // retirer. La ligne est reliee par `gbp_posts.calendar_slot_id`, ecrit AVANT
+  // la publication — le pointeur inverse, lui, n'est pose qu'a la fin, donc
+  // jamais sur un run qui n'est pas revenu.
+  const gbpSlotIds = stale.filter(slot => slot.artifact_kind === 'gbp_post').map(slot => slot.id)
+  const gbpProducts = await gbpPostsBySlot(gbpSlotIds)
+
   for (const slot of stale) {
     const outcome = slot.generation_id ? outcomes.get(slot.generation_id) : undefined
     const context = {
@@ -329,6 +366,24 @@ async function reapStaleSlots(): Promise<void> {
       generationId: slot.generation_id,
       attempts: slot.attempt_count ?? 0,
       lastTouchedAt: slot.updated_at,
+    }
+
+    // Un creneau de post qui a laisse une ligne derriere lui : on l'adopte, on
+    // ne le rejoue pas. 'published' est le seul succes ; tout le reste devient
+    // 'generated', c'est-a-dire « quelque chose existe, ce n'est pas en ligne,
+    // un humain doit regarder » — et surtout pas 'planned', qui relancerait une
+    // redaction et une ecriture distante.
+    const product = gbpProducts.get(slot.id)
+    if (product) {
+      await updateEditorialSlot(slot.id, {
+        status: product.status === 'published' ? 'published' : 'generated',
+        gbp_post_id: product.id,
+        ...(product.status === 'published'
+          ? {}
+          : { error_message: `Run interrompu — le post existe en '${product.status}', reprise manuelle depuis l’écran.` }),
+      }).catch(() => null)
+      log('WARN', 'reaper', `Slot ${slot.id} recovered from a gbp post in '${product.status}'`, context)
+      continue
     }
 
     // The abandoned run did produce something: adopt its result instead of
@@ -486,9 +541,28 @@ async function processEditorialSlot(slot: EditorialSlot, config: JobConfig): Pro
     return
   }
 
+  // ─── L'AIGUILLAGE ────────────────────────────────────────────────────────
+  //
+  // APRES la reclamation, jamais avant : c'est le compare-and-swap ci-dessus qui
+  // garantit qu'un seul tick traite ce creneau, et un post de fiche a exactement
+  // le meme besoin qu'une page. Un second calendrier, ou un aiguillage pose plus
+  // haut, redonnerait deux ecrivains au meme creneau.
+  //
+  // La branche s'arrete ici : ni `claimEditorialSlot`, ni `attempt_count`, ni
+  // `failEditorialSlot` ne changent de comportement pour une page.
+  if (slot.artifact_kind === 'gbp_post') {
+    await processGbpPostSlot(slot, campaign, attempt, config)
+    return
+  }
+
+  // `page_type` et `target_keyword` sont nullables depuis la migration 019 : un
+  // creneau 'gbp_post' n'en porte aucun. Ce chemin ne traite QUE des pages — la
+  // reclamation d'un creneau de post passe par lib/gbp/posts/run.ts — donc la
+  // nullabilite se traduit ici en absence plutot qu'en `null` : `RunOverride`
+  // sait deja se passer d'un mot-cle, il ne sait pas lire un `null`.
   const override = {
-    pageType: slot.page_type as PageType,
-    targetKeyword: slot.target_keyword,
+    pageType: (slot.page_type ?? undefined) as PageType | undefined,
+    targetKeyword: slot.target_keyword ?? undefined,
     targetCity: slot.target_city,
   }
 
@@ -607,6 +681,223 @@ async function processEditorialSlot(slot: EditorialSlot, config: JobConfig): Pro
       duration_ms: Date.now() - startTime,
     })
   }
+}
+
+// ─── GBP Post Planning ───────────────────────────────────────────────────────
+
+/**
+ * Poser les prochains creneaux de post des campagnes qui ont dit oui.
+ *
+ * Ce job ne connait NI l'opt-in, NI la cadence, NI le plafond hebdomadaire, NI
+ * les cooldowns : `planDueGbpPostSlots` les applique, parce que ce sont des
+ * colonnes et des regles de la migration 019 et que la connaissance de 019
+ * s'arrete a lib/gbp/posts. Ce qui n'a pas ete planifie est dit a voix haute —
+ * un plafond silencieux se lit exactement comme « il n'y avait rien a faire ».
+ */
+async function planGbpPostSlotsForAll(): Promise<void> {
+  const report = await planDueGbpPostSlots().catch(error => {
+    log('ERROR', 'gbp_plan', 'Planification des posts de fiche impossible', undefined,
+      error instanceof Error ? error : new Error(String(error)))
+    return null
+  })
+  if (!report) return
+
+  log('INFO', 'gbp_plan', `${report.created} créneau(x) de post planifié(s)`)
+
+  for (const reason of report.skipped) {
+    log('INFO', 'gbp_plan', `Non planifié — ${reason}`)
+  }
+}
+
+// ─── GBP Post Slots ──────────────────────────────────────────────────────────
+//
+// LA BRANCHE 'gbp_post' DE processEditorialSlot, ET RIEN D'AUTRE.
+//
+// Elle partage tout ce qui protege un creneau — la reclamation atomique, le
+// budget de tentatives, le compte a rebours du reaper — et ne partage aucune
+// regle metier : la sequence complete (doute leve, page a annoncer, angle,
+// contexte, redaction, gate, connecteur, trace) vit dans lib/gbp/posts/run.ts,
+// et ce qu'un resultat fait au creneau vit dans lib/gbp/posts/schedule.ts.
+// Redecider ici la moindre de ces regles en donnerait une seconde version, et
+// deux versions de « ai-je deja ecrit sur cette fiche ? » se paient en doublon
+// public.
+//
+// AUCUNE PROMESSE D'AUDIENCE : `localPosts.reportInsights` est supprime depuis
+// fevrier 2023, aucune metrique par post n'existe, et rien ici n'en fabrique.
+
+/**
+ * Produire le post d'un creneau, une fois, ce tick.
+ *
+ * Le creneau est DEJA reclame quand cette fonction demarre : elle ne reclame
+ * rien, ne compte aucune tentative, et se contente de traduire un rapport en
+ * etat de creneau.
+ */
+async function processGbpPostSlot(
+  slot: EditorialSlot,
+  campaign: Campaign,
+  attempt: number,
+  config: JobConfig,
+): Promise<void> {
+  const startTime = Date.now()
+  const context = { campaignId: campaign.id, slotId: slot.id, attempt }
+
+  // LE PLAFOND HEBDOMADAIRE, AVANT TOUT TRAVAIL ET AVANT TOUT RESEAU.
+  //
+  // Verifie ici et pas seulement a la planification : entre le jour ou le
+  // creneau a ete pose et celui-ci, un operateur a pu composer des posts a la
+  // main depuis l'ecran. Sans cette relecture la semaine deborderait sans que
+  // personne n'ait desobei — et le quota reellement accorde par Google est
+  // inconnu depuis ce produit (docs/gbp-acces-api.md).
+  const capReason = campaign.site_id
+    ? await gbpWeeklyCapReached(campaign.site_id).catch(error => {
+      // Ne jamais arreter le moteur parce qu'une source manque : un plafond
+      // illisible laisse passer, et `runGbpPostNow` reste la barriere qui
+      // compte.
+      log('WARN', 'gbp_post_slot', `Plafond hebdomadaire illisible pour le slot ${slot.id}`, context,
+        error instanceof Error ? error : new Error(String(error)))
+      return null
+    })
+    : null
+
+  if (capReason) {
+    await postponeGbpSlot(slot, capReason, context)
+    await logJobExecution({
+      job_type: 'gbp_post_slot',
+      job_id: slot.id,
+      campaign_id: campaign.id,
+      status: 'skipped',
+      error_message: capReason,
+      duration_ms: Date.now() - startTime,
+    })
+    return
+  }
+
+  try {
+    const report = await withTimeout(
+      runGbpPostNow({ campaignId: campaign.id, calendarSlotId: slot.id }),
+      config.timeoutMs,
+      'gbp_post_slot',
+    )
+
+    for (const problem of report.problems) {
+      log('WARN', 'gbp_post_slot', `Slot ${slot.id} : ${problem}`, context)
+    }
+
+    const patch = decideGbpSlotOutcome(slot, report)
+    await applyGbpSlotPatch(slot.id, patch, context)
+
+    if (!report.postId) {
+      // UN REPORT N'EST PAS UN ECHEC : rien n'a ete produit, rien n'a ete paye,
+      // aucun modele n'a ete appele. Le creneau garde sa tentative — sans quoi
+      // trois reports d'affilee tueraient un creneau auquel il n'est rien arrive
+      // — et repart au lendemain avec son motif visible dans le calendrier.
+      log('WARN', 'gbp_post_slot', `Slot ${slot.id} reporté — aucune tentative consommée`, {
+        ...context,
+        reason: patch.error_message,
+        replannedFor: patch.scheduled_date,
+      })
+    } else if (report.published) {
+      log('INFO', 'gbp_post_slot', `Slot ${slot.id} publié sur la fiche`, {
+        ...context,
+        gbpPostId: report.postId,
+        duration: Date.now() - startTime,
+      })
+    } else {
+      // Terminal, et volontairement : le chemin de composition insere toujours
+      // une ligne NEUVE, donc rejouer paierait une seconde redaction et
+      // risquerait un second post sur la fiche. La reprise d'une ligne
+      // existante est une decision humaine, depuis l'ecran.
+      log('ERROR', 'gbp_post_slot', `Slot ${slot.id} : post écrit mais pas en ligne — décision humaine requise`, {
+        ...context,
+        gbpPostId: report.postId,
+        refusalKind: report.refusalKind,
+      })
+    }
+
+    await logJobExecution({
+      job_type: 'gbp_post_slot',
+      job_id: slot.id,
+      campaign_id: campaign.id,
+      status: jobStatusFor(patch),
+      error_message: patch.error_message,
+      duration_ms: Date.now() - startTime,
+    })
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Erreur scheduler'
+    const timedOut = error instanceof JobTimeoutError
+
+    // Un delai depasse ne dit RIEN de ce que le run a fait — il peut etre en
+    // train d'ecrire sur la fiche. Le creneau reste en 'generating' pour le
+    // reaper, qui decidera quand le resultat sera connaissable plutot que de
+    // deviner maintenant.
+    if (timedOut) {
+      log('WARN', 'gbp_post_slot', `Slot ${slot.id} timed out — left to the reaper`, {
+        ...context,
+        staleAfterMinutes: STALE_GENERATING_MINUTES,
+      })
+    } else if (attempt >= config.maxAttempts) {
+      await failEditorialSlot(slot.id, message).catch(() => null)
+      log('ERROR', 'gbp_post_slot', `Slot ${slot.id} failed after ${attempt} attempt(s) — giving up`, context,
+        error instanceof Error ? error : new Error(message))
+    } else {
+      // Une panne, elle, consomme bien sa tentative : c'est ce qui distingue un
+      // report (rien n'a echoue) d'une base injoignable.
+      await releaseEditorialSlot(slot.id, message).catch(() => null)
+      log('WARN', 'gbp_post_slot', `Slot ${slot.id} failed (attempt ${attempt}/${config.maxAttempts}) — retried next tick`, context,
+        error instanceof Error ? error : new Error(message))
+    }
+
+    await logJobExecution({
+      job_type: 'gbp_post_slot',
+      job_id: slot.id,
+      campaign_id: campaign.id,
+      status: timedOut ? 'timeout' : 'failed',
+      error_message: message,
+      duration_ms: Date.now() - startTime,
+    })
+  }
+}
+
+/**
+ * Rendre le creneau ET la tentative.
+ *
+ * `releaseEditorialSlot` ne saurait pas le faire : elle repose le statut et le
+ * motif, jamais `attempt_count`. Le faire en deux ecritures ouvrirait une fenetre
+ * pendant laquelle un autre tick reclame le creneau, et la seconde ecriture lui
+ * volerait son compteur.
+ */
+async function postponeGbpSlot(
+  slot: EditorialSlot,
+  reason: string,
+  context: Record<string, unknown>,
+): Promise<void> {
+  const patch = decideGbpSlotOutcome(slot, { published: false, reported: reason, problems: [] })
+  await applyGbpSlotPatch(slot.id, patch, context)
+  log('WARN', 'gbp_post_slot', `Slot ${slot.id} reporté — aucune tentative consommée`, {
+    ...context,
+    reason,
+    replannedFor: patch.scheduled_date,
+  })
+}
+
+async function applyGbpSlotPatch(
+  slotId: string,
+  patch: GbpSlotPatch,
+  context: Record<string, unknown>,
+): Promise<void> {
+  await updateEditorialSlot(slotId, patch).catch(error => {
+    // Jamais fatal — le post, lui, a deja vecu sa vie — mais jamais silencieux :
+    // un creneau qui reste en 'generating' sort de toutes les files jusqu'a ce
+    // que le reaper le ramasse.
+    log('ERROR', 'gbp_post_slot', `Slot ${slotId} : état non enregistré`, context,
+      error instanceof Error ? error : new Error(String(error)))
+  })
+}
+
+/** Le statut du journal d'execution, derive de ce qu'est devenu le creneau. */
+function jobStatusFor(patch: GbpSlotPatch): string {
+  if (patch.status === 'published') return 'published'
+  return patch.status === 'planned' ? 'skipped' : 'failed'
 }
 
 // ─── Publishing Job ─────────────────────────────────────────────────────────────
@@ -981,6 +1272,59 @@ export interface RunCampaignResult {
   rejected?: { reasons: string[]; status: 'rejected' | 'failed' }
 }
 
+/**
+ * Close a run that never reached the model, because the address was taken.
+ *
+ * The ONLY new refusal in this file, and the cheapest one it can make: it
+ * happens before the first token, so it costs a row update and a log line
+ * instead of a page. `failed` rather than `rejected` because nothing was
+ * produced — there is no content to review, only an address to change — and
+ * `refusal_kind` is what tells this deliberate decision apart from a breakage:
+ * a breakage retries itself, a refusal waits for a human.
+ *
+ * Never throws. A refusal that could not be recorded is still a refusal, and
+ * turning it into an exception would put the slot back in the retry budget to
+ * hit the same occupied address fifteen minutes later.
+ */
+async function refuseBeforeGenerating(
+  campaign: Campaign,
+  generationId: string,
+  city: string,
+  startTime: number,
+  message: string
+): Promise<RunCampaignResult> {
+  await updateGeneration(generationId, {
+    status: 'failed',
+    refusal_kind: 'occupe',
+    error_message: message.slice(0, 2000),
+  }).catch(() => null)
+
+  log('WARN', 'campaign', 'Adresse occupee — aucune generation demandee au modele', {
+    campaignId: campaign.id,
+    generationId,
+    siteId: campaign.site_id,
+    reason: message,
+  })
+
+  // The schedule still advances: this run happened, it decided, and leaving the
+  // campaign due would replay the same refusal on the next tick.
+  await updateCampaignSchedule(campaign.id, {
+    last_run_at: new Date().toISOString(),
+    next_run_at: computeNextRunAt(campaign) || undefined,
+  }).catch(() => null)
+
+  await logJobExecution({
+    job_type: 'campaign',
+    job_id: campaign.id,
+    generation_id: generationId,
+    status: 'refused',
+    error_message: message.slice(0, 2000),
+    duration_ms: Date.now() - startTime,
+  })
+
+  return { generationId, city, rejected: { reasons: [message], status: 'failed' } }
+}
+
 export async function runCampaignNow(
   campaign: Campaign,
   override?: RunOverride
@@ -988,16 +1332,15 @@ export async function runCampaignNow(
   const { city, pageType } = resolveRunTarget(campaign, override)
   const startTime = Date.now()
 
-  // Fetch existing site context for deduplication
-  let existingSlugs: string[] = []
-  let existingKeywords: string[] = []
-  if (campaign.site_id) {
-    const context = await getSiteContext(campaign.site_id).catch(() => null)
-    if (context) {
-      existingSlugs = context.usedSlugs
-      existingKeywords = context.usedKeywords
-    }
-  }
+  // ONE read of what the site already carries, before anything is spent.
+  //
+  // This replaces `getSiteContext`, which pulled the full HTML of every
+  // generation over the wire to extract three arrays of strings. It never
+  // throws: an unreadable site comes back blind, and a blind inventory still
+  // generates — it just says so, and pays for a probe below.
+  const inventory: SiteInventory = campaign.site_id
+    ? await loadSiteInventory(campaign.site_id)
+    : blindInventory('', 'jamais-analyse')
 
   // The scheduler opens the row itself (see openGeneration); only the manual
   // "run now" path arrives here without one.
@@ -1011,6 +1354,86 @@ export async function runCampaignNow(
   })).id
 
   try {
+    const mainKeyword = override?.planBrief?.target_keyword
+      || override?.targetKeyword
+      || `${campaign.business_type} ${city}`
+
+    // ─── The address, decided BEFORE the first token ──────────────────────
+    //
+    // The slug used to be an output of the model, written in the same UPDATE as
+    // the HTML at the end of this function. `updateGeneration` throws on a
+    // Supabase error, so a slug collision failed the WHOLE update and lost a
+    // page that had already been paid for. Now it is written alone, first, and
+    // the partial unique index (site_id, slug) arbitrates: the loser learns it
+    // lost before spending a cent.
+    const reservation = await reserveSlug({
+      siteId: campaign.site_id || '',
+      generationId,
+      city,
+      slugInput: {
+        proposed: override?.planBrief?.proposed_slug,
+        focusKeyword: mainKeyword,
+        title: override?.planBrief?.proposed_title,
+        city,
+        businessType: campaign.business_type,
+      },
+      inventory,
+      // Editorial order, not technical order: a district named by the brief
+      // tells two sibling pages apart far better than the trade does, and the
+      // trade is the same word on every page of the campaign.
+      disambiguators: [
+        override?.planBrief?.required_entities?.[0] ?? '',
+        override?.planBrief?.search_intent ?? '',
+        campaign.business_type,
+      ].filter(Boolean),
+    })
+
+    if (!reservation.ok) {
+      return await refuseBeforeGenerating(campaign, generationId, city, startTime, reservation.message)
+    }
+
+    // ─── The probe, only when our memory is not enough ────────────────────
+    //
+    // The inventory answers "is this address taken?" without touching the
+    // network, and that is the right answer while it is FRESH. Past that it
+    // describes a site that no longer exists — the owner published, renamed,
+    // redirected — so the question is asked of the site itself. Two or three
+    // HTTP requests against the price of a page written on top of one that
+    // ranks.
+    //
+    // A probe that fails answers `free: true`: absence of evidence is not
+    // evidence of occupancy, and the engine is never stopped because an
+    // external source is missing.
+    if (inventory.freshness.state !== 'fresh' && campaign.site) {
+      const probe = await probeSlugFree(campaign.site, reservation.slug)
+      if (!probe.free) {
+        return await refuseBeforeGenerating(
+          campaign,
+          generationId,
+          city,
+          startTime,
+          probe.message
+            ?? `/${reservation.slug} est deja occupee sur le site (inventaire ${inventory.freshness.state}).`
+        )
+      }
+      if (probe.reason === 'inconnu') {
+        log('WARN', 'campaign', "Sonde d'occupation sans reponse — generation poursuivie", {
+          generationId,
+          siteId: campaign.site_id,
+          slug: reservation.slug,
+        })
+      }
+    }
+
+    // The pages of the site closest to this subject, in the model's own words.
+    //
+    // On the REAL focus keyword, never on an empty topic: `findSimilar` returns
+    // nothing at all for empty content, so a blank subject would silently show
+    // the model no neighbour and prove nothing.
+    const inventoryNeighbours = campaign.site_id
+      ? await nearestExistingEntries(campaign.site_id, mainKeyword, inventory, MAX_PROMPT_NEIGHBOURS)
+      : []
+
     // Get Google context if available
     const googleContext = campaign.site_id
       ? await getGoogleContext(campaign.site_id).catch(() => null)
@@ -1033,8 +1456,13 @@ export async function runCampaignNow(
       externalLinkCount: campaign.external_link_count ?? 3,
       enableImages: campaign.enable_images ?? true,
       imagePerPage: campaign.image_per_page ?? 2,
-      existingSlugs,
-      existingKeywords,
+      reservedSlug: reservation.slug,
+      inventoryNeighbours,
+      inventoryFreshness: inventory.freshness,
+      // Always a creation on this path today. A refresh is decided by the
+      // planner, not by the runner, and it never reaches the generator without
+      // a human having asked for it.
+      action: { kind: 'create' },
       planBrief: override?.planBrief,
       googleContext,
       // Without these two the RAG context is never built: generateSeoPage gates
@@ -1080,6 +1508,11 @@ export async function runCampaignNow(
       siteUrl: campaign.site?.url || '',
       campaign,
       planBrief: override?.planBrief,
+      // Handed down rather than re-read: it was loaded at the top of this
+      // function to reserve the address, and the pipeline needs exactly the
+      // same rows for the internal mesh.
+      inventory,
+      intent: 'create',
     }).catch(error => {
       log('ERROR', 'campaign', 'Post-generation pipeline crashed — page kept as generated', {
         generationId,
@@ -1104,12 +1537,29 @@ export async function runCampaignNow(
       })
     }
 
+    // What the duplicate check concluded, filed as evidence.
+    //
+    // Written whether or not it blocked: an observation that found nothing is
+    // still proof that the check ran, and a rejection rate computed on rows that
+    // only exist when they blocked would read 100 % for ever.
+    if (report?.duplicateVerdict) {
+      await persistDuplicateVerdict(generationId, report.duplicateVerdict)
+    }
+
     // Update generation with generated content.
     // `page_payload` carries the schemas, FAQ and internal links that have no
     // scalar column of their own; the deferred publishing job reads it back
     // instead of rebuilding a stripped-down page.
+    //
+    // NO `slug` HERE. This is the line the whole change turns on.
+    //
+    // The slug was written in this very update, alongside the HTML, and
+    // `updateGeneration` throws on a Supabase error (lib/db.ts): a collision on
+    // the unique index therefore failed the ENTIRE update and threw away a page
+    // that had already been generated and paid for. The address is reserved at
+    // the top of this function, alone, before a single token is spent. Putting
+    // it back here "for safety" would undo all of it.
     await updateGeneration(generationId, {
-      slug: page.slug,
       title: page.title,
       meta_description: page.metaDescription,
       focus_keyword: page.focusKeyword,
@@ -1388,6 +1838,9 @@ export async function triggerJob(jobName: string, options?: Record<string, unkno
       break
     case 'gbp':
       await syncAllGbp()
+      break
+    case 'gbpPlan':
+      await planGbpPostSlotsForAll()
       break
     case 'cycle':
       await checkCycleCompletion()

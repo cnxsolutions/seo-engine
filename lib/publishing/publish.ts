@@ -22,8 +22,17 @@
 // gate. Those are different questions: one asks whether our view of the site is
 // stale, the other whether the article is good enough. Only the first is the
 // operator's to overrule.
+//
+// `replaces` is the same permission narrowed to one named page, and it obeys the
+// same rule: destination guards yes, gate never. The two may not travel
+// together — see the guard at step 0.
 
-import { markGenerationRejected, runPrePublishGate, type PipelineReport } from '@/lib/pipeline'
+import {
+  markGenerationRejected,
+  persistDuplicateVerdict,
+  runPrePublishGate,
+  type PipelineReport,
+} from '@/lib/pipeline'
 import { updateGeneration } from '@/lib/db'
 import { connectorFor, missingCredentials, UnknownConnectorError } from './connector'
 import { recordPublication, type RecordReport } from './record'
@@ -53,7 +62,27 @@ export async function publishPage(opts: PublishPageOptions): Promise<PublishPage
   const { site, pageType, generationId, gateAlreadyRan, campaign } = opts
   let page = opts.page
 
-  // ─── 0. Do we even know this kind of site? ─────────────────────────────────
+  // ─── 0. Is the request itself coherent? ────────────────────────────────────
+  //
+  // `replaces` and `force` say contradictory things about the same write.
+  // `replaces` authorises ONE named page and refuses everything else; `force`
+  // takes over whatever it finds. Accepted together, `force` wins by
+  // construction and the named target becomes decoration — the caller believes
+  // it constrained the write to the page a human looked at, and it did not.
+  //
+  // Refused here rather than arbitrated in each connector: two connectors
+  // resolving a contradiction on their own is two chances to resolve it
+  // differently, and the safe answer is that nobody resolves it.
+  if (opts.replaces && opts.force) {
+    return {
+      outcome: failed(
+        `Requete contradictoire : « replaces » designe la page /${opts.replaces.path.replace(/^\/+/, '')} ` +
+          `et « force » leve la garde sur n'importe laquelle. Choisir l'un des deux. Aucune publication tentee.`
+      ),
+    }
+  }
+
+  // ─── 0 bis. Do we even know this kind of site? ─────────────────────────────
   //
   // Checked before the credentials, because `missingCredentials` asks the
   // connector which ones it needs.
@@ -90,6 +119,16 @@ export async function publishPage(opts: PublishPageOptions): Promise<PublishPage
 
     if (!gate.publishable) {
       if (generationId) {
+        // The evidence before the verdict, and both before the row is parked.
+        //
+        // A refusal for duplication that arrives without the pages it collided
+        // with is not actionable: the operator reads "duplicat" and has nothing
+        // to look at. Written first so the row is never in `rejected` with its
+        // proof still in memory, and never blocking on a write that may fail —
+        // `persistDuplicateVerdict` swallows its own errors on purpose.
+        if (gate.duplicateVerdict) {
+          await persistDuplicateVerdict(generationId, gate.duplicateVerdict)
+        }
         await markGenerationRejected(generationId, gate.reasons).catch(() => null)
       }
       return {

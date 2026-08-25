@@ -7,13 +7,21 @@
 // are the ones every other view uses, and two implementations of a stat tile is
 // exactly the debt this wave was meant to pay off.
 //
-// What is left is what the design system does NOT provide and only the dashboard
-// needs: a titled panel wrapper over the shared `.panel` classes, the provenance
-// line each tab opens with, and the in-table magnitude bar.
+// `SourceNote` and `MagnitudeBar` have since made the same trip: both were
+// promoted verbatim into components/ui.tsx, because /sites/[id]/existing and the
+// publication screens need the very same "where does this figure come from" line
+// and the very same in-table bar. They are re-exported here rather than deleted
+// so the two tabs keep one import for their layout pieces — the implementation
+// exists once, in the design system.
+//
+// What is genuinely left is what the design system does NOT provide and only the
+// dashboard needs: a titled panel wrapper over the shared `.panel` classes.
 // ─────────────────────────────────────────────────────────────────────────────
 
 import type { LucideIcon } from 'lucide-react'
 import type { ReactNode } from 'react'
+
+export { MagnitudeBar, SourceNote } from '@/components/ui'
 
 // ─── Panel ───────────────────────────────────────────────────────────────────
 
@@ -44,64 +52,5 @@ export function Panel({
       </header>
       <div className="panel__body">{children}</div>
     </section>
-  )
-}
-
-// ─── Provenance ──────────────────────────────────────────────────────────────
-
-/**
- * Every tab states where its figures come from and over what period.
- * A metric whose origin is unknown is worth nothing.
- */
-export function SourceNote({ source, period, note }: { source: string; period: string; note?: ReactNode }) {
-  return (
-    <p
-      className="meta"
-      style={{
-        margin: `0 0 var(--space-5)`,
-        display: 'flex',
-        flexWrap: 'wrap',
-        gap: 'var(--space-1) var(--space-3)',
-      }}
-    >
-      <span>
-        <strong style={{ color: 'var(--ink-secondary)', fontWeight: 600 }}>Source</strong> {source}
-      </span>
-      <span aria-hidden>·</span>
-      <span>
-        <strong style={{ color: 'var(--ink-secondary)', fontWeight: 600 }}>Période</strong> {period}
-      </span>
-      {note && (
-        <>
-          <span aria-hidden>·</span>
-          <span>{note}</span>
-        </>
-      )}
-    </p>
-  )
-}
-
-// ─── Magnitude bar (inside tables) ───────────────────────────────────────────
-
-/**
- * A bar that reads a value already printed beside it — never the only encoding,
- * and never a second colour: one series slot for the whole column, because the
- * bar length already carries the comparison.
- */
-export function MagnitudeBar({ value, max }: { value: number; max: number }) {
-  return (
-    <div
-      aria-hidden="true"
-      style={{ height: 6, width: '100%', background: 'var(--surface-inset)', borderRadius: '0 3px 3px 0' }}
-    >
-      <div
-        style={{
-          height: '100%',
-          width: `${max > 0 ? Math.max((value / max) * 100, value > 0 ? 2 : 0) : 0}%`,
-          background: 'var(--series-1)',
-          borderRadius: '0 3px 3px 0',
-        }}
-      />
-    </div>
   )
 }

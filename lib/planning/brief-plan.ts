@@ -1,4 +1,4 @@
-import { buildPageSlug } from '@/lib/seo/slug'
+import { buildPageSlug, resolveFreeSlug, type SlugResolution } from '@/lib/seo/slug'
 import { DEFAULT_PLANNING_MODEL, generateJson } from '@/lib/ai/provider'
 import {
   getGscPlanningSignals,
@@ -8,9 +8,23 @@ import {
   type StrikingDistanceOpportunity,
 } from '@/lib/google/performance'
 import { buildSerpEvidence, type SerpEvidence } from '@/lib/serp'
-import { getSiteContext } from '@/lib/db'
+import { loadSiteInventory } from '@/lib/existing/inventory'
 import { generateEditorialCalendar } from '@/lib/scheduler/editorial'
-import type { AnalysisRun, Campaign, PageType, PlanItemBrief } from '@/lib/types'
+import {
+  decideEditorialAction,
+  WITHOUT_SEARCH_CONSOLE,
+  type EditorialAction,
+} from '@/src/core/domain/existing/action'
+import type { EditorialTarget } from '@/src/core/domain/existing/identity'
+import { blindInventory, type SiteInventory } from '@/src/core/domain/existing/inventory'
+import type {
+  AnalysisRun,
+  Campaign,
+  PageType,
+  PlanItemAction,
+  PlanItemBrief,
+  SlugResolutionDto,
+} from '@/lib/types'
 
 export interface GenerateBriefPlanOptions {
   campaign: Campaign
@@ -71,19 +85,31 @@ export async function generateBriefPlan(opts: GenerateBriefPlanOptions): Promise
  * traffic available), pages seen and never clicked (a title problem, not a
  * content problem), and subjects that got zero impression after 30 days (stop
  * insisting). When it does not, nothing changes.
+ *
+ * ET C'EST ICI QUE LE MOTEUR CESSE DE NE SAVOIR DIRE QU'« UNE PAGE DE PLUS ».
+ * Chaque sujet du cycle est confronte a l'existant AVANT que le modele ne soit
+ * ouvert : ce qui ressort 'refresh' ou 'skip' ne lui est jamais soumis, donc ne
+ * coute pas un jeton. Un 'refresh' voyage dans le plan comme une PROPOSITION —
+ * il nomme la page visee, sa portee et la preuve qui l'a designee, et il attend
+ * un clic humain plus loin dans la chaine. Rien, dans ce module ni en aval de
+ * lui, ne supprime, ne fusionne ni ne redirige quoi que ce soit.
+ *
+ * UNE PANNE DE CONNAISSANCE NE BLOQUE JAMAIS LA PLANIFICATION. Inventaire
+ * aveugle, Search Console absente, site inconnu : le plan sort quand meme, en
+ * 'create', et chaque item porte la degradation en toutes lettres.
  */
 export async function generateBriefPlanWithSignals(opts: GenerateBriefPlanOptions): Promise<BriefPlanResult> {
   const { campaign, cycleDays, analysisRun } = opts
-  let existingSlugs = opts.existingSlugs || []
-  let existingKeywords = opts.existingKeywords || []
 
-  if ((!opts.existingSlugs || !opts.existingKeywords) && campaign.site_id) {
-    const context = await getSiteContext(campaign.site_id).catch(() => null)
-    if (context) {
-      existingSlugs = opts.existingSlugs || context.usedSlugs
-      existingKeywords = opts.existingKeywords || context.usedKeywords
-    }
-  }
+  // L'existant D'ABORD. Tout ce qui suit — le verdict de chaque sujet, l'adresse
+  // de chaque page, le brief lui-meme — se prend contre cette lecture, et elle
+  // est faite une seule fois.
+  const inventory = await resolveInventory(campaign)
+  const takenPaths = new Set<string>(inventory.takenPaths)
+
+  const existingSlugs = opts.existingSlugs ?? inventory.entries.map(entry => entry.path.replace(/^\//, ''))
+  const existingKeywords =
+    opts.existingKeywords ?? dedupe(inventory.entries.map(entry => (entry.focusKeyword ?? '').toLowerCase()))
 
   const signals = await resolveSignals(opts)
   const serpEvidence = await resolveSerpEvidence(opts)
@@ -118,28 +144,237 @@ export async function generateBriefPlanWithSignals(opts: GenerateBriefPlanOption
   // earliest dates, because a cycle publishes in date order.
   const opportunities = assignOpportunities(calendarSlots.length, signals)
 
+  // ── LA DECISION, AVANT LE PREMIER JETON ───────────────────────────────────
+  //
+  // Chaque creneau est confronte a l'existant avant que le modele ne soit
+  // ouvert. Ce qui en sort 'refresh' ou 'skip' ne lui est PAS soumis : le
+  // moteur cesse de payer une page pour decouvrir ensuite qu'il ne fallait pas
+  // l'ecrire. Un sujet a rafraichir n'a pas besoin d'un brief neuf — il a
+  // besoin d'une cible, d'une portee et d'une preuve, et les trois sont deja
+  // rendues ici.
+  const decisionContext = {
+    campaign,
+    inventory,
+    signals,
+    // Les communes desservies, resolues UNE fois : c'est ce qui permet au
+    // comparateur d'identite de voir que « Taxi Troyes » et « Taxi Reims » sont
+    // le meme titre a la ville pres.
+    cityTokens: dedupe([...campaign.communes, campaign.department ?? '']),
+  }
+
+  const subjects = calendarSlots.map((slot, index) =>
+    decideForSlot(slot, opportunities[index] ?? null, decisionContext)
+  )
+
+  const toWrite = subjects.filter(subject => subject.action.kind === 'create')
+  const refreshCount = subjects.filter(subject => subject.action.kind === 'refresh').length
+  const skipCount = subjects.length - toWrite.length - refreshCount
+
   console.log(
-    `[plan] redaction des briefs : ${calendarSlots.length} creneaux, modele ${DEFAULT_PLANNING_MODEL}` +
-      `${signals ? ' + signaux Search Console' : ' (aucun historique Search Console)'}` +
-      `${serpEvidence.length ? ` + ${serpEvidence.length} SERP mesurees` : ''}`
+    `[plan] decision avant depense : ${toWrite.length} page(s) a ecrire, ` +
+      `${refreshCount} mise(s) a jour proposee(s), ${skipCount} sujet(s) ecarte(s)` +
+      `${inventory.freshness.state !== 'fresh' ? ` — inventaire ${inventory.freshness.state}` : ''}` +
+      `${signals ? '' : ` — ${WITHOUT_SEARCH_CONSOLE}`}`
+  )
+
+  const rawItems = toWrite.length === 0
+    ? []
+    : await writeBriefs({
+        campaign,
+        analysisRun,
+        existingSlugs,
+        existingKeywords,
+        subjects: toWrite,
+        signals,
+        serpEvidence,
+      })
+
+  return {
+    items: normalizeBriefs({ subjects, rawItems, campaign, takenPaths, inventory, signals }),
+    signals,
+    serpEvidence,
+  }
+}
+
+/**
+ * Tout ce que le moteur sait du site, ou l'aveu qu'il n'en sait rien.
+ *
+ * `loadSiteInventory` ne jette jamais — un site illisible revient aveugle — et
+ * une campagne sans site revient aveugle elle aussi, par le meme chemin plutot
+ * que par une branche a part. C'est ce qui rend la suite ecrite UNE fois : la
+ * decision, la reservation d'adresse et la degradation nommee n'ont jamais a se
+ * demander si un inventaire existe.
+ *
+ * AUCUN CRAWL N'EST DECLENCHE ICI, et c'est delibere. Le crawl incremental d'un
+ * cycle appartient a lib/scheduler/cycle-manager.ts, qui le lance juste avant
+ * d'appeler ce planificateur ; le refaire ici crawlerait deux fois le meme site
+ * a cinq lignes d'intervalle sur le chemin principal, et ferait attendre un site
+ * entier a une requete d'ecran sur les deux autres. Une fraicheur insuffisante
+ * n'est donc pas reparee ici : elle est NOMMEE, dans la console et dans chaque
+ * item du plan.
+ */
+async function resolveInventory(campaign: Campaign): Promise<SiteInventory> {
+  const inventory = campaign.site_id
+    ? await loadSiteInventory(campaign.site_id)
+    : blindInventory('', 'jamais-analyse')
+
+  // Nomme, jamais fatal. Un plan bati sur une vue vieillie du site reste un
+  // plan ; un plan bati sur une vue vieillie que personne n'a mentionnee est la
+  // facon dont le moteur finit par proposer une page publiee la semaine
+  // derniere.
+  if (inventory.freshness.state !== 'fresh') {
+    console.warn(
+      `[plan] inventaire ${inventory.freshness.state}` +
+        `${inventory.freshness.blindReason ? ` (${inventory.freshness.blindReason})` : ''}` +
+        `${inventory.freshness.ageDays !== null ? `, ${inventory.freshness.ageDays} jour(s)` : ''}` +
+        ` : ${inventory.takenPaths.size} adresse(s) connue(s), des pages publiees depuis peuvent manquer.`
+    )
+  }
+
+  return inventory
+}
+
+/**
+ * Demander au modele les briefs des SEULS sujets a ecrire.
+ *
+ * Rend un tableau vide sur une reponse illisible : le plan sort alors avec ses
+ * briefs de repli, exactement comme avant. Seule l'analyse de la reponse est
+ * gardee — un modele injoignable reste une panne, pas un plan silencieusement
+ * vide.
+ */
+async function writeBriefs(opts: {
+  campaign: Campaign
+  analysisRun?: AnalysisRun | null
+  existingSlugs: string[]
+  existingKeywords: string[]
+  subjects: readonly PlannedSubject[]
+  signals: GscPlanningSignals | null
+  serpEvidence: SerpEvidence[]
+}): Promise<Array<Partial<PlanItemBrief>>> {
+  console.log(
+    `[plan] redaction des briefs : ${opts.subjects.length} creneaux, modele ${DEFAULT_PLANNING_MODEL}` +
+      `${opts.signals ? ' + signaux Search Console' : ' (aucun historique Search Console)'}` +
+      `${opts.serpEvidence.length ? ` + ${opts.serpEvidence.length} SERP mesurees` : ''}`
   )
 
   const raw = await generateJson({
     systemPrompt: `Tu es un stratege SEO senior. Tu crees uniquement des briefs editoriaux exploitables par une IA de redaction plus tard.
 Tu ne rediges jamais la page, tu ne fournis jamais de HTML, et tu reponds uniquement en JSON valide.`,
-    userPrompt: buildPrompt({ campaign, analysisRun, existingSlugs, existingKeywords, calendarSlots, signals, opportunities, serpEvidence }),
+    userPrompt: buildPrompt({
+      campaign: opts.campaign,
+      analysisRun: opts.analysisRun,
+      existingSlugs: opts.existingSlugs,
+      existingKeywords: opts.existingKeywords,
+      calendarSlots: opts.subjects.map(subject => subject.slot),
+      signals: opts.signals,
+      opportunities: opts.subjects.map(subject => subject.opportunity),
+      serpEvidence: opts.serpEvidence,
+    }),
     model: DEFAULT_PLANNING_MODEL,
     maxTokens: 7000,
     temperature: 0.45,
   })
 
   try {
-    const parsed = JSON.parse(raw)
-    const items = Array.isArray(parsed) ? parsed : parsed.items || parsed.plan || []
-    return { items: normalizeBriefs(items, calendarSlots, campaign, signals, opportunities), signals, serpEvidence }
+    return itemsOf(JSON.parse(raw) as unknown)
   } catch {
-    return { items: fallbackBriefs(calendarSlots, campaign, signals, opportunities), signals, serpEvidence }
+    return []
   }
+}
+
+/** Les trois formes de reponse deja tolerees, sans `any` pour les lire. */
+function itemsOf(parsed: unknown): Array<Partial<PlanItemBrief>> {
+  if (Array.isArray(parsed)) return parsed as Array<Partial<PlanItemBrief>>
+
+  if (parsed !== null && typeof parsed === 'object') {
+    const envelope = parsed as { items?: unknown; plan?: unknown }
+    if (Array.isArray(envelope.items)) return envelope.items as Array<Partial<PlanItemBrief>>
+    if (Array.isArray(envelope.plan)) return envelope.plan as Array<Partial<PlanItemBrief>>
+  }
+
+  return []
+}
+
+// ─── Ce que le plan decide, sujet par sujet ─────────────────────────────────
+
+/** Un creneau du calendrier, tel que generateEditorialCalendar le rend. */
+type PlanSlot = ReturnType<typeof generateEditorialCalendar>[number]
+
+/**
+ * Un creneau, son sujet de depart, et ce que le moteur a decide d'en faire.
+ *
+ * `seedKeyword` est le sujet SEME PAR LE CALENDRIER, pas celui que le modele
+ * proposera : c'est sur lui que le verdict est rendu, puisqu'il est le seul
+ * connu avant la depense. Le modele ne peut ensuite affiner que le sujet d'un
+ * creneau deja juge libre — et la page qu'il produira repassera de toute facon
+ * devant le gate de duplicat, qui la compare a l'existant pour de vrai.
+ */
+interface PlannedSubject {
+  slot: PlanSlot
+  opportunity: StrikingDistanceOpportunity | null
+  pageType: PageType
+  city: string
+  seedKeyword: string
+  action: EditorialAction
+}
+
+/**
+ * Search Console absente, dite comme telle plutot que devinee.
+ *
+ * `decideEditorialAction` exige des signaux ; il n'exige pas qu'ils existent.
+ * `available: false` est ce qui lui fait sauter les trois regles de mesure et
+ * porter WITHOUT_SEARCH_CONSOLE dans sa preuve, au lieu de lire une absence de
+ * donnee comme une absence de concurrence.
+ */
+const NO_SEARCH_CONSOLE: GscPlanningSignals = {
+  available: false,
+  windowStart: '',
+  windowEnd: '',
+  strikingDistance: [],
+  lowCtrPages: [],
+  deadPages: [],
+  cannibalized: [],
+  blockedQueries: [],
+}
+
+/**
+ * Creer, rafraichir ou ecarter — pour UN creneau, avant tout appel au modele.
+ *
+ * La page confrontee a l'existant est celle que ce creneau produirait :
+ * l'adresse que la fabrique de slug lui donnerait, le titre que le repli lui
+ * donnerait, son mot-cle seme. La meta description manque, et c'est exact — elle
+ * n'est pas encore ecrite. Le comparateur d'identite le sait : une comparaison
+ * sans corps ni meta se declare PARTIELLE, et un score bas n'y prouve rien.
+ */
+function decideForSlot(
+  slot: PlanSlot,
+  opportunity: StrikingDistanceOpportunity | null,
+  context: {
+    campaign: Campaign
+    inventory: SiteInventory
+    signals: GscPlanningSignals | null
+    cityTokens: readonly string[]
+  },
+): PlannedSubject {
+  const { campaign, inventory, signals, cityTokens } = context
+  const pageType = (slot.page_type || 'child') as PageType
+  const city = slot.target_city || campaign.communes[0] || campaign.department || ''
+  const seedKeyword = slot.target_keyword || `${campaign.business_type} ${city}`.trim()
+
+  const target: EditorialTarget = {
+    path: `/${buildPageSlug({ focusKeyword: seedKeyword, city, businessType: campaign.business_type })}`,
+    title: titleFor(pageType, campaign.business_type, city),
+    metaDescription: '',
+    focusKeyword: seedKeyword,
+  }
+
+  const action = decideEditorialAction(target, {
+    gsc: signals ?? NO_SEARCH_CONSOLE,
+    inventory,
+    cityTokens,
+  })
+
+  return { slot, opportunity, pageType, city, seedKeyword, action }
 }
 
 /**
@@ -315,7 +550,8 @@ Anti-doublon:
 
 ${buildPerformanceSection(opts.signals)}
 ${buildSerpSection(opts.serpEvidence)}
-Slots a transformer en briefs:
+Slots a transformer en briefs (ce sont les SEULS sujets qu'aucune page du site ne couvre deja :
+ceux que le site traite deja ont ete retires avant cet appel, ne les reintroduis pas):
 ${JSON.stringify(slots, null, 1)}
 
 Objectif:
@@ -323,7 +559,10 @@ Pour chaque slot, produire un brief SEO complet. Ce brief servira le jour J a re
 Ne redige pas la page. Ne donne pas de HTML.
 
 Regles:
-1. proposed_slug doit etre longue traine, 6 a 10 mots, unique, jamais dans les slugs deja utilises.
+1. proposed_slug dit ce que la page traite, en 7 mots maximum, et jamais un slug deja utilise.
+   La longue traine decrit la REQUETE, pas l'adresse : un slug rallonge pour atteindre un compte
+   de mots est tronque a la fabrication, et c'est son dernier mot — celui qui distinguait la page
+   de sa soeur — qui tombe.
 2. target_keyword doit etre une intention longue traine, differente des mots-cles deja cibles.
 3. page_type "pillar": brief autorite topique, trame hub, liens vers pages filles.
 4. page_type "child": angle specifique, lien retour pilier et pages soeurs.
@@ -495,87 +734,390 @@ function buildPerformanceSection(signals: GscPlanningSignals | null): string {
   return `${blocks.join('\n')}\n`
 }
 
-function normalizeBriefs(
-  rawItems: Array<Partial<PlanItemBrief>>,
-  slots: ReturnType<typeof generateEditorialCalendar>,
-  campaign: Campaign,
-  signals: GscPlanningSignals | null,
-  opportunities: Array<StrikingDistanceOpportunity | null>
-): PlanItemBrief[] {
-  return slots.map((slot, index) => {
-    const item = rawItems[index] || {}
-    const opportunity = opportunities[index] ?? null
-    const pageType = (item.page_type || slot.page_type || 'child') as PageType
-    const city = item.target_city || slot.target_city || campaign.communes[0] || campaign.department || ''
-    const proposedKeyword = item.target_keyword
-      || subIntentKeyword(opportunity, city)
-      || slot.target_keyword
-      || `${campaign.business_type} ${city}`.trim()
+/**
+ * Turn decisions into briefs — l'adresse d'une page neuve PROUVEE libre, la
+ * cible d'une mise a jour nommee, un sujet ecarte qui dit pourquoi.
+ *
+ * `takenPaths` is mutated as the plan is built, and that is the point: two
+ * sibling slots of the same cycle produce the same address far more often than
+ * a slot collides with a page already online, and a set refreshed only between
+ * cycles would catch the rare case and miss the common one.
+ *
+ * Une adresse qui ne se libere pas ne fait plus DISPARAITRE son creneau : elle
+ * le fait basculer en 'skip', avec le motif. Aucun suffixe numerique — `-2`
+ * n'est pas une desambiguation, c'est un aveu — mais un creneau evanoui etait la
+ * seule decision du plan que personne ne pouvait relire. Elle est desormais
+ * ecrite dans l'item, et elle ne coute toujours aucun jeton.
+ *
+ * `rawItems` est aligne sur les SEULS sujets soumis au modele, dans leur ordre.
+ * C'est pourquoi son compteur avance dans la branche 'create' et nulle part
+ * ailleurs : le lire par l'index du creneau decalerait tous les briefs des le
+ * premier sujet ecarte.
+ */
+function normalizeBriefs(input: {
+  subjects: readonly PlannedSubject[]
+  rawItems: ReadonlyArray<Partial<PlanItemBrief>>
+  campaign: Campaign
+  takenPaths: Set<string>
+  inventory: SiteInventory
+  signals: GscPlanningSignals | null
+}): PlanItemBrief[] {
+  const { subjects, rawItems, campaign, takenPaths, inventory, signals } = input
+  const briefs: PlanItemBrief[] = []
+  let written = 0
 
-    // Last line of defence: whatever the model answered, the plan must not open
-    // a page on a query the site already splits between several URLs.
-    const guard = guardAgainstCannibalization(proposedKeyword, city, signals)
-    const targetKeyword = guard.keyword
+  subjects.forEach((subject, index) => {
+    const { action } = subject
 
-    const dataRules = [
-      ...guard.rules,
-      ...(opportunity
-        ? [`Requete "${opportunity.query}" en position ${opportunity.position} sur ${opportunity.pageUrl} : traiter une sous-intention et lier vers cette URL, ne pas la concurrencer.`]
-        : []),
-    ]
-
-    const dataLinks = [
-      ...guard.links,
-      ...(opportunity ? [opportunity.pageUrl] : []),
-    ]
-
-    return {
-      id: item.id || createPlanItemId(),
-      scheduled_date: item.scheduled_date || slot.scheduled_date,
-      page_type: pageType,
-      // A measured opportunity outranks any heuristic: it is the only priority
-      // on this plan backed by an observed impression count.
-      priority: opportunity ? 'high' : (item.priority || priorityFor(pageType, index)),
-      target_city: city,
-      target_keyword: targetKeyword,
-      secondary_keywords: asStringArray(item.secondary_keywords, [
-        `${targetKeyword} pres de moi`,
-        `${targetKeyword} avis`,
-        `${targetKeyword} prix`,
-      ]),
-      search_intent: item.search_intent || intentFor(pageType),
-      proposed_title: item.proposed_title || titleFor(pageType, campaign.business_type, city),
-      // The page type never enters the URL, and the slug is not padded to reach
-      // a word count: both were doing exactly that, in two different ways.
-      proposed_slug: buildPageSlug({
-        proposed: item.proposed_slug,
-        focusKeyword: item.target_keyword,
-        title: item.proposed_title,
-        city,
-        businessType: campaign.business_type,
-      }),
-      page_goal: item.page_goal || `Capter une intention ${intentFor(pageType)} sur ${targetKeyword}.`,
-      outline: asStringArray(item.outline, defaultOutline(pageType, campaign.business_type, city)),
-      seo_rules: [...asStringArray(item.seo_rules, defaultRules(pageType, targetKeyword)), ...dataRules],
-      required_entities: asStringArray(item.required_entities, [city, campaign.department || 'Aube']),
-      internal_link_targets: dedupe([
-        ...asStringArray(item.internal_link_targets, pageType === 'pillar' ? ['pages filles du cluster'] : ['page pilier parente']),
-        ...dataLinks,
-      ]),
-      competitor_insights: asStringArray(item.competitor_insights, []),
-      estimated_word_count: item.estimated_word_count || estimatedWords(pageType, campaign.target_length),
-      rationale: item.rationale || rationaleFor(pageType, opportunity),
+    if (action.kind === 'refresh') {
+      briefs.push(refreshBrief(subject, action, campaign, index))
+      return
     }
+
+    if (action.kind === 'skip') {
+      briefs.push(skipBrief(subject, action.reasons, campaign, index))
+      return
+    }
+
+    const item = rawItems[written++] ?? {}
+    const fields = fieldsOf(subject, item, campaign, subIntentKeyword(subject.opportunity, subject.city))
+
+    // The page type never enters the URL, and the slug is not padded to reach a
+    // word count: both were doing exactly that, in two different ways.
+    //
+    // Disambiguators, in editorial order rather than technical order: a district
+    // named by the brief tells two sibling pages apart far better than the trade
+    // does, and the trade is the same word on every page of the campaign.
+    //
+    // `fields.targetKeyword` and not `item.target_keyword`: the slug used to
+    // fall back to the business type and the town whenever the model omitted its
+    // keyword, which handed EVERY slot of the cycle the same address.
+    const resolution = resolveFreeSlug(
+      {
+        proposed: item.proposed_slug,
+        focusKeyword: fields.targetKeyword,
+        title: item.proposed_title,
+        city: fields.city,
+        businessType: campaign.business_type,
+      },
+      takenPaths,
+      dedupe([fields.requiredEntities[0] ?? '', fields.searchIntent, campaign.business_type])
+    )
+
+    if (resolution.status === 'collision') {
+      const reason =
+        `L'adresse ${resolution.occupiedBy} est deja occupee et aucun desambiguateur ` +
+        `n'en libere d'autre pour ${fields.city || 'cette commune'}.`
+
+      console.warn(
+        `[plan] creneau du ${item.scheduled_date || subject.slot.scheduled_date} ecarte : ${reason}`
+      )
+
+      // Ecarte, et surtout PAS bascule en rafraichissement. La page qui occupe
+      // cette adresse n'a pas ete jugee proche du sujet — ou l'inventaire etait
+      // trop vieux pour qu'on en juge — et decider ici de la reecrire
+      // contournerait la garde de fraicheur qui existe precisement pour empecher
+      // qu'on propose d'ecraser une page qu'on ne connait plus.
+      briefs.push(
+        skipBrief(
+          subject,
+          [
+            reason,
+            "Aucun suffixe numerique n'est ajoute : « -2 » ne distingue pas deux pages, il declare qu'elles sont la meme.",
+          ],
+          campaign,
+          index
+        )
+      )
+      return
+    }
+
+    if (resolution.status === 'disambiguated') {
+      console.warn(
+        `[plan] ${resolution.from} etait occupee : le creneau du ` +
+          `${item.scheduled_date || subject.slot.scheduled_date} devient /${resolution.slug} ` +
+          `(desambigue par "${resolution.token}").`
+      )
+    }
+
+    // Reserved for the rest of THIS plan as soon as it is retained. Without
+    // this line the second sibling of a cycle would be told the address is free
+    // by the very set that just handed it to the first.
+    takenPaths.add(`/${resolution.slug}`)
+
+    briefs.push(
+      buildBrief({
+        subject,
+        campaign,
+        index,
+        fields,
+        item,
+        action: { kind: 'create', slug: slugDtoFor(resolution, inventory) },
+        slug: resolution.slug,
+        // La degradation est nommee DANS l'item : un plan bati sans Search
+        // Console ou sans inventaire sort quand meme, mais il ne se presente
+        // jamais comme un plan informe.
+        rationale:
+          (item.rationale || rationaleFor(fields.pageType, subject.opportunity)) +
+          degradationSuffix(inventory, signals),
+      })
+    )
+  })
+
+  return briefs
+}
+
+/**
+ * Le brief d'une mise a jour : une cible, une portee, une preuve.
+ *
+ * RIEN NE PART SEUL D'ICI. Cet item ne declenche aucune ecriture : il porte
+ * l'adresse de la page visee et les phrases qui l'ont designee, pour qu'un
+ * humain lise les deux avant de cliquer. Le moteur ne supprime pas, ne fusionne
+ * pas et ne redirige pas — les pages perdantes d'une cannibalisation sont
+ * NOMMEES dans `evidence` et rien d'autre ne leur arrive.
+ */
+function refreshBrief(
+  subject: PlannedSubject,
+  action: Extract<EditorialAction, { kind: 'refresh' }>,
+  campaign: Campaign,
+  index: number
+): PlanItemBrief {
+  const fields = fieldsOf(subject, {}, campaign, null)
+
+  return buildBrief({
+    subject,
+    campaign,
+    index,
+    fields,
+    item: {},
+    action,
+    // L'adresse d'une mise a jour est celle de la page visee : on ne CHOISIT
+    // pas l'URL d'une page qui existe deja, on la reprend. Rien n'est ajoute a
+    // takenPaths — cette adresse y figure deja, c'est meme ce qui l'a designee.
+    slug: action.targetPath.replace(/^\//, ''),
+    rationale: action.evidence.join(' '),
+    extraRules: scopeRules(action),
+    pageGoal:
+      action.scope === 'metadata'
+        ? `Reecrire le titre et la meta description de ${action.targetPath} sur ${fields.targetKeyword}.`
+        : `Mettre a jour le contenu de ${action.targetPath} sur ${fields.targetKeyword}.`,
   })
 }
 
-function fallbackBriefs(
-  slots: ReturnType<typeof generateEditorialCalendar>,
+/**
+ * Le brief d'un sujet ecarte : une ligne qui ne produira rien, et qui le dit.
+ *
+ * Elle reste dans le plan au lieu d'en disparaitre, parce qu'un creneau evanoui
+ * est une decision que personne ne peut relire. Elle ne reserve aucune adresse
+ * et n'annonce aucun mot : `proposed_slug` est vide et le compte de mots est
+ * nul, faute de quoi le plan facturerait une page qu'il a refuse d'ecrire.
+ */
+function skipBrief(
+  subject: PlannedSubject,
+  reasons: readonly string[],
   campaign: Campaign,
-  signals: GscPlanningSignals | null,
-  opportunities: Array<StrikingDistanceOpportunity | null>
-) {
-  return normalizeBriefs([], slots, campaign, signals, opportunities)
+  index: number
+): PlanItemBrief {
+  return buildBrief({
+    subject,
+    campaign,
+    index,
+    fields: fieldsOf(subject, {}, campaign, null),
+    item: {},
+    action: { kind: 'skip', reasons: [...reasons] },
+    slug: '',
+    rationale: reasons.join(' '),
+    pageGoal: "Sujet ecarte : aucune page n'est prevue pour ce creneau.",
+  })
+}
+
+/** Ce que le creneau et la reponse du modele disent du sujet, resolu une fois. */
+interface BriefFields {
+  pageType: PageType
+  city: string
+  targetKeyword: string
+  requiredEntities: string[]
+  searchIntent: string
+}
+
+/**
+ * `fallbackKeyword` n'est passe que sur une page NEUVE : c'est la sous-intention
+ * derivee d'une opportunite mesuree, utile quand le modele n'a rien repondu.
+ * Une mise a jour, elle, garde le sujet du creneau — celui sur lequel le verdict
+ * a ete rendu.
+ */
+function fieldsOf(
+  subject: PlannedSubject,
+  item: Partial<PlanItemBrief>,
+  campaign: Campaign,
+  fallbackKeyword: string | null
+): BriefFields {
+  const pageType = item.page_type || subject.pageType
+  const city = item.target_city || subject.city
+  const targetKeyword = item.target_keyword || fallbackKeyword || subject.seedKeyword
+
+  return {
+    pageType,
+    city,
+    targetKeyword,
+    requiredEntities: asStringArray(item.required_entities, [city, campaign.department || 'Aube']),
+    searchIntent: item.search_intent || intentFor(pageType),
+  }
+}
+
+/**
+ * Le brief lui-meme, ecrit UNE fois pour les trois verdicts.
+ *
+ * Les trois partagent tout sauf leur adresse, leur objectif et leur motif : les
+ * separer en trois fabriques aurait fait diverger les valeurs par defaut de la
+ * page neuve et celles de la mise a jour, alors que ce sont les memes briefs
+ * lus par le meme generateur.
+ */
+function buildBrief(draft: {
+  subject: PlannedSubject
+  campaign: Campaign
+  index: number
+  fields: BriefFields
+  item: Partial<PlanItemBrief>
+  action: PlanItemAction
+  slug: string
+  rationale: string
+  pageGoal?: string
+  extraRules?: string[]
+}): PlanItemBrief {
+  const { subject, campaign, index, fields, item, action } = draft
+  const { pageType, city, targetKeyword, requiredEntities, searchIntent } = fields
+
+  // Lier vers la page qui ranke n'a de sens que sur une page NEUVE. Quand c'est
+  // cette page-la qu'on met a jour, se lier a soi-meme n'apporte rien, et lui
+  // demander de « ne pas la concurrencer » serait absurde.
+  const opportunity = action.kind === 'create' ? subject.opportunity : null
+
+  const dataRules = opportunity
+    ? [`Requete "${opportunity.query}" en position ${opportunity.position} sur ${opportunity.pageUrl} : traiter une sous-intention et lier vers cette URL, ne pas la concurrencer.`]
+    : []
+
+  return {
+    id: item.id || createPlanItemId(),
+    scheduled_date: item.scheduled_date || subject.slot.scheduled_date,
+    page_type: pageType,
+    // A measured opportunity outranks any heuristic: it is the only priority
+    // on this plan backed by an observed impression count.
+    priority:
+      action.kind === 'skip'
+        ? 'low'
+        : subject.opportunity
+          ? 'high'
+          : item.priority || priorityFor(pageType, index),
+    target_city: city,
+    target_keyword: targetKeyword,
+    secondary_keywords: asStringArray(item.secondary_keywords, [
+      `${targetKeyword} pres de moi`,
+      `${targetKeyword} avis`,
+      `${targetKeyword} prix`,
+    ]),
+    search_intent: searchIntent,
+    proposed_title: item.proposed_title || titleFor(pageType, campaign.business_type, city),
+    proposed_slug: draft.slug,
+    page_goal:
+      item.page_goal || draft.pageGoal || `Capter une intention ${intentFor(pageType)} sur ${targetKeyword}.`,
+    outline: asStringArray(item.outline, defaultOutline(pageType, campaign.business_type, city)),
+    seo_rules: [
+      ...asStringArray(item.seo_rules, defaultRules(pageType, targetKeyword)),
+      ...(draft.extraRules ?? []),
+      ...dataRules,
+    ],
+    required_entities: requiredEntities,
+    internal_link_targets: dedupe([
+      ...asStringArray(item.internal_link_targets, pageType === 'pillar' ? ['pages filles du cluster'] : ['page pilier parente']),
+      ...(opportunity ? [opportunity.pageUrl] : []),
+    ]),
+    competitor_insights: asStringArray(item.competitor_insights, []),
+    estimated_word_count:
+      action.kind === 'skip' ? 0 : item.estimated_word_count || estimatedWords(pageType, campaign.target_length),
+    rationale: draft.rationale,
+    action,
+    ...(action.kind === 'refresh'
+      ? {
+          refresh_target_path: action.targetPath,
+          refresh_scope: action.scope,
+          ...(action.targetGenerationId ? { refresh_target_generation_id: action.targetGenerationId } : {}),
+        }
+      : {}),
+  }
+}
+
+/**
+ * Ce que la portee autorise a reecrire, dit au generateur.
+ *
+ * Le brief est le seul canal entre la decision et la redaction : sans cette
+ * ligne, une mise a jour de portee 'metadata' arriverait au generateur comme
+ * n'importe quelle page et il reecrirait le corps qui obtient deja les
+ * impressions.
+ */
+function scopeRules(action: Extract<EditorialAction, { kind: 'refresh' }>): string[] {
+  return action.scope === 'metadata'
+    ? [`Portee de la mise a jour : title et meta description UNIQUEMENT. Le corps de ${action.targetPath} n'est pas reecrit.`]
+    : [`Cette page met a jour ${action.targetPath} : reprendre ce que cette page couvre deja et le completer, jamais partir d'un sujet different.`]
+}
+
+/**
+ * Ce que la resolution d'adresse a le droit de PROMETTRE.
+ *
+ * Sur un inventaire aveugle, `takenPaths` ne contient que les adresses posees
+ * par ce plan-ci : dire « libre » reviendrait a certifier une verification qui
+ * n'a pas eu lieu. Le statut le dit, et l'ecran peut alors refuser le badge
+ * vert plutot que l'afficher a tort.
+ */
+function slugDtoFor(
+  resolution: Exclude<SlugResolution, { status: 'collision' }>,
+  inventory: SiteInventory
+): SlugResolutionDto {
+  if (inventory.freshness.state === 'blind') {
+    return {
+      status: 'unverified',
+      reason:
+        `Inventaire aveugle${inventory.freshness.blindReason ? ` (${inventory.freshness.blindReason})` : ''} : ` +
+        `les adresses deja occupees par ce site n'ont pas pu etre lues, celle-ci n'a donc pas ete verifiee.`,
+    }
+  }
+
+  return resolution.status === 'disambiguated'
+    ? { status: 'disambiguated', from: resolution.from, token: resolution.token }
+    : { status: 'free' }
+}
+
+/**
+ * La panne de connaissance, NOMMEE dans l'item qui en decoule.
+ *
+ * Une source absente ne bloque jamais le plan — mais un plan degrade qui ne le
+ * dit pas se lit comme un plan mesure. Les items 'refresh' et 'skip' portent
+ * deja ces mentions, ecrites par le domaine avec leur preuve : les redire ici
+ * les compterait deux fois, donc seule la page neuve les recoit.
+ */
+function degradationSuffix(inventory: SiteInventory, signals: GscPlanningSignals | null): string {
+  const notes: string[] = []
+
+  if (!signals) {
+    notes.push(
+      `Decide ${WITHOUT_SEARCH_CONSOLE} : aucune mesure d'audience n'etait disponible, l'absence de donnee ne vaut pas absence de concurrence.`
+    )
+  }
+
+  if (inventory.freshness.state === 'blind') {
+    notes.push(
+      `Inventaire aveugle${inventory.freshness.blindReason ? ` (${inventory.freshness.blindReason})` : ''} : ` +
+        `le moteur ne sait pas quelles pages ce site porte deja, aucune mise a jour ne pouvait etre proposee.`
+    )
+  } else if (inventory.freshness.state === 'stale') {
+    notes.push(
+      inventory.freshness.ageDays === null
+        ? "Inventaire d'age inconnu : des pages publiees depuis peuvent manquer."
+        : `Inventaire vieux de ${inventory.freshness.ageDays} jour(s) : des pages publiees depuis peuvent manquer.`
+    )
+  }
+
+  return notes.length === 0 ? '' : ` ${notes.join(' ')}`
 }
 
 /**
@@ -599,27 +1141,19 @@ function subIntentKeyword(opportunity: StrikingDistanceOpportunity | null, city:
   return `${query} ${city}`
 }
 
-function guardAgainstCannibalization(
-  keyword: string,
-  city: string,
-  signals: GscPlanningSignals | null
-): { keyword: string; rules: string[]; links: string[] } {
-  if (!signals || signals.cannibalized.length === 0) return { keyword, rules: [], links: [] }
-
-  const normalized = normalizeText(keyword)
-  const collision = signals.cannibalized.find((entry) => normalizeText(entry.query) === normalized)
-  if (!collision) return { keyword, rules: [], links: [] }
-
-  const differentiated = city && !normalized.includes(normalizeText(city)) ? `${keyword} ${city}` : keyword
-
-  return {
-    keyword: differentiated,
-    rules: [
-      `Cannibalisation detectee sur "${collision.query}" (${collision.pages.length} pages du site en concurrence). Ne pas retraiter cette requete frontalement : lier vers ${collision.winner}, qui doit rester la page de reference.`,
-    ],
-    links: [collision.winner],
-  }
-}
+// `guardAgainstCannibalization` used to live here.
+//
+// It called itself a last line of defence, and what it actually did was compare
+// two strings for exact equality and paste the town on the end when they
+// matched. Two facts made it worthless: an exact string match between a model's
+// keyword and a Search Console query almost never happens, and appending the
+// town produces a keyword that a page of the same cycle, in the same town, has
+// every chance of carrying too.
+//
+// What replaces it is not a smarter comparison, it is a different question. The
+// blocked queries still reach the model through `buildPerformanceSection`, and
+// the ADDRESS — the one thing a published page can never take back — is now
+// proven free against the inventory before the brief is written at all.
 
 function rationaleFor(pageType: PageType, opportunity: StrikingDistanceOpportunity | null): string {
   if (opportunity) {

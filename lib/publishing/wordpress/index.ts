@@ -16,8 +16,9 @@
 import { detectDialect, dialectNote, metaFor, type SeoDialect } from './dialect'
 import { diagnose } from './describe'
 import { createWpClient, WpError, type WpClient } from './rest'
-import { decideTarget, type WpPage } from './target'
+import { decideTarget, refusalKindFor, type WpPage } from './target'
 import type { Connector } from '../connector'
+import { rejectedOnArrival } from '../http-evidence'
 import type { PublishOutcome, PublishRequest } from '../outcome'
 import type { GeneratedPage } from '@/lib/ai/openai'
 
@@ -70,6 +71,12 @@ export const wordPressConnector: Connector = {
         slug: page.slug,
         knownRemoteId: request.knownRemoteId,
         force,
+        // La reprise ciblee. Sans cette ligne `target.ts` recevait une option
+        // que personne ne lui envoyait jamais : une mise a jour validee a la
+        // main dans /publish repartait en refus 'occupe', et le seul moyen
+        // restant d'ecrire sur cette page-la etait `force` — exactement le
+        // resultat que `replaces` existe pour eviter.
+        replaces: request.replaces,
         recovering: request.recovering,
         expectedTitle: page.title,
       })
@@ -78,7 +85,9 @@ export const wordPressConnector: Connector = {
         return {
           ok: false,
           refusal: {
-            kind: target.reason.includes('redirection') ? 'redirection' : 'occupe',
+            // Classified by `target.ts`, which owns the reasons it writes. The
+            // probe asks the same question and must get the same answer.
+            kind: refusalKindFor(target.reason),
             message: target.reason,
           },
           written: false,
@@ -184,7 +193,14 @@ export const wordPressConnector: Connector = {
       //
       // 5xx stays "possibly written": a plugin can fatal AFTER wp_insert_post().
       // 408 too — a proxy can time out on a request WordPress already served.
-      return fail(error, attemptedWrite && !rejectedOnArrival(error), notes)
+      //
+      // The rule itself now lives in ../http-evidence, shared with the Google
+      // listing connector, whose POST is just as non-idempotent as this one. Read
+      // there why it is decided on the status and not on the failure name — and
+      // why 429 joined 408. Anything that is not a `WpError` carries no status at
+      // all: no answer came back, so nothing is proved either way.
+      const httpStatus = error instanceof WpError ? error.status : undefined
+      return fail(error, attemptedWrite && !rejectedOnArrival(httpStatus), notes)
     }
   },
 }
@@ -269,24 +285,6 @@ function contentWithSchema(page: GeneratedPage): string {
  *   WordPress. Taken from the caller's position in the sequence — never guessed
  *   from the kind of error, which is what made this wrong in both directions.
  */
-/**
- * A refusal received from the destination: nothing could have been inserted.
- *
- * Decided on the HTTP status, not on the failure name: `rest_filtre` is raised
- * both for a WAF answering 403 before WordPress (nothing written) and for a 502
- * from nginx (possibly written after insertion). The status separates them; the
- * name does not.
- */
-function rejectedOnArrival(error: unknown): boolean {
-  return (
-    error instanceof WpError &&
-    error.status !== undefined &&
-    error.status >= 400 &&
-    error.status < 500 &&
-    error.status !== 408
-  )
-}
-
 function fail(error: unknown, written: boolean, notes: string[] = []): PublishOutcome {
   const message = error instanceof WpError ? error.message : error instanceof Error ? error.message : String(error)
 

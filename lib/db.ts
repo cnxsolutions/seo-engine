@@ -260,6 +260,33 @@ export async function createGeneration(payload: CreateGenerationPayload) {
   return data as Generation
 }
 
+/**
+ * THIS FUNCTION THROWS. Everything folded into one call fails together.
+ *
+ * That is not a defect — a caller storing a generated page wants to know its
+ * write failed — but it decides what may travel in the same `values`, and two
+ * columns must NOT.
+ *
+ * `slug` was the first lesson: written here alongside the HTML, a collision on
+ * the unique index failed the ENTIRE update and threw away a page that had
+ * already been generated and paid for. The address is reserved on its own now
+ * (lib/existing/reservation.ts), before a single token is spent.
+ *
+ * `duplicate_verdict` is the second, and it is the one this pass adds. The
+ * verdict is bookkeeping ABOUT a page that already exists: losing the page
+ * because its evidence could not be filed would be the worse failure of the two.
+ * It is therefore written by `persistDuplicateVerdict` (lib/pipeline/repository.ts),
+ * which never throws, in its own UPDATE — and, critically, on BOTH sides of the
+ * decision, the branch that rejects and the branch that lets the page through.
+ * While the gate runs in observation mode the verdict is computed on pages that
+ * DO ship: filing it only when it blocked would make the blocking rate that the
+ * switch to enforcement will be decided on read 100 % for ever, measured on an
+ * empty sample.
+ *
+ * Nothing here forbids it in the type. `lib/db.ts` is shared data access and
+ * holds no editorial policy of its own — the rule is named where it is broken,
+ * not enforced by narrowing a generic CRUD helper.
+ */
 export async function updateGeneration(id: string, values: Partial<Generation>) {
   const supabase = requireSupabase()
   const { data, error } = await supabase.from('generations').update(values).eq('id', id).select('*').single()
@@ -295,6 +322,15 @@ export async function listPublishedGenerations() {
  * The `sites(*)` embed keeps the credentials on purpose — the publishing job
  * pushes to WordPress and GitHub straight from `gen.site`. Projecting the safe
  * columns here would compile cleanly and publish with an empty password.
+ *
+ * `intent = 'create'` is what makes "a refresh is never automatic" true.
+ *
+ * A row with `intent = 'refresh'` sits in `generated` on purpose: that is where
+ * the architecture parks a page rewrite until a human clicks. Without this
+ * filter the deferred job would pick it up at the next tick and push it with no
+ * `replaces`, which on the owner's site means overwriting — or being refused as
+ * 'occupe' on — a page that ranks. Rows written before migration 018 carry the
+ * column's default, so this filter excludes nothing that existed before it.
  */
 export async function listPendingPublishGenerations() {
   const supabase = requireSupabase()
@@ -302,6 +338,7 @@ export async function listPendingPublishGenerations() {
     .from('generations')
     .select('*, site:sites(*), campaign:campaigns!inner(*)')
     .eq('status', 'generated')
+    .eq('intent', 'create')
     .eq('campaign.auto_publish', true)
     .not('content', 'is', null)
     .not('site_id', 'is', null)
@@ -365,84 +402,19 @@ export async function listSitePages(siteId: string) {
   return (data ?? []) as SitePage[]
 }
 
-export async function getSiteContext(siteId: string): Promise<{
-  existingPages: SitePage[]
-  generatedPages: Generation[]
-  usedSlugs: string[]
-  usedKeywords: string[]
-  usedTitles: string[]
-}> {
-  const supabase = requireSupabase()
-
-  const [pagesResult, gensResult] = await Promise.all([
-    supabase.from('site_pages').select('*').eq('site_id', siteId),
-    // `failed` rows are read too, and then split below.
-    //
-    // Excluding them wholesale was safe while `failed` only meant "the model
-    // broke". It stopped being safe when a deliberate REFUSAL started landing
-    // there: a slug refused because the site already serves it was dropped from
-    // the dedup context, so the planner proposed it again, the engine paid for
-    // the page again, and it was refused again — for ever.
-    supabase.from('generations').select('*').eq('site_id', siteId),
-  ])
-
-  if (pagesResult.error) throw new Error(pagesResult.error.message)
-  if (gensResult.error) throw new Error(gensResult.error.message)
-
-  const existingPages = (pagesResult.data ?? []) as SitePage[]
-  const allGenerations = (gensResult.data ?? []) as Generation[]
-
-  // A failed row keeps its SLUG in the context but releases its subject.
-  //
-  // The two are not the same question. A slug the site already serves must never
-  // be proposed again, whatever happened to our attempt. The topic, on the other
-  // hand, deserves a second try — under a different URL.
-  const generatedPages = allGenerations.filter(g => g.status !== 'failed')
-
-  const usedSlugs = [
-    ...existingPages.map(p => p.path.replace(/^\//, '').replace(/\/$/, '')),
-    ...allGenerations.filter(g => g.slug).map(g => g.slug!),
-  ]
-
-  const usedKeywords = [
-    ...existingPages.flatMap(p => p.keywords),
-    ...existingPages.filter(p => p.focus_keyword).map(p => p.focus_keyword!),
-    ...generatedPages.filter(g => g.focus_keyword).map(g => g.focus_keyword!),
-  ]
-
-  const usedTitles = [
-    ...existingPages.filter(p => p.title).map(p => p.title!),
-    ...generatedPages.filter(g => g.title).map(g => g.title!),
-  ]
-
-  return {
-    existingPages,
-    generatedPages,
-    usedSlugs: [...new Set(usedSlugs)],
-    usedKeywords: [...new Set(usedKeywords.map(k => k.toLowerCase()))],
-    usedTitles: [...new Set(usedTitles.map(t => t.toLowerCase()))],
-  }
-}
-
-export async function checkDuplicates(siteId: string, proposals: Array<{ slug?: string; focusKeyword?: string; title?: string }>) {
-  const context = await getSiteContext(siteId)
-
-  return proposals.map(p => {
-    const slugConflict = p.slug && context.usedSlugs.includes(p.slug.replace(/^\//, ''))
-    const keywordConflict = p.focusKeyword && context.usedKeywords.includes(p.focusKeyword.toLowerCase())
-    const titleConflict = p.title && context.usedTitles.includes(p.title.toLowerCase())
-
-    return {
-      ...p,
-      isDuplicate: !!(slugConflict || keywordConflict),
-      conflicts: {
-        slug: slugConflict || false,
-        keyword: keywordConflict || false,
-        title: titleConflict || false,
-      },
-    }
-  })
-}
+// `getSiteContext` and `checkDuplicates` used to live here.
+//
+// They were two of the four places that each simulated a knowledge of what the
+// site already carries. Both read `select('*')` twice — the FULL HTML of every
+// generation pulled over the wire to extract three arrays of strings — and
+// neither separated the only two questions that matter: "is this URL taken?"
+// and "is this subject already covered?".
+//
+// Both are replaced by `loadSiteInventory` (lib/existing/inventory.ts), one read
+// with a narrow projection. They were deleted rather than deprecated so the
+// compiler names every caller instead of letting a fifth one appear; and this
+// file goes back to being shared data access, with no editorial policy of its
+// own.
 
 // -- Analysis Runs -----------------------------------------------------------
 

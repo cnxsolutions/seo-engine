@@ -1099,6 +1099,22 @@ textarea.input {
   flex-wrap: wrap;
 }
 
+/* ═══ Partial comparison ═════════════════════════════════════════════════
+   A comparison made against an excerpt, not against a full body.
+
+   The hatching is a TEXTURE, and that is the whole point: it survives
+   greyscale and colour-vision deficiency, where a shade does not. It has to
+   land on the TRACK — `.meter` paints an opaque `background: var(--ramp-1)`
+   over anything behind it, so the same class on the wrapper would be
+   invisible. `Meter` takes it through `trackClassName`, never `className`. */
+.hatch {
+  background-image: repeating-linear-gradient(
+    45deg,
+    var(--line-strong) 0 2px,
+    transparent 2px 6px
+  );
+}
+
 /* ═══ Popover (site switcher, menus) ═════════════════════════════════════ */
 
 .popover {

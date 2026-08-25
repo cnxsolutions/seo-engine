@@ -56,6 +56,11 @@ export const nextJsConnector: Connector = {
       branch,
       pageType,
       autoPromote: site.auto_promote ?? false,
+      // Le pendant Next.js de la reprise ciblee cote WordPress. Le publisher
+      // ne leve sa garde que si `path` designe EXACTEMENT le slug commite ;
+      // omettre la ligne rendait cette garde inatteignable et laissait la
+      // validation humaine se heurter au marqueur de fichier ecrit a la main.
+      replaces: request.replaces,
     })
 
     if (!result.success) {

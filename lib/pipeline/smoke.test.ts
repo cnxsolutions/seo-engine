@@ -154,6 +154,11 @@ function gateInput(overrides: Partial<Parameters<typeof runValidationGate>[0]> =
       "Plombier à Troyes : intervention en moins de deux heures pour fuite, canalisation bouchée ou chauffe-eau. Devis gratuit avant travaux, tarifs annoncés.",
     focusKeyword: 'dépannage plomberie troyes',
     html,
+    // `slug` est obligatoire sur GateInput depuis le lot 3 : le gate en derive
+    // l'URL quand `url` est absent, et le detecteur de collision de chemin s'en
+    // sert comme identite de la page. Il doit rester le dernier segment de
+    // l'`url` ci-dessous, sinon la fixture decrirait deux pages differentes.
+    slug: 'depannage-plomberie-troyes',
     url: 'https://exemple.fr/depannage-plomberie-troyes',
     schemaLocalBusiness: SCHEMA_LOCAL_BUSINESS,
     schemaFaqPage: SCHEMA_FAQ,

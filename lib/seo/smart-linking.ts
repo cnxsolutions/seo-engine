@@ -222,7 +222,7 @@ function buildPillarHubBlock(graph: LinkGraph, siteUrl: string): string {
   const baseUrl = siteUrl.replace(/\/$/, '')
   const cards = graph.children
     .map((child) => {
-      const typeLabel = PAGE_TYPE_LABELS[child.pageType] || child.pageType
+      const typeLabel = PUBLIC_PAGE_TYPE_LABELS[child.pageType] || child.pageType
       return `<li>
       <a href="${escapeAttribute(`${baseUrl}/${child.slug}`)}" class="hub-link">
         <span class="hub-type">${escapeAttribute(typeLabel)}</span>
@@ -241,7 +241,19 @@ function buildPillarHubBlock(graph: LinkGraph, siteUrl: string): string {
 </section>`
 }
 
-const PAGE_TYPE_LABELS: Record<PageType, string> = {
+/**
+ * Libellés destinés aux VISITEURS du site du client, pas à l'opérateur.
+ *
+ * Volontairement distincts de `PAGE_TYPE_LABELS` (lib/types.ts), qui nomme les
+ * mêmes types pour le tableau de bord : « Pilier », « Enfant », « Local pack ».
+ * Ces mots-là décrivent une mécanique interne et n'ont aucun sens pour
+ * quelqu'un qui lit la page — les fusionner au nom du DRY afficherait
+ * « Enfant » dans le maillage d'un site en production.
+ *
+ * Deux publics, deux vocabulaires. Le nom porte la distinction pour que la
+ * prochaine passe de déduplication ne les rapproche pas par erreur.
+ */
+const PUBLIC_PAGE_TYPE_LABELS: Record<PageType, string> = {
   pillar: 'Guide complet',
   child: 'Détail',
   alternative: 'Alternatives',

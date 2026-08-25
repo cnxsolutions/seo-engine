@@ -1,5 +1,6 @@
 import {
-  ArrowDown, ArrowUp, ArrowLeft, Inbox, LucideIcon, Minus, PlugZap, SearchX, TriangleAlert,
+  ArrowDown, ArrowUp, ArrowLeft, ArrowRight, CircleCheck, CircleQuestionMark, Inbox, Info,
+  LucideIcon, MapPin, Minus, OctagonAlert, PlugZap, SearchX, ShieldAlert, TriangleAlert, X,
 } from 'lucide-react'
 import Link from 'next/link'
 import React from 'react'
@@ -190,12 +191,24 @@ export function FormField({ label, hint, children, htmlFor, error, required }: F
         {hint && !error && <span className="field-hint" style={{ marginLeft: 'var(--space-2)' }}>{hint}</span>}
       </label>
       {children}
-      {error && (
-        <p style={{ marginTop: 'var(--space-1)', fontSize: 'var(--fs-xs)', color: 'var(--status-critical-text)', display: 'flex', alignItems: 'center', gap: 4 }}>
-          <TriangleAlert size={12} /> {error}
-        </p>
-      )}
+      {error && <FieldError>{error}</FieldError>}
     </div>
+  )
+}
+
+/**
+ * The error line of a field, on its own.
+ *
+ * It is exported because `FormField` REQUIRES `label` and renders it above its
+ * children: inside a `<td>` of a `.data-table`, wrapping an input in a
+ * `FormField` would repeat the column header on every row. The cell needs the
+ * error, not a second heading.
+ */
+export function FieldError({ children }: { children: React.ReactNode }) {
+  return (
+    <p style={{ marginTop: 'var(--space-1)', fontSize: 'var(--fs-xs)', color: 'var(--status-critical-text)', display: 'flex', alignItems: 'center', gap: 4 }}>
+      <TriangleAlert size={12} /> {children}
+    </p>
   )
 }
 
@@ -333,6 +346,22 @@ const STATUS_STYLES: Record<string, { cls: string; label: string }> = {
   disconnected: { cls: 'badge badge-muted',   label: 'Non connecté' },
   synced:       { cls: 'badge badge-success', label: 'Synchronisé' },
   stale:        { cls: 'badge badge-warning', label: 'À rafraîchir' },
+
+  /* Inventory freshness and write intent — the same strings the API emits, so
+     no screen needs a translation table. `stale` above doubles as the "stale
+     inventory" badge: SeoConfigBadge already overrides its label, so its
+     default is indifferent to that call site, and a second key for one state
+     is how a vocabulary starts to drift.
+
+     `blind` is muted, NOT danger: a site that was never crawled is not a
+     failure, and painting it red would punish the operator for a crawl that
+     nobody has run yet. `create` is muted for the same reason — an intent is
+     not an outcome. */
+  fresh:        { cls: 'badge badge-success', label: 'Inventaire à jour' },
+  blind:        { cls: 'badge badge-muted',   label: 'Site jamais analysé' },
+  refresh:      { cls: 'badge badge-info',    label: 'Mise à jour' },
+  create:       { cls: 'badge badge-muted',   label: 'Nouvelle page' },
+  duplicat:     { cls: 'badge badge-danger',  label: 'Quasi-doublon' },
 }
 
 export function StatusBadge({ status, label }: { status: string; label?: string }) {
@@ -425,7 +454,14 @@ export interface StatDelta {
 
 export interface StatTileProps {
   label: string
-  value: string | number
+  /**
+   * Widened from `string | number` so a tile can carry `<UnknownValue/>`.
+   * A dashboard that prints 0 for "we never crawled this site" is lying, and
+   * the tile is exactly where that lie used to be cheapest to tell. The
+   * `typeof value === 'number'` branch below is unchanged, so every existing
+   * caller keeps its formatting.
+   */
+  value: string | number | React.ReactNode
   icon?: LucideIcon
   /** Applied when `value` is a number. */
   format?: ValueFormat
@@ -531,10 +567,18 @@ export interface MeterProps {
   /** Fractions of `max`, e.g. `{ warning: 0.8, critical: 0.95 }`. */
   thresholds?: { warning?: number; critical?: number }
   className?: string
+  /**
+   * A class on the TRACK, not on the wrapper.
+   *
+   * `className` lands on the outer div, and `.meter` paints an opaque
+   * `background: var(--ramp-1)` over anything behind it — so texturing the
+   * track through `className` is silently invisible. `.hatch` needs this prop.
+   */
+  trackClassName?: string
 }
 
 /** A single ratio against a limit — never a two-slice pie. */
-export function Meter({ value, max = 100, label, valueLabel, tone = 'accent', thresholds, className }: MeterProps) {
+export function Meter({ value, max = 100, label, valueLabel, tone = 'accent', thresholds, className, trackClassName }: MeterProps) {
   const ratio = max > 0 ? Math.max(0, Math.min(1, value / max)) : 0
   const resolved =
     tone !== 'auto' ? tone
@@ -553,7 +597,7 @@ export function Meter({ value, max = 100, label, valueLabel, tone = 'accent', th
         </div>
       )}
       <div
-        className={`meter ${resolved === 'accent' ? '' : `meter--${resolved}`}`.trim()}
+        className={['meter', resolved === 'accent' ? '' : `meter--${resolved}`, trackClassName ?? ''].filter(Boolean).join(' ')}
         role="meter"
         aria-valuenow={value}
         aria-valuemin={0}
@@ -737,297 +781,593 @@ export function SeoConfigBadge({ plugin, schemaTypes = [] }: SeoConfigBadgeProps
   )
 }
 
-// GenerationWizard - Step-by-step wizard for content generation
-interface Step {
-  id: string
-  title: string
-  description: string
-  icon: React.ReactNode
-}
+/* ═══════════════════════════════════════════════════════════════════════════
+   What the engine knows about the site it writes on
+   ───────────────────────────────────────────────────────────────────────────
+   Everything below shows a page that ALREADY EXISTS, or a verdict about one.
 
-interface GenerationWizardProps {
-  steps: Step[]
-  currentStep: number
-  onStepChange: (step: number) => void
-  children: React.ReactNode
-}
+   Two rules govern the whole block and neither is decoration:
 
-export function GenerationWizard({ steps, currentStep, onStepChange, children }: GenerationWizardProps) {
+   · When the engine does not KNOW, the screen says so. "No crawl, so nothing
+     to count" and "zero pages" are different facts, and rendering both as 0
+     is exactly how a dashboard starts to lie. `UnknownValue` is the single
+     shape that fact takes.
+
+   · Every state carries AT LEAST TWO encodings, one of them non-chromatic.
+     Measured against `--surface-card`, a bare `--status-warning` dot is
+     1.79:1 and a bare `--status-serious` dot is 2.57:1 — both under the 3:1
+     that a graphic object needs. So severity is a badge (colour + glyph +
+     word), a score is a number (the bar is redundant, never alone), and a
+     partial comparison is a texture (`.hatch`), which survives greyscale and
+     colour-vision deficiency where a hue does not.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+// ── UnknownValue ────────────────────────────────────────────────────
+/**
+ * The absence of knowledge, rendered.
+ *
+ * `why` is not optional: "inconnu" without a reason is the same dead end as
+ * the 0 it replaces. It is on the `title` for the pointer and repeated in
+ * `.sr-only` because a tooltip is unreachable by keyboard and by screen
+ * reader.
+ */
+export function UnknownValue({ why }: { why: string }) {
   return (
-    <div>
-      <ol style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', marginBottom: 'var(--space-6)', listStyle: 'none', padding: 0 }}>
-        {steps.map((step, index) => {
-          const done = index < currentStep
-          const current = index === currentStep
-          return (
-            <li key={step.id} style={{ flex: index < steps.length - 1 ? 1 : 'none', display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
-              <button
-                type="button"
-                onClick={() => done && onStepChange(index)}
-                disabled={index > currentStep}
-                aria-current={current ? 'step' : undefined}
-                style={{
-                  display: 'flex', alignItems: 'center', gap: 'var(--space-2)',
-                  padding: '0.25rem 0.5rem', borderRadius: 'var(--radius-sm)', border: 'none',
-                  background: current ? 'var(--accent-wash)' : 'transparent',
-                  color: done || current ? 'var(--accent-text)' : 'var(--ink-muted)',
-                  cursor: done ? 'pointer' : 'default',
-                  fontSize: 'var(--fs-xs)', fontWeight: 600,
-                }}
-              >
-                <span style={{
-                  width: 20, height: 20, borderRadius: '50%',
-                  background: done || current ? 'var(--accent)' : 'var(--surface-inset)',
-                  color: done || current ? 'var(--accent-on)' : 'var(--ink-muted)',
-                  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                  fontSize: 10, fontWeight: 700,
-                }}>
-                  {done ? '✓' : index + 1}
-                </span>
-                <span className="hidden sm:inline">{step.title}</span>
-              </button>
-              {index < steps.length - 1 && (
-                <span style={{ flex: 1, height: 1, background: done ? 'var(--accent)' : 'var(--line)' }} />
-              )}
-            </li>
-          )
-        })}
-      </ol>
-      <div className="glass-card">{children}</div>
-    </div>
+    <span className="meta" title={why}>
+      Inconnu
+      <span className="sr-only"> — {why}</span>
+    </span>
   )
 }
 
-// SiteCard - Card for displaying a connected site
-interface SiteCardProps {
-  name: string
-  url: string
-  type: 'wordpress' | 'sanity'
-  schemaStatus: 'not_extracted' | 'extracting' | 'extracted' | 'error'
-  lastSync?: string
-  contentTypesCount?: number
-  onExtract?: () => void
-  onViewSchema?: () => void
-  onEdit?: () => void
+// ── RiskBadge ───────────────────────────────────────────────────────
+export type RiskLevel = 'bloquant' | 'serieux' | 'avertissement' | 'sain' | 'inconnu'
+
+/**
+ * The ONE place a severity gets a colour. Each rung ships a distinct glyph and
+ * a distinct word, so 'serieux' and 'avertissement' stay apart under
+ * deuteranopia and protanopia, where --status-serious and --status-warning
+ * very nearly meet.
+ *
+ * `CircleQuestionMark` is the canonical lucide name. `CircleHelp` and
+ * `HelpCircle` do exist in 0.577.0 — they are aliases of this very icon — but
+ * they are the deprecated spelling that lucide drops from release to release.
+ */
+const RISK_STYLES: Record<RiskLevel, { cls: string; label: string; icon: LucideIcon }> = {
+  bloquant:      { cls: 'badge badge-danger',  label: 'Bloquant',       icon: OctagonAlert },
+  serieux:       { cls: 'badge badge-serious', label: 'Sérieux',        icon: TriangleAlert },
+  avertissement: { cls: 'badge badge-warning', label: 'Avertissement',  icon: Info },
+  sain:          { cls: 'badge badge-success', label: 'Aucun conflit',  icon: CircleCheck },
+  inconnu:       { cls: 'badge badge-muted',   label: 'Non vérifiable', icon: CircleQuestionMark },
 }
 
-const SCHEMA_STATUS: Record<SiteCardProps['schemaStatus'], string> = {
-  not_extracted: 'draft',
-  extracting: 'running',
-  extracted: 'completed',
-  error: 'failed',
-}
+export function RiskBadge({ level, label, size = 'md' }: { level: RiskLevel; label?: string; size?: 'sm' | 'md' }) {
+  const preset = RISK_STYLES[level]
+  const Icon = preset.icon
 
-export function SiteCard({ name, url, type, schemaStatus, lastSync, contentTypesCount, onExtract, onViewSchema, onEdit }: SiteCardProps) {
+  // `||`, not `??`: a caller passing label="" would otherwise ship a badge that
+  // is nothing but a coloured square with a glyph — the exact failure this
+  // component exists to prevent. The word is never optional.
   return (
-    <div className="panel">
-      <div className="panel__body">
-        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 'var(--space-4)', marginBottom: 'var(--space-4)' }}>
-          <div style={{ minWidth: 0 }}>
-            <div style={{ fontWeight: 600, color: 'var(--ink-primary)' }}>{name}</div>
-            <div className="meta truncate">{url}</div>
-          </div>
-          <div style={{ display: 'flex', gap: 'var(--space-2)', flexShrink: 0 }}>
-            <span className="chip">{type}</span>
-            <StatusBadge status={SCHEMA_STATUS[schemaStatus]} />
-          </div>
-        </div>
+    <span className={preset.cls} style={size === 'sm' ? { padding: '0.0625rem 0.375rem' } : undefined}>
+      <Icon size={11} strokeWidth={2.4} aria-hidden="true" />
+      {label || preset.label}
+    </span>
+  )
+}
 
-        {schemaStatus === 'extracted' && (
-          <div className="inset" style={{ display: 'flex', gap: 'var(--space-6)', marginBottom: 'var(--space-4)' }}>
-            <div>
-              <div style={{ fontSize: 'var(--fs-xl)', fontWeight: 700, color: 'var(--ink-primary)' }}>{contentTypesCount ?? 0}</div>
-              <div className="meta">Types de contenu</div>
-            </div>
-            {lastSync && (
-              <div>
-                <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--ink-primary)' }}>{lastSync}</div>
-                <div className="meta">Dernière synchronisation</div>
-              </div>
-            )}
-          </div>
-        )}
+// ── SimilarityScore ─────────────────────────────────────────────────
+/**
+ * How close a proposed page is to one already online.
+ *
+ * `value` and `threshold` are RATIOS, and the readout is "82 / 100 · seuil 80"
+ * — never "82 %". A cosine of 0.82 is not "82 % of the text is duplicated",
+ * and the threshold beside it is what makes the number actionable.
+ *
+ * `threshold` travels in from the match that DECIDED, never a constant written
+ * here: a truncated inventory lowers TITLE_NEAR_DUPLICATE from 0.80 to 0.72,
+ * and a hard-coded "seuil 80" would sit next to a block that fired at 0.74.
+ *
+ * The bar is redundant on purpose. Its fill against its track measures 3.14:1
+ * in light and 2.75:1 in dark, and in the warning tone it drops to 1.65:1 —
+ * so the bar can never be the only carrier. The number always ships.
+ */
+export function SimilarityScore({ value, threshold, label, partial, className }: {
+  value: number
+  threshold: number
+  label: string
+  partial?: boolean
+  className?: string
+}) {
+  // `partial` OVERRIDES the verdict rather than shading it: a low cosine
+  // against an excerpt proves nothing, and "aucun conflit" printed over a
+  // half-read page is a green light on exactly the pages worth protecting.
+  const level: RiskLevel = partial
+    ? 'inconnu'
+    : value >= threshold ? 'bloquant'
+      : value >= threshold * 0.9 ? 'avertissement'
+        : 'sain'
 
-        <div style={{ display: 'flex', gap: 'var(--space-2)', flexWrap: 'wrap' }}>
-          {schemaStatus !== 'extracted' && (
-            <button type="button" className="btn-primary btn-sm" onClick={onExtract}>
-              {schemaStatus === 'extracting' ? 'Extraction…' : 'Extraire le schéma'}
-            </button>
-          )}
-          {schemaStatus === 'extracted' && (
-            <button type="button" className="btn-secondary btn-sm" onClick={onViewSchema}>Voir le schéma</button>
-          )}
-          <button type="button" className="btn-ghost btn-sm" onClick={onEdit}>Modifier</button>
-        </div>
+  return (
+    <div className={className}>
+      <div className="meta">{label}</div>
+      <div style={{ display: 'flex', alignItems: 'baseline', flexWrap: 'wrap', gap: 'var(--space-2)', marginTop: 'var(--space-1)' }}>
+        <span className="num" style={{ fontSize: 'var(--fs-md)', fontWeight: 700, color: partial ? 'var(--ink-muted)' : 'var(--ink-primary)' }}>
+          {formatMetric(value * 100, 'number', { decimals: 0 })}
+        </span>
+        <span className="num" style={{ fontSize: 'var(--fs-sm)', color: 'var(--ink-muted)' }}>/ 100</span>
+        {/* The threshold is a figure the operator decides on, so it does not
+            wear `.meta`: --ink-muted on --surface-inset measures 4.42:1, under AA. */}
+        <span className="num" style={{ fontSize: 'var(--fs-xs)', color: 'var(--ink-secondary)' }}>
+          · seuil {formatMetric(threshold * 100, 'number', { decimals: 0 })}
+        </span>
+        <RiskBadge level={level} size="sm" />
       </div>
+      <div style={{ marginTop: 'var(--space-2)' }}>
+        <Meter
+          value={value}
+          max={1}
+          tone="auto"
+          thresholds={{ warning: threshold * 0.9, critical: threshold }}
+          trackClassName={partial ? 'hatch' : undefined}
+        />
+      </div>
+      {partial && (
+        // No character count here: the excerpt cap belongs to the crawler, and
+        // a figure copied into the design system outlives the truth it quoted.
+        <p style={{ marginTop: 'var(--space-1)', fontSize: 'var(--fs-xs)', color: 'var(--ink-secondary)', lineHeight: 'var(--lh-snug)' }}>
+          Comparée à un extrait de la page, pas à son texte complet — un score bas ne prouve rien.
+        </p>
+      )}
     </div>
   )
 }
 
-// ValidationResult - Shows content validation results
-interface ValidationResultProps {
-  isValid: boolean
-  errors?: Array<{ field: string; message: string }>
-  warnings?: Array<{ field: string; message: string }>
+// ── ComparePanel ────────────────────────────────────────────────────
+export interface CompareSide {
+  kind: 'existante' | 'proposee'
+  /** Normalised, as `normalizeInventoryPath()` returns it. Never a raw path. */
+  path: string
+  url?: string
+  /** ISO. On the 'existante' side: `InventoryEntry.observedAt`. */
+  observedAt?: string
+  note?: string
 }
 
-export function ValidationResult({ isValid, errors = [], warnings = [] }: ValidationResultProps) {
-  const tone = isValid ? 'good' : 'critical'
+/**
+ * The page online, beside the page proposed. The incumbent is ALWAYS on the
+ * left, so position itself carries which is which.
+ *
+ * The two sides are NOT told apart by their background: --surface-inset
+ * against --surface-card measures 1.14:1 in light and 1.07:1 in dark, which is
+ * a change of plane nobody can see. They are told apart by a rule on the left
+ * edge, by a written eyebrow, and by their order.
+ *
+ * The grid is intrinsic — `repeat(auto-fit, minmax(280px, 1fr))` — and folds
+ * on its own. It has to be: this project's Tailwind chain compiles no
+ * breakpoint rules at all (globals.css uses the v3 `@tailwind` directives
+ * while postcss loads @tailwindcss/postcss v4), so a responsive-variant class
+ * would be silently inert at every width.
+ */
+export function ComparePanel({ left, right, title, risk, children }: {
+  left: CompareSide
+  right: CompareSide
+  title?: string
+  risk?: RiskLevel
+  children: React.ReactNode
+}) {
+  return (
+    <section className="panel">
+      {(title || risk) && (
+        <div className="panel__header">
+          <h3 className="card-title" style={{ minWidth: 0 }}>{title ?? 'Comparaison'}</h3>
+          {risk && <RiskBadge level={risk} />}
+        </div>
+      )}
+      <div className="panel__body--flush">
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))' }}>
+          <CompareColumn side={left} />
+          <CompareColumn side={right} />
+        </div>
+        {children}
+      </div>
+    </section>
+  )
+}
+
+/** The accent rule on the proposed side doubles as the column separator —
+ *  two borders on one edge would just read as a thicker line. */
+function CompareColumn({ side }: { side: CompareSide }) {
+  const proposed = side.kind === 'proposee'
   return (
     <div style={{
-      borderRadius: 'var(--radius-md)',
-      border: `1px solid var(--status-${tone})`,
-      background: `var(--status-${tone}-wash)`,
-      overflow: 'hidden',
+      minWidth: 0,
+      padding: 'var(--space-4) var(--space-5)',
+      borderLeft: `2px solid ${proposed ? 'var(--accent)' : 'var(--line-strong)'}`,
     }}>
-      <div style={{
-        display: 'flex', alignItems: 'center', gap: 'var(--space-2)',
-        padding: 'var(--space-3) var(--space-4)',
-        borderBottom: errors.length || warnings.length ? '1px solid var(--line)' : 'none',
-        fontWeight: 600,
-        color: `var(--status-${tone}-text)`,
-      }}>
-        <TriangleAlert size={14} style={{ opacity: isValid ? 0 : 1 }} />
-        {isValid ? 'Contenu valide' : 'Contenu avec erreurs'}
+      <div className="eyebrow" style={proposed ? { color: 'var(--accent-text)' } : undefined}>
+        {proposed ? 'Page proposée' : 'Page en ligne'}
       </div>
+      <div style={{ marginTop: 'var(--space-2)' }}>
+        <span className="chip">{side.path}</span>
+      </div>
+      {side.url && <div className="meta truncate" style={{ marginTop: 'var(--space-1)' }}>{side.url}</div>}
+      {side.observedAt && <div className="meta" style={{ marginTop: 'var(--space-1)' }}>Observée le {formatDayLong(side.observedAt)}</div>}
+      {side.note && (
+        <p style={{ marginTop: 'var(--space-2)', fontSize: 'var(--fs-sm)', color: 'var(--ink-secondary)', lineHeight: 'var(--lh-snug)' }}>
+          {side.note}
+        </p>
+      )}
+    </div>
+  )
+}
 
-      {(errors.length > 0 || warnings.length > 0) && (
-        <div style={{ padding: 'var(--space-4)', display: 'flex', flexDirection: 'column', gap: 'var(--space-2)', background: 'var(--surface-card)' }}>
-          {errors.map((error, i) => (
-            <div key={`err-${i}`}>
-              <code style={{ fontSize: 'var(--fs-xs)', color: 'var(--status-critical-text)' }}>{error.field}</code>
-              <p style={{ fontSize: 'var(--fs-sm)', color: 'var(--ink-secondary)' }}>{error.message}</p>
-            </div>
-          ))}
-          {warnings.map((warning, i) => (
-            <div key={`warn-${i}`}>
-              <code style={{ fontSize: 'var(--fs-xs)', color: 'var(--status-warning-text)' }}>{warning.field}</code>
-              <p style={{ fontSize: 'var(--fs-sm)', color: 'var(--ink-secondary)' }}>{warning.message}</p>
-            </div>
-          ))}
+/**
+ * One field of the comparison, laid out on the same intrinsic grid as the
+ * columns above so the values stay under their own side.
+ *
+ * No character-level diff: highlighting insertions in green and deletions in
+ * red is colour alone, and a real diff would mean an npm dependency this wave
+ * has committed not to take.
+ */
+export function CompareField({ label, before, after, similarity, threshold, partial }: {
+  label: string
+  before: string
+  after: string
+  similarity?: number
+  threshold?: number
+  partial?: boolean
+}) {
+  return (
+    <div style={{ padding: 'var(--space-4) var(--space-5)', borderTop: '1px solid var(--line)' }}>
+      <div className="field-label">{label}</div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 'var(--space-4)' }}>
+        <CompareValue kind="existante" value={before} />
+        <CompareValue kind="proposee" value={after} />
+      </div>
+      {similarity !== undefined && threshold !== undefined && (
+        <div style={{ marginTop: 'var(--space-3)' }}>
+          <SimilarityScore value={similarity} threshold={threshold} label={label} partial={partial} />
         </div>
       )}
     </div>
   )
 }
 
-// ExtractorWizard - Full extraction wizard
-interface ExtractorWizardProps {
-  siteName: string
-  siteType: 'wordpress' | 'sanity'
-  steps: Array<{
-    id: string
-    title: string
-    status: 'pending' | 'running' | 'completed' | 'error'
-    details?: string
-  }>
-  onClose?: () => void
+/** The written side name is `.sr-only`: on screen the left rule and the column
+ *  order say it, but neither reaches a screen reader once the grid folds. */
+function CompareValue({ kind, value }: { kind: CompareSide['kind']; value: string }) {
+  const proposed = kind === 'proposee'
+  return (
+    <p style={{
+      margin: 0,
+      minWidth: 0,
+      paddingLeft: 'var(--space-3)',
+      borderLeft: `2px solid ${proposed ? 'var(--accent)' : 'var(--line-strong)'}`,
+      fontSize: 'var(--fs-sm)',
+      color: 'var(--ink-secondary)',
+      lineHeight: 'var(--lh-snug)',
+    }}>
+      <span className="sr-only">{proposed ? 'Page proposée : ' : 'Page en ligne : '}</span>
+      {value}
+    </p>
+  )
 }
 
-const EXTRACT_STEP_TONE: Record<string, string> = {
-  pending: 'var(--ink-faint)',
-  running: 'var(--status-warning)',
-  completed: 'var(--status-good)',
-  error: 'var(--status-critical)',
+// ── Notice ──────────────────────────────────────────────────────────
+export type NoticeTone = 'good' | 'warning' | 'serious' | 'critical' | 'info'
+
+/** Same glyphs as `RiskBadge`, so one severity never wears two faces. */
+const NOTICE_TONES: Record<NoticeTone, { mark: string; text: string; icon: LucideIcon }> = {
+  good:     { mark: 'var(--status-good)',     text: 'var(--status-good-text)',     icon: CircleCheck },
+  warning:  { mark: 'var(--status-warning)',  text: 'var(--status-warning-text)',  icon: Info },
+  serious:  { mark: 'var(--status-serious)',  text: 'var(--status-serious-text)',  icon: TriangleAlert },
+  critical: { mark: 'var(--status-critical)', text: 'var(--status-critical-text)', icon: OctagonAlert },
+  info:     { mark: 'var(--accent)',          text: 'var(--accent-text)',          icon: Info },
 }
 
-export function ExtractorWizard({ siteName, siteType, steps, onClose }: ExtractorWizardProps) {
-  const done = steps.filter((s) => s.status === 'completed').length
+/**
+ * The banner three pages had each written for themselves.
+ *
+ * `inline` and `onDismiss` are part of the contract, not conveniences: the
+ * Google page nests three of these inside a panel and needs `.inset` instead
+ * of a second card frame, and the strategy page dismisses its transient
+ * "cycle lancé" banner. A consolidation that drops two used props is a
+ * regression wearing a design-system badge.
+ *
+ * Still server-renderable: it ATTACHES the handlers it is given and creates
+ * none, so a server page can pass `action.href` and simply omit the rest.
+ */
+export function Notice({ tone, title, body, icon, action, onDismiss, inline, children }: {
+  tone: NoticeTone
+  title: string
+  body?: React.ReactNode
+  icon?: LucideIcon
+  action?: { label: string; href?: string; onClick?: () => void }
+  onDismiss?: () => void
+  inline?: boolean
+  children?: React.ReactNode
+}) {
+  const preset = NOTICE_TONES[tone]
+  const Icon = icon ?? preset.icon
 
   return (
     <div
-      role="dialog"
-      aria-modal="true"
-      aria-label={`Extraction du schéma — ${siteName}`}
+      className={inline ? 'inset' : 'glass-card'}
       style={{
-        position: 'fixed', inset: 0, background: 'var(--surface-scrim)',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        zIndex: 100, padding: 'var(--space-4)',
+        borderLeft: `3px solid ${preset.mark}`,
+        marginBottom: inline ? 0 : 'var(--space-5)',
+        display: 'flex',
+        gap: 'var(--space-3)',
+        alignItems: 'flex-start',
       }}
     >
-      <div className="panel" style={{ width: '100%', maxWidth: 480, boxShadow: 'var(--shadow-lg)' }}>
-        <div className="panel__header">
-          <div style={{ minWidth: 0 }}>
-            <div style={{ fontWeight: 600, color: 'var(--ink-primary)' }}>Extraction du schéma</div>
-            <div className="meta truncate">{siteName} · {siteType}</div>
-          </div>
-          {onClose && <button type="button" className="btn-icon" onClick={onClose} aria-label="Fermer">✕</button>}
-        </div>
-
-        <div className="panel__body" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
-          {steps.map((step) => (
-            <div key={step.id} style={{ display: 'flex', alignItems: 'flex-start', gap: 'var(--space-3)' }}>
-              <span style={{
-                width: 24, height: 24, borderRadius: '50%', flexShrink: 0,
-                background: tint(EXTRACT_STEP_TONE[step.status], 15),
-                color: EXTRACT_STEP_TONE[step.status],
-                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                fontSize: 11, fontWeight: 700,
-              }}>
-                {step.status === 'completed' ? '✓' : step.status === 'error' ? '✕' : step.status === 'running' ? '◐' : '○'}
-              </span>
-              <div style={{ minWidth: 0 }}>
-                <div style={{ fontWeight: 500, color: 'var(--ink-primary)', fontSize: 'var(--fs-sm)' }}>{step.title}</div>
-                {step.details && <div className="meta">{step.details}</div>}
-              </div>
-            </div>
-          ))}
-        </div>
-
-        <div className="panel__footer">
-          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 'var(--space-2)' }}>
-            <span>Progression</span>
-            <span className="num" style={{ color: 'var(--ink-primary)', fontWeight: 600 }}>{done} / {steps.length}</span>
-          </div>
-          <div className="progress-bar">
-            <div className="progress-bar-fill" style={{ width: `${steps.length ? (done / steps.length) * 100 : 0}%` }} />
-          </div>
-        </div>
+      <Icon size={16} color={preset.mark} strokeWidth={2.2} aria-hidden="true" style={{ flexShrink: 0, marginTop: 2 }} />
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <strong style={{ fontSize: 'var(--fs-sm)', fontWeight: 600, color: preset.text }}>{title}</strong>
+        {body && (
+          <p style={{
+            fontSize: 'var(--fs-sm)',
+            color: 'var(--ink-secondary)',
+            margin: '0.25rem 0 0',
+            lineHeight: 1.55,
+            // Kept from the /sites/new copy this replaces: the bodies fed to a
+            // Notice are error strings, and an unbroken URL or token in one of
+            // them would otherwise push the card past the viewport.
+            overflowWrap: 'anywhere',
+          }}>{body}</p>
+        )}
+        {children}
       </div>
+      {action && (
+        action.href
+          ? <Link href={action.href} className="btn-secondary btn-sm">{action.label}</Link>
+          : <button type="button" className="btn-secondary btn-sm" onClick={action.onClick}>{action.label}</button>
+      )}
+      {onDismiss && (
+        <button type="button" className="btn-icon" onClick={onDismiss} aria-label="Fermer">
+          <X size={14} />
+        </button>
+      )}
     </div>
   )
 }
 
-// ── MetricCard ──────────────────────────────────────────────
-interface MetricCardProps {
-  icon: LucideIcon
-  label: string
-  value: string | number
-  change?: string
-  changeType?: 'up' | 'down'
-  /** Optional recessive trend, rendered by the caller (Sparkline). */
-  trend?: React.ReactNode
-  href?: string
+// ── ReasonList ──────────────────────────────────────────────────────
+/**
+ * Why something was refused — or, in the `info` tone, what the connector had
+ * to say about a publication that went through.
+ *
+ * `tone` repairs a defect rather than freezing it: both copies this replaces
+ * painted their heading in --status-critical-text with a ShieldAlert in every
+ * case, including over "À savoir sur cette publication", whose entries are
+ * informative notes. The colour was lying about the severity.
+ *
+ * An empty `reasons` renders no `<ul>` at all, which is the behaviour of the
+ * /publish copy — an empty bulleted list is a promise of content that is not
+ * coming.
+ */
+export function ReasonList({ title, reasons, tone = 'critical' }: {
+  title: string
+  reasons: string[]
+  tone?: 'critical' | 'info'
+}) {
+  const critical = tone === 'critical'
+  const Icon = critical ? ShieldAlert : Info
+
+  return (
+    <div className="inset">
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 'var(--space-1)',
+          fontSize: 'var(--fs-2xs)',
+          fontWeight: 650,
+          textTransform: 'uppercase',
+          letterSpacing: 'var(--ls-eyebrow)',
+          color: critical ? 'var(--status-critical-text)' : 'var(--accent-text)',
+          marginBottom: 'var(--space-2)',
+        }}
+      >
+        <Icon size={12} aria-hidden="true" />
+        {title}
+      </div>
+      {reasons.length > 0 && (
+        <ul style={{ margin: 0, paddingLeft: '1.1rem', fontSize: 'var(--fs-xs)', color: 'var(--ink-secondary)', lineHeight: 1.7 }}>
+          {reasons.map((reason, i) => (
+            <li key={i}>{reason}</li>
+          ))}
+        </ul>
+      )}
+    </div>
+  )
 }
 
 /**
- * Kept for the pages already written against it. New code should reach for
- * `StatTile`, which carries a typed delta instead of a pre-formatted string.
+ * `error_message` is written as `Rejete par le pipeline : CODE: raison | CODE:
+ * raison` (lib/pipeline/repository.ts). Split it back into the list it started
+ * as, and drop the prefix — the badge already says the page was refused.
  */
-export function MetricCard({ icon: Icon, label, value, change, changeType, trend, href }: MetricCardProps) {
-  const tone = changeType === 'up' ? 'good' : changeType === 'down' ? 'bad' : 'flat'
-  const Arrow = changeType === 'up' ? ArrowUp : changeType === 'down' ? ArrowDown : Minus
+export function splitReasons(message: string | null): string[] {
+  if (!message) return []
+  return message
+    .replace(/^Rejete par le pipeline\s*:\s*/i, '')
+    .split('|')
+    .map((part) => part.trim())
+    .filter(Boolean)
+}
 
-  const body = (
-    <>
-      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 'var(--space-3)' }}>
-        <span className="stat-label" style={{ marginTop: 0 }}>{label}</span>
-        <Icon size={15} color="var(--ink-faint)" strokeWidth={2} />
+// ── GbpPostPreview ──────────────────────────────────────────────────
+/**
+ * What a Business Profile post will look like once it leaves.
+ *
+ * `maxChars` and `target` arrive as props with NO default. The limits are
+ * declared "to be confirmed against the real API" and the first 400 response
+ * will correct them; a default living in the design system would survive that
+ * correction and keep counting against a number nobody believes any more. It
+ * also keeps ui.tsx free of any dependency on lib/.
+ *
+ * No image slot and no "En savoir plus" fold: the LocalPostDraft invariant is
+ * "no media in v1", and Google's truncation point is proven nowhere in this
+ * repo. A preview that invents either is a preview that lies.
+ */
+export function GbpPostPreview({ businessName, summary, cta, maxChars, target, className }: {
+  businessName: string
+  summary: string
+  cta?: { actionType: string; label: string; url?: string }
+  maxChars: number
+  target: { min: number; max: number }
+  className?: string
+}) {
+  const overflow = summary.length > maxChars
+
+  return (
+    <section className={`panel ${className ?? ''}`.trim()} style={{ maxWidth: '22rem' }}>
+      <div className="panel__header">
+        <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)', minWidth: 0 }}>
+          <IconBox icon={MapPin} color="var(--series-3)" boxSize={28} size={14} />
+          <div style={{ minWidth: 0 }}>
+            <div className="truncate" style={{ fontSize: 'var(--fs-sm)', fontWeight: 600, color: 'var(--ink-primary)' }}>{businessName}</div>
+            <div className="meta">Post sur la fiche</div>
+          </div>
+        </div>
       </div>
-      <div className="stat-value" style={{ marginTop: 'var(--space-2)' }}>{value}</div>
-      <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 'var(--space-3)', marginTop: 'var(--space-2)', minHeight: 20 }}>
-        {change ? (
-          <span className={`delta delta--${tone}`}>
-            <Arrow size={12} strokeWidth={2.4} aria-hidden="true" />
-            {change}
-          </span>
-        ) : <span />}
-        {trend}
+
+      <div className="panel__body">
+        <p style={{ margin: 0, fontSize: 'var(--fs-sm)', color: 'var(--ink-secondary)', whiteSpace: 'pre-wrap', lineHeight: 'var(--lh-normal)' }}>
+          {overflow ? summary.slice(0, maxChars) : summary}
+          {overflow && (
+            // The wavy underline is a SHAPE. A wash alone would leave the
+            // overflow invisible in greyscale, which is where it matters most.
+            <span style={{ background: 'var(--status-critical-wash)', textDecoration: 'underline wavy var(--status-critical)' }}>
+              {summary.slice(maxChars)}
+            </span>
+          )}
+        </p>
+
+        {cta && (
+          <>
+            <hr className="divider" />
+            {/* Google renders the call to action as a text link. A filled
+                button here would promise a rendering that never happens. */}
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 'var(--space-1)', color: 'var(--accent-text)', fontWeight: 600, fontSize: 'var(--fs-sm)' }}>
+              {cta.label}
+              <ArrowRight size={13} aria-hidden="true" />
+            </span>
+            {/* 'CALL' carries no url — showing one would invent a destination. */}
+            {cta.actionType !== 'CALL' && cta.url && (
+              <div className="meta truncate" style={{ marginTop: 'var(--space-1)' }}>{cta.url}</div>
+            )}
+          </>
+        )}
       </div>
-    </>
+
+      <div className="panel__footer">
+        <Meter
+          value={summary.length}
+          max={maxChars}
+          tone="auto"
+          thresholds={{ warning: target.max / maxChars, critical: 1 }}
+          label="Longueur"
+          valueLabel={`${summary.length} / ${maxChars} car. · cible ${target.min}–${target.max}`}
+        />
+        <p className="meta" style={{ marginTop: 'var(--space-2)' }}>Limites à confirmer contre l’API Google.</p>
+      </div>
+    </section>
   )
+}
 
-  return href
-    ? <Link href={href} className="stat-card card--interactive" style={{ display: 'block' }}>{body}</Link>
-    : <div className="stat-card">{body}</div>
+// ── Provenance ──────────────────────────────────────────────────────
+/**
+ * Where the figures above come from and over what period. A metric whose
+ * origin is unknown is worth nothing.
+ *
+ * Promoted out of app/(dashboard)/dashboard/ui-bits.tsx, whose own header
+ * declares it carries only "what the design system does NOT provide and only
+ * the dashboard needs". Three route folders read it now.
+ */
+export function SourceNote({ source, period, note }: { source: string; period: string; note?: React.ReactNode }) {
+  return (
+    <p
+      className="meta"
+      style={{
+        margin: `0 0 var(--space-5)`,
+        display: 'flex',
+        flexWrap: 'wrap',
+        gap: 'var(--space-1) var(--space-3)',
+      }}
+    >
+      <span>
+        <strong style={{ color: 'var(--ink-secondary)', fontWeight: 600 }}>Source</strong> {source}
+      </span>
+      <span aria-hidden>·</span>
+      <span>
+        <strong style={{ color: 'var(--ink-secondary)', fontWeight: 600 }}>Période</strong> {period}
+      </span>
+      {note && (
+        <>
+          <span aria-hidden>·</span>
+          <span>{note}</span>
+        </>
+      )}
+    </p>
+  )
+}
+
+/**
+ * A bar that reads a value already printed beside it — never the only
+ * encoding, and never a second colour: one series slot for the whole column,
+ * because the bar length already carries the comparison.
+ */
+export function MagnitudeBar({ value, max }: { value: number; max: number }) {
+  return (
+    <div
+      aria-hidden="true"
+      style={{ height: 6, width: '100%', background: 'var(--surface-inset)', borderRadius: '0 3px 3px 0' }}
+    >
+      <div
+        style={{
+          height: '100%',
+          width: `${max > 0 ? Math.max((value / max) * 100, value > 0 ? 2 : 0) : 0}%`,
+          background: 'var(--series-1)',
+          borderRadius: '0 3px 3px 0',
+        }}
+      />
+    </div>
+  )
+}
+
+// ── Dates & URLs ────────────────────────────────────────────────────
+//
+// `formatDay` was declared FOUR times across the route folders, each with its
+// own idea of what a short French date looks like. It lives here now.
+//
+// `Intl.DateTimeFormat` is safe where `Intl.NumberFormat` was not: the month
+// abbreviations are stable across the Node and browser ICU builds, whereas the
+// NumberFormat grouping character has changed between Node releases — which is
+// why `formatMetric` above does its grouping by hand.
+
+const DAY = new Intl.DateTimeFormat('fr-FR', { day: 'numeric', month: 'short' })
+const DAY_LONG = new Intl.DateTimeFormat('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' })
+
+/** Noon UTC, deliberately: a bare date parsed as midnight lands on the day
+ *  before in any negative offset, and the whole app runs on ISO days. */
+export function formatDay(iso: string): string {
+  return DAY.format(new Date(`${iso.slice(0, 10)}T12:00:00Z`))
+}
+
+export function formatDayLong(iso: string): string {
+  return DAY_LONG.format(new Date(`${iso.slice(0, 10)}T12:00:00Z`))
+}
+
+/** `https://www.site.fr/taxi-troyes` → `/taxi-troyes`, so a table column stays readable. */
+export function shortenUrl(url: string): string {
+  try {
+    const parsed = new URL(url)
+    const path = `${parsed.pathname}${parsed.search}`.replace(/\/$/, '')
+    return path === '' ? '/' : path
+  } catch {
+    return url
+  }
 }

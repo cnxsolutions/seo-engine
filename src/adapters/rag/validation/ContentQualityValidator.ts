@@ -17,7 +17,7 @@ import {
   stripHtmlToText,
   tokenizeWords,
   type HeadingNode,
-} from './text-utils'
+} from '@/src/core/domain/text/text-utils'
 
 /**
  * SEVERITY POLICY — this validator gates publication, so severity is a product

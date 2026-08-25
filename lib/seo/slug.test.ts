@@ -4,7 +4,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { describe, expect, it } from 'vitest'
-import { buildPageSlug, MAX_SLUG_CHARS, MAX_SLUG_WORDS, slugify } from './slug'
+import { buildPageSlug, MAX_SLUG_CHARS, MAX_SLUG_WORDS, resolveFreeSlug, slugify } from './slug'
 
 describe('buildPageSlug', () => {
   it('ne laisse JAMAIS passer un type de page interne', () => {
@@ -119,5 +119,113 @@ describe('buildPageSlug', () => {
 describe('slugify', () => {
   it('ne laisse ni accent, ni majuscule, ni tiret en bordure', () => {
     expect(slugify('  Épicerie Fine — Troyes  ')).toBe('epicerie-fine-troyes')
+  })
+})
+
+describe('resolveFreeSlug', () => {
+  it('rend le slug tel quel quand personne ne l occupe', () => {
+    const resolution = resolveFreeSlug(
+      { proposed: 'taxi gare', city: 'Troyes' },
+      new Set(['/taxi-aeroport-troyes']),
+      ['centre-ville'],
+    )
+    expect(resolution).toEqual({ status: 'free', slug: 'taxi-gare-troyes' })
+  })
+
+  it('desambiguise par le premier mot qui libere l adresse', () => {
+    const resolution = resolveFreeSlug(
+      { proposed: 'taxi gare', city: 'Troyes' },
+      new Set(['/taxi-gare-troyes']),
+      ['nuit', 'aeroport'],
+    )
+    expect(resolution).toEqual({
+      status: 'disambiguated',
+      slug: 'nuit-taxi-gare-troyes',
+      from: '/taxi-gare-troyes',
+      token: 'nuit',
+    })
+  })
+
+  it('passe au mot suivant quand le premier est pris lui aussi', () => {
+    const resolution = resolveFreeSlug(
+      { proposed: 'taxi gare', city: 'Troyes' },
+      new Set(['/taxi-gare-troyes', '/nuit-taxi-gare-troyes']),
+      ['nuit', 'aeroport'],
+    )
+    expect(resolution).toMatchObject({ status: 'disambiguated', token: 'aeroport' })
+  })
+
+  it('refuse plutot que de publier a une adresse deja prise', () => {
+    // No fallback slug. Nothing free means the subject itself has to be
+    // reconsidered, and that decision belongs to whoever called — before the
+    // page is paid for.
+    const resolution = resolveFreeSlug(
+      { proposed: 'taxi gare', city: 'Troyes' },
+      new Set(['/taxi-gare-troyes', '/nuit-taxi-gare-troyes', '/aeroport-taxi-gare-troyes']),
+      ['nuit', 'aeroport'],
+    )
+    expect(resolution).toEqual({ status: 'collision', occupiedBy: '/taxi-gare-troyes' })
+  })
+
+  it('ne prend pas pour une liberation un candidat qui retombe sur le slug de base', () => {
+    // A disambiguator the slug already carries — the town is the everyday case
+    // — is absorbed by dedupe() and comes back as the base slug. Counting it as
+    // a free address would publish straight onto the occupied one.
+    const taken = new Set(['/taxi-gare-troyes'])
+    expect(resolveFreeSlug({ proposed: 'taxi gare', city: 'Troyes' }, taken, ['troyes']))
+      .toEqual({ status: 'collision', occupiedBy: '/taxi-gare-troyes' })
+    expect(resolveFreeSlug({ proposed: 'taxi gare', city: 'Troyes' }, taken, ['troyes', 'nuit']))
+      .toMatchObject({ status: 'disambiguated', slug: 'nuit-taxi-gare-troyes', token: 'nuit' })
+  })
+
+  it('juge la liberte du slug APRES troncature, pas avant', () => {
+    // The regression this guards: adding a word at the front pushes the last
+    // one past the seven-word cap, and the word that falls can be the only one
+    // that told this page apart from a sibling. Asked for
+    // `gare-taxi-conventionne-cpam-transport-assis-professionnalise-troyes`,
+    // which nobody holds; delivered `…-assis-troyes`, which is already online.
+    const input = {
+      proposed: 'taxi conventionne cpam transport assis professionnalise',
+      city: 'Troyes',
+    }
+    const base = buildPageSlug(input)
+    expect(base).toBe('taxi-conventionne-cpam-transport-assis-professionnalise-troyes')
+
+    const resolution = resolveFreeSlug(
+      input,
+      new Set([`/${base}`, '/gare-taxi-conventionne-cpam-transport-assis-troyes']),
+      ['gare', 'nuit'],
+    )
+    expect(resolution).toMatchObject({
+      status: 'disambiguated',
+      slug: 'nuit-taxi-conventionne-cpam-transport-assis-troyes',
+      token: 'nuit',
+    })
+  })
+
+  it('ne fabrique JAMAIS de suffixe numerique, meme apres cent collisions', () => {
+    // `-2` is a confession of duplication printed in the URL, and it would
+    // always succeed: the engine would keep publishing near-identical pages
+    // instead of stopping. Once the meaningful words run out, the answer is a
+    // refusal, and it stays a refusal.
+    const taken = new Set<string>()
+    const input = { proposed: 'taxi gare', city: 'Troyes' }
+    const tokens = ['nuit', 'aeroport', 'conventionne']
+    let refusals = 0
+
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      const resolution = resolveFreeSlug(input, taken, tokens)
+      if (resolution.status === 'collision') {
+        expect(resolution.occupiedBy).not.toMatch(/-\d+$/)
+        refusals += 1
+        continue
+      }
+      expect(resolution.slug).not.toMatch(/-\d+$/)
+      taken.add(`/${resolution.slug}`)
+    }
+
+    // One free slug, three disambiguated, then a refusal every single time.
+    expect(taken.size).toBe(1 + tokens.length)
+    expect(refusals).toBe(100 - 1 - tokens.length)
   })
 })

@@ -26,6 +26,13 @@ const baseOptions: PageTypeGenerateOptions = {
   siteUrl: 'https://example.fr',
   targetLength: 800,
   enableRag: false,
+  // The address is now an INPUT, reserved against the existing site before the
+  // first token is spent. These four fields are required precisely so no caller
+  // can generate blind again.
+  reservedSlug: 'adresse-reservee-plombier-troyes',
+  inventoryNeighbours: [],
+  action: { kind: 'create' },
+  inventoryFreshness: { state: 'fresh', lastCrawledAt: '2026-07-30T00:00:00.000Z', ageDays: 1 },
 }
 
 function buildPrompt(overrides: Partial<Parameters<typeof buildUserPrompt>[0]> = {}) {
@@ -46,8 +53,10 @@ function buildPrompt(overrides: Partial<Parameters<typeof buildUserPrompt>[0]> =
     requiredSections: ['hero', 'content', 'parent_link', 'faq', 'cta'],
     competitorNames: [],
     alternativeNames: [],
-    existingSlugs: [],
-    existingKeywords: [],
+    // Rendered by lib/existing/prompt-block.ts and inserted verbatim. Empty
+    // here: what this suite checks is the rest of the prompt, and the awareness
+    // block has its own contract.
+    existingAwareness: '',
     searchIntent: 'transactionnelle',
     today: '2026-07-31',
     ...overrides,
@@ -285,7 +294,14 @@ describe('normalizeResponse()', () => {
     expect(page.readingTimeMinutes).toBe(1)
   })
 
-  it('keeps the plan brief slug and focus keyword', () => {
+  it('publishes at the RESERVED address, not the one the model or the brief proposed', () => {
+    // The regression this locks, and the reason the rule was inverted: the slug
+    // used to be rebuilt from whatever came back, AFTER the page was paid for.
+    // Three sources disagree here on purpose — the payload says
+    // `depannage-plomberie-urgence-fuite-eau-troyes-centre`, the brief says
+    // `slug-du-plan-...`, and only `reservedSlug` was checked against the site's
+    // existing pages and written to `generations.slug`. Publishing at either of
+    // the other two would put this page on top of an address nobody arbitrated.
     const page = normalizeResponse(validPayload, {
       ...baseOptions,
       planBrief: {
@@ -310,7 +326,10 @@ describe('normalizeResponse()', () => {
       },
     }, 800, 'transactionnelle')
 
-    expect(page.slug).toBe('slug-du-plan-depannage-plomberie-troyes')
+    expect(page.slug).toBe(baseOptions.reservedSlug)
+    expect(page.slug).not.toBe(validPayload.slug)
+    expect(page.slug).not.toBe('slug-du-plan-depannage-plomberie-troyes')
+    // The focus keyword still comes from the brief: only the ADDRESS moved.
     expect(page.focusKeyword).toBe('depannage plomberie troyes')
   })
 })

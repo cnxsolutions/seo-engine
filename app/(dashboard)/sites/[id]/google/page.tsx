@@ -12,9 +12,20 @@
 //   · synchronisation failed          → the error, and a way to retry
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { AlertTriangle, CheckCircle2, Clock, Database, Link2, RefreshCw, Search, Store } from 'lucide-react'
+import type { ReactNode } from 'react'
+import { AlertTriangle, Clock, Database, Link2, RefreshCw, Search, Store } from 'lucide-react'
+import Link from 'next/link'
 import { notFound } from 'next/navigation'
-import { EmptyState, PageHeader, StatTile, formatMetric } from '@/components/ui'
+import {
+  EmptyState,
+  Notice,
+  PageHeader,
+  StatTile,
+  UnknownValue,
+  formatDayLong,
+  formatMetric,
+  type NoticeTone,
+} from '@/components/ui'
 import { getAuthenticatedClient } from '@/lib/google/client'
 import { getGscCoverage } from '@/lib/google/performance'
 import {
@@ -50,7 +61,16 @@ export default async function SiteGooglePage({
 
   if (!site) notFound()
 
-  const [state, coverage] = await Promise.all([getGoogleSyncState(id), getGscCoverage(id)])
+  // Une lecture de plus ne doit JAMAIS blanchir une page qui fonctionne :
+  // `readGbpPostStats` ne jette pas et rend `null` sur le moindre défaut — table
+  // absente (migration 019 non appliquée), comptage refusé, réseau. Le panneau
+  // écrit alors « comptage indisponible », ce qui est un fait, plutôt que zéro,
+  // qui serait un mensonge.
+  const [state, coverage, postStats] = await Promise.all([
+    getGoogleSyncState(id),
+    getGscCoverage(id),
+    readGbpPostStats(id),
+  ])
 
   if (!state.connected) {
     return (
@@ -88,6 +108,7 @@ export default async function SiteGooglePage({
           <>
             <span>Compte&nbsp;: {state.email ?? 'inconnu'}</span>
             <span>{state.scopes.length} autorisation{state.scopes.length > 1 ? 's' : ''} accordée{state.scopes.length > 1 ? 's' : ''}</span>
+            <Link href={`/sites/${id}/existing`} className="btn-link">Pages connues du site</Link>
           </>
         }
         secondaryAction={{ label: 'Changer de propriété', href: `/sites/${id}/google/select` }}
@@ -124,7 +145,7 @@ export default async function SiteGooglePage({
           icon={RefreshCw}
           hint={
             state.gsc.rangeStart && state.gsc.rangeEnd
-              ? `Période ${formatDay(state.gsc.rangeStart)} → ${formatDay(state.gsc.rangeEnd)}`
+              ? `Période ${formatDayLong(state.gsc.rangeStart)} → ${formatDayLong(state.gsc.rangeEnd)}`
               : 'Aucune période enregistrée'
           }
         />
@@ -137,7 +158,7 @@ export default async function SiteGooglePage({
             !coverage.readable
               ? 'Table gsc_performance illisible'
               : coverage.firstDate && coverage.lastDate
-                ? `Du ${formatDay(coverage.firstDate)} au ${formatDay(coverage.lastDate)}`
+                ? `Du ${formatDayLong(coverage.firstDate)} au ${formatDayLong(coverage.lastDate)}`
                 : 'Aucune donnée conservée'
           }
         />
@@ -177,7 +198,7 @@ export default async function SiteGooglePage({
                   label="Période couverte au dernier passage"
                   value={
                     state.gsc.rangeStart && state.gsc.rangeEnd
-                      ? `${formatDay(state.gsc.rangeStart)} → ${formatDay(state.gsc.rangeEnd)}`
+                      ? `${formatDayLong(state.gsc.rangeStart)} → ${formatDayLong(state.gsc.rangeEnd)}`
                       : 'Aucune synchronisation enregistrée'
                   }
                 />
@@ -226,6 +247,13 @@ export default async function SiteGooglePage({
           error={state.gbp.error}
           located={Boolean(state.gbpLocationId)}
           liveProbe={gbpProbe}
+          // Le CONTENU des autorisations, et non plus seulement leur nombre.
+          // `business.manage` était déjà demandé au consentement mais n'était
+          // confronté à rien : un compte relié sans lui lit la fiche et ne peut
+          // pas y écrire, ce qui se manifestait par un 403 après coup, une fois
+          // le post payé.
+          canWrite={state.scopes.some((scope) => scope.includes('business.manage'))}
+          posts={postStats}
         />
       </div>
     </div>
@@ -241,6 +269,8 @@ function GbpPanel({
   error,
   located,
   liveProbe,
+  canWrite,
+  posts,
 }: {
   siteId: string
   status: string | null
@@ -248,8 +278,11 @@ function GbpPanel({
   error: string | null
   located: boolean
   liveProbe: GbpAccessProbe | null
+  canWrite: boolean
+  posts: GbpPostStats | null
 }) {
   const quotaBlocked = status === 'quota_exhausted' || liveProbe?.status === 'quota_exhausted'
+  const waiting = posts ? posts.pending + posts.uncertain : 0
 
   return (
     <section className="panel">
@@ -261,17 +294,68 @@ function GbpPanel({
             {quotaBlocked ? 'Quota Google à zéro' : gbpLabel(status)}
           </span>
         </div>
-        <form action="/api/google/sync" method="POST">
-          <input type="hidden" name="site_id" value={siteId} />
-          <input type="hidden" name="scope" value="gbp" />
-          <button type="submit" className="btn-ghost" disabled={!located}>
-            <RefreshCw size={14} /> Réessayer
-          </button>
-        </form>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+          <Link href={`/publish?site=${siteId}`} className="btn-secondary">Piloter les posts</Link>
+          <form action="/api/google/sync" method="POST">
+            <input type="hidden" name="site_id" value={siteId} />
+            <input type="hidden" name="scope" value="gbp" />
+            <button type="submit" className="btn-ghost" disabled={!located}>
+              <RefreshCw size={14} /> Réessayer
+            </button>
+          </form>
+        </div>
       </div>
 
       <div className="panel__body" style={{ display: 'grid', gap: 'var(--space-4)' }}>
         <DetailRow label="Dernière tentative" value={formatDateTime(lastSyncAt)} />
+
+        {/* « Aucune fiche rattachée » et « aucun post publié » sont deux faits
+            différents, et deux affichages différents. Un « 0 » sur une fiche
+            absente ferait lire une absence de connexion comme une absence
+            d'activité, et l'opérateur chercherait pourquoi le moteur ne publie
+            pas là où il n'a jamais pu publier. */}
+        <DetailRow
+          label="Posts publiés par le moteur"
+          value={
+            !located
+              ? <UnknownValue why="Aucune fiche d’établissement n’est rattachée à ce site." />
+              : !posts
+                ? <UnknownValue why="Le comptage des posts n’a pas pu être établi — la migration 019 n’est peut-être pas appliquée." />
+                : posts.published === 0
+                  ? 'Aucun'
+                  : `${posts.published} — dernier le ${posts.lastPublishedAt ? formatDayLong(posts.lastPublishedAt) : 'date inconnue'}`
+          }
+        />
+
+        {located && posts && (posts.published > 0 || waiting > 0 || posts.remoteKnown > 0) && (
+          <div className="inset" style={{ fontSize: 'var(--fs-sm)', color: 'var(--ink-secondary)', lineHeight: 1.55 }}>
+            {posts.pending} en attente · {posts.remoteKnown} écrit{posts.remoteKnown > 1 ? 's' : ''} à la main
+            {posts.remoteKnown > 1 ? ' connus' : ' connu'}. Les posts que le propriétaire a tapés lui-même entrent dans
+            le même contrôle anti-duplication que les nôtres : le moteur ne redit pas ce qui vient d’être écrit.
+          </div>
+        )}
+
+        {posts && posts.uncertain > 0 && (
+          <Notice
+            inline
+            tone="warning"
+            title={`${posts.uncertain} écriture${posts.uncertain > 1 ? 's' : ''} incertaine${posts.uncertain > 1 ? 's' : ''}`}
+            body="Le moteur n’a pas su si Google avait enregistré ces posts. Rien n’est réécrit à l’aveugle : la prochaine tentative commence par relire la fiche."
+            action={{ label: 'Voir la file', href: `/publish?site=${siteId}` }}
+          />
+        )}
+
+        {/* Un refus AVANT tout appel réseau, plutôt qu'un 403 après coup — et
+            après que la rédaction du post a été payée. */}
+        {located && !canWrite && (
+          <Notice
+            inline
+            tone="critical"
+            title="Autorisation d’écriture absente"
+            body="Le compte connecté n’a pas accordé l’autorisation de gérer la fiche : aucun post ne peut être publié. Reconnectez Google pour l’accorder."
+            action={{ label: 'Reconnecter Google', href: `/api/google/auth?site_id=${siteId}` }}
+          />
+        )}
 
         {quotaBlocked ? (
           <div className="inset" style={{ display: 'grid', gap: 'var(--space-3)' }}>
@@ -282,6 +366,14 @@ function GbpPanel({
             <p style={{ fontSize: 'var(--fs-sm)', color: 'var(--ink-secondary)', margin: 0, lineHeight: 1.55 }}>
               {GBP_QUOTA_MESSAGE}
             </p>
+            {/* Ce que le quota retient est un fait mesurable, pas une menace :
+                aucun post n'est perdu, ils attendent. */}
+            {waiting > 0 && (
+              <p style={{ fontSize: 'var(--fs-sm)', color: 'var(--ink-secondary)', margin: 0, lineHeight: 1.55 }}>
+                {waiting} post{waiting > 1 ? 's' : ''} attend{waiting > 1 ? 'ent' : ''} que ce quota soit débloqué.
+                Aucun n&apos;est perdu.
+              </p>
+            )}
             <a href={GBP_QUOTA_DOC} target="_blank" rel="noreferrer" className="btn-secondary" style={{ justifySelf: 'start' }}>
               Documentation Google — quotas et formulaire de demande
             </a>
@@ -289,9 +381,15 @@ function GbpPanel({
         ) : liveProbe && !liveProbe.available ? (
           <Notice tone="warning" title="API Business Profile injoignable" body={liveProbe.message} inline />
         ) : !located ? (
+          // PHRASE CORRIGÉE. Elle disait « rien n'en dépend pour générer ou
+          // publier » : c'était vrai avant que le canal des posts n'existe, et
+          // c'est faux depuis. Une phrase de l'interface qui devient fausse à
+          // cause d'une fonctionnalité nouvelle se corrige dans le même lot —
+          // sinon le produit se met à mentir sur lui-même.
           <p className="meta" style={{ margin: 0 }}>
-            Aucune fiche d&apos;établissement rattachée à ce site. La fiche est facultative&nbsp;: elle enrichit le contexte local
-            (avis, horaires, catégories) mais rien n&apos;en dépend pour générer ou publier.
+            Aucune fiche d&apos;établissement rattachée à ce site. Sans fiche rattachée, les pages continuent d&apos;être
+            générées et publiées normalement. En revanche, les posts de fiche en dépendent entièrement&nbsp;: ce canal
+            reste inactif.
           </p>
         ) : error ? (
           <Notice tone="critical" title="Dernière synchronisation en échec" body={error} inline />
@@ -304,15 +402,106 @@ function GbpPanel({
       </div>
 
       <div className="panel__footer">
-        Business Profile est optionnel. Search Console, la génération et la publication fonctionnent sans lui.
+        Business Profile reste facultatif pour les pages du site&nbsp;: Search Console, la génération et la publication
+        fonctionnent sans lui. Les posts de fiche, eux, ne peuvent pas exister sans lui.
       </div>
     </section>
   )
 }
 
+// ─── Les posts de fiche, comptés ─────────────────────────────────────────────
+
+/**
+ * Ce que le moteur a écrit sur cette fiche, et ce qui attend.
+ *
+ * Chaque nombre vient d'un comptage `head: true` : PostgREST plafonne un select
+ * ordinaire à mille lignes et ne dit rien du reste, alors qu'un comptage exact
+ * ne transfère aucune ligne et ne peut pas se tromper.
+ */
+interface GbpPostStats {
+  /** Posts du MOTEUR réellement en ligne. Les posts 'remote' sont comptés à part. */
+  published: number
+  lastPublishedAt: string | null
+  /** Écrits, pas encore partis. */
+  pending: number
+  /** Ni partis ni refusés : le doute d'écriture, le seul état qui demande un humain. */
+  uncertain: number
+  /** Posts que le propriétaire a tapés lui-même, connus du corpus anti-duplication. */
+  remoteKnown: number
+}
+
+const PENDING_STATUSES = ['pending', 'generating', 'generated', 'publishing']
+
+/**
+ * Ne jette jamais, ne blanchit jamais la page.
+ *
+ * `null` veut dire « nous n'avons pas pu compter », et l'appelant l'écrit tel
+ * quel. C'est le cas normal tant que la migration 019 n'est pas appliquée : la
+ * table n'existe pas, et le reste de cet écran — Search Console, la connexion,
+ * la fiche — n'en dépend en rien.
+ *
+ * OÙ CETTE LECTURE DEVRAIT VIVRE : lib/gbp/posts, aux côtés de la politique.
+ * Elle est écrite ici parce que ce module n'expose aujourd'hui aucun compteur et
+ * qu'il n'appartient pas à ce lot. Elle ne décide RIEN — cinq nombres, aucune
+ * règle — donc la faire remonter plus tard ne déplacera aucune politique.
+ */
+async function readGbpPostStats(siteId: string): Promise<GbpPostStats | null> {
+  try {
+    const supabase = createServiceClient()
+    const base = () => supabase.from('gbp_posts').select('id', { count: 'exact', head: true }).eq('site_id', siteId)
+
+    const [published, pending, uncertain, remote, last] = await Promise.all([
+      base().eq('source', 'engine').eq('status', 'published'),
+      base().eq('source', 'engine').in('status', PENDING_STATUSES),
+      base().eq('status', 'incertain'),
+      base().eq('source', 'remote'),
+      supabase
+        .from('gbp_posts')
+        .select('published_at')
+        .eq('site_id', siteId)
+        .eq('source', 'engine')
+        .not('published_at', 'is', null)
+        .order('published_at', { ascending: false })
+        .limit(1)
+        .maybeSingle(),
+    ])
+
+    // UN seul comptage en échec suffit à rendre `null` : une ligne où trois
+    // nombres sur cinq sont justes et les deux autres à zéro se lit comme cinq
+    // faits mesurés.
+    for (const result of [published, pending, uncertain, remote]) {
+      if (result.error) throw new Error(result.error.message)
+    }
+
+    return {
+      published: published.count ?? 0,
+      pending: pending.count ?? 0,
+      uncertain: uncertain.count ?? 0,
+      remoteKnown: remote.count ?? 0,
+      // Une date manquante ne rend pas les quatre comptages faux : elle est
+      // rendue nulle, et la ligne dit « date inconnue » sans effacer le nombre.
+      lastPublishedAt: (last.data?.published_at as string | null | undefined) ?? null,
+    }
+  } catch (err) {
+    console.error('[WARN] [google-status] Comptage des posts de fiche impossible', {
+      siteId,
+      reason: err instanceof Error ? err.message : String(err),
+    })
+    return null
+  }
+}
+
 // ─── Presentational helpers ──────────────────────────────────────────────────
 
-function DetailRow({ label, value }: { label: string; value: string }) {
+/**
+ * `value` est un ReactNode et non une chaîne : la ligne « Posts publiés par le
+ * moteur » rend `<UnknownValue/>` quand aucune fiche n'est rattachée, et une
+ * prop `string` la refuserait à la compilation. Composant local à cette page,
+ * sans autre appelant — l'élargissement est sans risque. (Le `DetailRow`
+ * homonyme de /calendar accepte déjà ReactNode ; ce sont deux composants
+ * différents du même nom.)
+ */
+function DetailRow({ label, value }: { label: string; value: ReactNode }) {
   return (
     <div style={{ display: 'flex', gap: 'var(--space-4)', justifyContent: 'space-between', alignItems: 'baseline' }}>
       <span className="meta" style={{ flexShrink: 0 }}>{label}</span>
@@ -321,36 +510,10 @@ function DetailRow({ label, value }: { label: string; value: string }) {
   )
 }
 
-type NoticeTone = 'good' | 'warning' | 'critical' | 'info'
-
-function Notice({ tone, title, body, inline }: { tone: NoticeTone; title: string; body: string; inline?: boolean }) {
-  const color =
-    tone === 'critical' ? 'var(--status-critical)'
-      : tone === 'warning' ? 'var(--status-warning)'
-        : tone === 'good' ? 'var(--status-good)'
-          : 'var(--accent)'
-
-  const Icon = tone === 'good' ? CheckCircle2 : AlertTriangle
-
-  return (
-    <div
-      className={inline ? 'inset' : 'glass-card'}
-      style={{
-        borderLeft: `3px solid ${color}`,
-        marginBottom: inline ? 0 : 'var(--space-5)',
-        display: 'flex',
-        gap: 'var(--space-3)',
-        alignItems: 'flex-start',
-      }}
-    >
-      <Icon size={16} color={color} style={{ flexShrink: 0, marginTop: 2 }} />
-      <div style={{ minWidth: 0 }}>
-        <strong style={{ fontSize: 'var(--fs-sm)' }}>{title}</strong>
-        <p style={{ fontSize: 'var(--fs-sm)', color: 'var(--ink-secondary)', margin: '0.25rem 0 0', lineHeight: 1.55 }}>{body}</p>
-      </div>
-    </div>
-  )
-}
+// The `Notice` this page used to declare is gone; it imports the shared one from
+// components/ui, which was written from this very copy and keeps both props this
+// page relies on (`inline`, and the four tones it uses). The shared `NoticeTone`
+// carries one member more — 'serious' — which nothing here emits.
 
 // ─── State reading ───────────────────────────────────────────────────────────
 
@@ -476,10 +639,11 @@ function formatDateTime(iso: string | null): string {
   return `${pad(date.getDate())}/${pad(date.getMonth() + 1)}/${date.getFullYear()} à ${pad(date.getHours())}h${pad(date.getMinutes())}`
 }
 
-function formatDay(day: string): string {
-  const [year, month, date] = day.split('-')
-  return date && month && year ? `${date}/${month}/${year}` : day
-}
+// The local `formatDay` that rendered `jj/mm/aaaa` is gone. Its four call sites
+// now use the shared `formatDayLong` and NOT the shared `formatDay`: every one of
+// them prints the two ends of a Search Console window, and Search Console serves
+// sixteen months of history — a range whose endpoints wear no year can read
+// backwards. The year was in the string this page used to build; it stays in it.
 
 function pad(value: number): string {
   return String(value).padStart(2, '0')

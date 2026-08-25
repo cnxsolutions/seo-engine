@@ -52,6 +52,42 @@ const TRACKING = [
   { href: '/calendar', icon: Calendar, label: 'Calendrier' },
 ]
 
+// ─── Warnings ────────────────────────────────────────────────────────────────
+
+interface StepWarning {
+  label: string
+  title: string
+}
+
+/**
+ * A warning is DATA, unlike the "à faire" pill below, which this component
+ * derives from `isCurrent`.
+ *
+ * The sidebar reads `/api/workflow` and nothing else — it has no way to know
+ * whether a site's inventory is fresh, and it must never go and find out: the
+ * rules live in app/api/workflow/state.ts, pure and testable without Supabase.
+ *
+ * Read off the payload rather than off `WorkflowStep`, and validated at runtime,
+ * because the field is served by a route this file does not own. Until that
+ * route sends one, no badge appears; the day it does, nothing here changes.
+ *
+ * What it must NEVER do is turn into `state: 'blocked'`. A blocked rung renders
+ * as a non-clickable `<div aria-disabled="true">`, so a crawl that never ran
+ * would stop the product from producing at all — and an unknown is something to
+ * signal, not something to forbid.
+ */
+function warningOf(step: WorkflowStep | undefined): StepWarning | null {
+  if (!step || !('warning' in step)) return null
+
+  const raw = step.warning
+  if (typeof raw !== 'object' || raw === null) return null
+
+  const { label, title } = raw as { label?: unknown; title?: unknown }
+  if (typeof label !== 'string' || !label.trim()) return null
+
+  return { label, title: typeof title === 'string' ? title : label }
+}
+
 // ─── Workflow state ──────────────────────────────────────────────────────────
 
 /**
@@ -229,6 +265,7 @@ function StepRow({
   const done = state === 'done'
   const blocked = state === 'blocked'
   const note = blocked ? step?.reason : isCurrent ? step?.detail : undefined
+  const warning = warningOf(step)
 
   const body = (
     <>
@@ -249,6 +286,25 @@ function StepRow({
         )}
       </span>
       {active && !blocked && <ChevronRight size={14} style={{ opacity: 0.5, marginTop: 3 }} />}
+      {/* Same slot as the "à faire" pill, and the two can show together: one
+          says where the operator stands, the other what the engine cannot see. */}
+      {warning && (
+        <span
+          title={warning.title}
+          style={{
+            marginTop: 2,
+            padding: '0.1rem 0.4rem',
+            borderRadius: 'var(--radius-pill)',
+            background: 'var(--status-warning-wash)',
+            color: 'var(--status-warning-text)',
+            fontSize: 'var(--fs-2xs)',
+            fontWeight: 700,
+            whiteSpace: 'nowrap',
+          }}
+        >
+          {warning.label}
+        </span>
+      )}
       {!active && isCurrent && (
         <span style={{
           marginTop: 2,

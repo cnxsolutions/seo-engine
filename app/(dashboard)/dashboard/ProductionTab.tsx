@@ -25,16 +25,9 @@ import Link from 'next/link'
 import { JOB_HISTORY_DAYS, type ProductionMetrics } from '@/app/api/dashboard/metrics'
 import { LineChart } from '@/components/charts'
 import { EmptyState, Meter, StatTile, StatusBadge } from '@/components/ui'
+import { pageTypeLabel } from '@/lib/types'
 import { Panel, SourceNote } from './ui-bits'
 import { formatCount, formatDateTime, formatDay, formatDayLong, formatDuration } from './viz'
-
-const PAGE_TYPE_LABELS: Record<string, string> = {
-  pillar: 'Pilier',
-  child: 'Enfant',
-  alternative: 'Alternative',
-  comparative: 'Comparatif',
-  local_pack: 'Local pack',
-}
 
 const JOB_TYPE_LABELS: Record<string, string> = {
   campaign: 'Génération',
@@ -211,7 +204,7 @@ export function ProductionTab({ metrics, scopeLabel }: { metrics: ProductionMetr
                           {slot.targetKeyword}
                         </span>
                         <span className="meta">
-                          {PAGE_TYPE_LABELS[slot.pageType] ?? slot.pageType}
+                          {pageTypeLabel(slot.pageType)}
                           {slot.targetCity ? ` · ${slot.targetCity}` : ''}
                           {slot.attemptCount > 0 ? ` · ${slot.attemptCount} tentative(s)` : ''}
                         </span>
@@ -309,7 +302,7 @@ export function ProductionTab({ metrics, scopeLabel }: { metrics: ProductionMetr
                           {generation.title || 'Sans titre'}
                         </span>
                         <span className="meta">
-                          {PAGE_TYPE_LABELS[generation.pageType] ?? generation.pageType}
+                          {pageTypeLabel(generation.pageType)}
                           {generation.city ? ` · ${generation.city}` : ''} · {formatDateTime(generation.createdAt)}
                         </span>
                       </span>
