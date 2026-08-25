@@ -101,10 +101,20 @@ export interface PromptBlocks {
 
   // Instructions block
   instructions: string
-
-  // Anti-duplicate block
-  antiDuplicate: string
 }
+
+// `antiDuplicate` was the ninth block here, and it is gone.
+//
+// It listed twenty existing slugs and twenty existing keywords. Twenty lines
+// further down the same prompt, lib/ai/page-types.ts listed THIRTY of each,
+// from the same corpus, under the heading "ANTI-DOUBLON (CRITIQUE)". The same
+// information travelled twice in the same request, truncated differently, so
+// the model could not tell which list was authoritative — and neither list
+// carried a title, a meta description or an editorial promise, which is the
+// only material a page has to say how it differs from its neighbours.
+//
+// Both are replaced, once, by lib/existing/prompt-block.ts: eight real pages
+// with their real address, title and meta.
 
 // ─── Main Builder ──────────────────────────────────────────────────────────────
 
@@ -127,8 +137,6 @@ export class FullRagContextBuilder {
     secondaryKeywords?: string[]
     city?: string
     department?: string
-    existingSlugs?: string[]
-    existingKeywords?: string[]
     planBrief?: PlanItemBrief
   }): Promise<RagGenerationContext> {
     const startTime = Date.now()
@@ -220,12 +228,6 @@ export class FullRagContextBuilder {
       sections.push('')
     }
 
-    // Anti-duplicate
-    if (promptBlocks.antiDuplicate) {
-      sections.push('## ANTI-DUPLICAT')
-      sections.push(promptBlocks.antiDuplicate)
-    }
-
     return sections.join('\n')
   }
 
@@ -315,8 +317,6 @@ export class FullRagContextBuilder {
       secondaryKeywords?: string[]
       city?: string
       pageType: PageType
-      existingSlugs?: string[]
-      existingKeywords?: string[]
     },
     unifiedContext: UnifiedContext
   ): Promise<PromptBlocks> {
@@ -328,7 +328,6 @@ export class FullRagContextBuilder {
       internalLinks: '',
       structure: '',
       instructions: '',
-      antiDuplicate: '',
     }
 
     // Taxonomy block
@@ -361,9 +360,6 @@ export class FullRagContextBuilder {
 
     // Instructions
     blocks.instructions = this.buildInstructionsBlock(params, unifiedContext)
-
-    // Anti-duplicate
-    blocks.antiDuplicate = this.buildAntiDuplicateBlock(params)
 
     return blocks
   }
@@ -553,25 +549,6 @@ export class FullRagContextBuilder {
     return parts.join('\n')
   }
 
-  private buildAntiDuplicateBlock(params: {
-    existingSlugs?: string[]
-    existingKeywords?: string[]
-  }): string {
-    const parts: string[] = []
-
-    // Existing slugs to avoid
-    if (params.existingSlugs && params.existingSlugs.length > 0) {
-      parts.push(`Slugs existants (NE PAS réutiliser): ${params.existingSlugs.slice(0, 20).join(', ')}`)
-    }
-
-    // Existing keywords to vary
-    if (params.existingKeywords && params.existingKeywords.length > 0) {
-      parts.push(`Keywords déjà ciblés (varier l'angle): ${params.existingKeywords.slice(0, 20).join(', ')}`)
-    }
-
-    return parts.join('\n')
-  }
-
   private mapPageTypeToFormat(pageType: PageType): 'article' | 'guide' | 'list' | 'comparison' | 'tutorial' {
     switch (pageType) {
       case 'pillar':
@@ -675,7 +652,6 @@ export class FullRagContextBuilder {
         internalLinks: '',
         structure: '',
         instructions: '',
-        antiDuplicate: '',
       },
       stats: {
         buildTimeMs: 0,

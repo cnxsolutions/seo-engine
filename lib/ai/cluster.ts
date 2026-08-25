@@ -2,6 +2,7 @@ import { generateSeoPage, type GeneratedSeoPage } from './page-types'
 import { buildBreadcrumb } from '@/lib/seo/breadcrumb'
 import { injectInternalLinks } from '@/lib/seo/internal-linking'
 import type { GeneratedPage } from './openai'
+import type { InventoryEntry, InventoryFreshness } from '@/src/core/domain/existing/inventory'
 
 export interface GenerateClusterOptions {
   mainKeyword: string
@@ -18,8 +19,34 @@ export interface GenerateClusterOptions {
   enableLocalPack?: boolean
   competitorNames?: string[]
   alternativeNames?: string[]
-  existingSlugs?: string[]
-  existingKeywords?: string[]
+  /**
+   * Une adresse par page prevue, deja prouvee libre par l'appelant.
+   *
+   * Ce module ne resout plus rien : il consomme des slugs. La route
+   * (app/api/cluster/route.ts) les resout AVANT l'appel, contre un Set qu'elle
+   * fait grandir page apres page, parce que c'est le seul endroit ou une
+   * collision peut encore etre traitee sans jeter une page deja payee.
+   *
+   * `satellites`, `alternatives` et `comparatives` sont lues par index, dans
+   * l'ordre ou les pages sont produites.
+   */
+  reservedSlugs: {
+    pillar: string
+    satellites: string[]
+    alternatives: string[]
+    comparatives: string[]
+    localPack?: string
+  }
+  /**
+   * Les pages du site les plus proches du sujet du cluster, classees.
+   *
+   * Les memes pour toutes les pages produites ici : elles traitent le meme
+   * sujet, donc elles ont les memes voisines. Les relire par page aurait paye
+   * huit fois le meme embedding pour la meme reponse.
+   */
+  inventoryNeighbours: readonly InventoryEntry[]
+  /** Ce que vaut la liste ci-dessus, et depuis quand. */
+  inventoryFreshness: InventoryFreshness
 }
 
 export interface ClusterResult {
@@ -51,12 +78,24 @@ export async function generateCluster(opts: GenerateClusterOptions): Promise<Clu
     enableLocalPack = true,
     competitorNames = [],
     alternativeNames = [],
-    existingSlugs = [],
-    existingKeywords = [],
+    reservedSlugs,
   } = opts
 
-  const generatedSlugs = [...existingSlugs]
-  const generatedKeywords = [...existingKeywords]
+  // Les listes vivantes `generatedSlugs` / `generatedKeywords` ont disparu.
+  //
+  // Elles servaient a dire au modele « n'utilise pas ceux-la », ce qui est une
+  // consigne et non une garantie : le slug etait ensuite refabrique par
+  // buildPageSlug sans jamais les consulter. Une adresse se reserve, elle ne se
+  // recommande pas.
+
+  // `action` est fixe a 'create' et n'est PAS un parametre : un cluster cree un
+  // ensemble de pages neuves d'un seul tenant. Rafraichir une page existante est
+  // une decision page par page, qui passe par le chemin planifie.
+  const awareness = {
+    inventoryNeighbours: opts.inventoryNeighbours,
+    inventoryFreshness: opts.inventoryFreshness,
+    action: { kind: 'create' } as const,
+  }
 
   // 1. Page pilier — cornerstone exhaustive
   const pillarPage = await generateSeoPage({
@@ -73,15 +112,19 @@ export async function generateCluster(opts: GenerateClusterOptions): Promise<Clu
     externalLinkCount: 5,
     enableImages: true,
     imagePerPage: 3,
-    existingSlugs: generatedSlugs,
-    existingKeywords: generatedKeywords,
+    reservedSlug: reservedSlugs.pillar,
+    ...awareness,
   })
-  generatedSlugs.push(pillarPage.slug)
-  generatedKeywords.push(pillarPage.focusKeyword.toLowerCase())
 
   // 2. Pages filles — un sous-sujet par mot-clé satellite
   const satellitePages: GeneratedSeoPage[] = []
-  for (const keyword of satelliteKeywords) {
+  for (const [index, keyword] of satelliteKeywords.entries()) {
+    // Un satellite sans adresse reservee est un sujet que l'appelant a ecarte
+    // sur une collision. Il est saute ICI, avant l'appel au modele : c'est tout
+    // l'interet d'avoir resolu les adresses en amont.
+    const reservedSlug = reservedSlugs.satellites[index]
+    if (!reservedSlug) continue
+
     const page = await generateSeoPage({
       pageType: 'child',
       city,
@@ -98,11 +141,9 @@ export async function generateCluster(opts: GenerateClusterOptions): Promise<Clu
       imagePerPage: 2,
       pillarSlug: pillarPage.slug,
       pillarTitle: pillarPage.title,
-      existingSlugs: generatedSlugs,
-      existingKeywords: generatedKeywords,
+      reservedSlug,
+      ...awareness,
     })
-    generatedSlugs.push(page.slug)
-    generatedKeywords.push(page.focusKeyword.toLowerCase())
     satellitePages.push(page)
   }
 
@@ -113,7 +154,9 @@ export async function generateCluster(opts: GenerateClusterOptions): Promise<Clu
       ? alternativeNames
       : generateAlternativeTargets(businessType, city)
 
-    if (altNames.length > 0) {
+    const altSlug = reservedSlugs.alternatives[0]
+
+    if (altNames.length > 0 && altSlug) {
       const altPage = await generateSeoPage({
         pageType: 'alternative',
         city,
@@ -131,11 +174,9 @@ export async function generateCluster(opts: GenerateClusterOptions): Promise<Clu
         pillarSlug: pillarPage.slug,
         pillarTitle: pillarPage.title,
         alternativeNames: altNames,
-        existingSlugs: generatedSlugs,
-        existingKeywords: generatedKeywords,
+        reservedSlug: altSlug,
+        ...awareness,
       })
-      generatedSlugs.push(altPage.slug)
-      generatedKeywords.push(altPage.focusKeyword.toLowerCase())
       alternativePages.push(altPage)
     }
   }
@@ -147,7 +188,9 @@ export async function generateCluster(opts: GenerateClusterOptions): Promise<Clu
       ? competitorNames
       : generateCompetitorTargets(businessType, city)
 
-    if (compNames.length > 0) {
+    const compSlug = reservedSlugs.comparatives[0]
+
+    if (compNames.length > 0 && compSlug) {
       const compPage = await generateSeoPage({
         pageType: 'comparative',
         city,
@@ -165,18 +208,16 @@ export async function generateCluster(opts: GenerateClusterOptions): Promise<Clu
         pillarSlug: pillarPage.slug,
         pillarTitle: pillarPage.title,
         competitorNames: compNames,
-        existingSlugs: generatedSlugs,
-        existingKeywords: generatedKeywords,
+        reservedSlug: compSlug,
+        ...awareness,
       })
-      generatedSlugs.push(compPage.slug)
-      generatedKeywords.push(compPage.focusKeyword.toLowerCase())
       comparativePages.push(compPage)
     }
   }
 
   // 5. Page Local Pack — optimisée Google Maps / 3-pack
   let localPackPage: GeneratedSeoPage | null = null
-  if (enableLocalPack) {
+  if (enableLocalPack && reservedSlugs.localPack) {
     localPackPage = await generateSeoPage({
       pageType: 'local_pack',
       city,
@@ -193,11 +234,9 @@ export async function generateCluster(opts: GenerateClusterOptions): Promise<Clu
       imagePerPage: 2,
       pillarSlug: pillarPage.slug,
       pillarTitle: pillarPage.title,
-      existingSlugs: generatedSlugs,
-      existingKeywords: generatedKeywords,
+      reservedSlug: reservedSlugs.localPack,
+      ...awareness,
     })
-    generatedSlugs.push(localPackPage.slug)
-    generatedKeywords.push(localPackPage.focusKeyword.toLowerCase())
   }
 
   // 6. Maillage interne complet entre toutes les pages du cluster

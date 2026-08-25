@@ -7,6 +7,25 @@ import { describe, it, expect, beforeEach } from 'vitest'
 import { ContentQualityValidator, createContentQualityValidator } from './ContentQualityValidator'
 import type { ContentQualityConfig } from './ContentQualityValidator'
 
+/** 33 French words, two sentences: the building block of the fixtures below. */
+const PARAGRAPH =
+  '<p>Notre equipe intervient rapidement dans toute la ville pour reparer une fuite, ' +
+  'deboucher une canalisation ou installer un chauffe-eau. Chaque intervention commence ' +
+  'par un diagnostic precis et un devis ecrit, sans frais caches.</p>'
+
+/** A page shaped like what the generator is actually prompted to produce. */
+const VALID_ARTICLE = [
+  '<h1>Plombier a Troyes : depannage urgent et devis gratuit</h1>',
+  PARAGRAPH.repeat(7),
+  '<h2>Quels sont les tarifs d un plombier a Troyes ?</h2>',
+  PARAGRAPH.repeat(7),
+  '<h2>Comment choisir son plombier dans l Aube ?</h2>',
+  PARAGRAPH.repeat(7),
+  '<p><a href="/depannage-plomberie-urgence-fuite-eau-troyes">Nos interventions d urgence</a></p>',
+].join('\n')
+
+const TITLE = 'Plombier a Troyes : depannage urgent et devis gratuit'
+
 describe('ContentQualityValidator', () => {
   let validator: ContentQualityValidator
 
@@ -14,227 +33,257 @@ describe('ContentQualityValidator', () => {
     validator = new ContentQualityValidator()
   })
 
-  describe('validate()', () => {
-    it('should validate content with all required elements', () => {
-      const content = {
-        title: 'Comment choisir un plombier à Troyes',
-        content: `
-          <h1>Comment choisir un plombier à Troyes</h1>
-          <p>Trouver un bon plombier peut sembler difficile. Voici nos conseils pour faire le bon choix.</p>
-          <h2>Les critères importants</h2>
-          <p>Un bon plombier doit avoir de l'expérience et des avis positifs.</p>
-          <img src="plombier.jpg" alt="Plombier professionnel à Troyes" />
-          <p>Consultez les avis en ligne pour évaluer la qualité du service.</p>
-          <a href="/contact">Contactez-nous</a>
-          <h2>Questions fréquentes</h2>
-          <p>Combien coûte une intervention?</p>
-        `.repeat(50), // Make it long enough
-      }
+  describe('a realistic generated article', () => {
+    it('publishes without a single blocking error', () => {
+      const result = validator.validate({ title: TITLE, content: VALID_ARTICLE })
 
-      const result = validator.validate(content)
-
-      // Should have valid structure metrics
-      expect(result.metrics.wordCount).toBeGreaterThan(500)
-      expect(result.metrics.h2Count).toBeGreaterThanOrEqual(1)
-      expect(result.metrics.imageCount).toBeGreaterThanOrEqual(1)
-      expect(result.metrics.headingCount).toBeGreaterThanOrEqual(2)
+      expect(result.errors).toEqual([])
+      expect(result.isValid).toBe(true)
     })
 
-    it('should detect missing title', () => {
-      const content = {
-        content: '<p>Contenu sans titre.</p>'.repeat(10),
-      }
+    it('measures the structure it actually contains', () => {
+      const result = validator.validate({ title: TITLE, content: VALID_ARTICLE })
 
-      const result = validator.validate(content)
+      expect(result.metrics.wordCount).toBeGreaterThan(600)
+      expect(result.metrics.h1Count).toBe(1)
+      expect(result.metrics.h2Count).toBe(2)
+      expect(result.metrics.headingCount).toBe(3)
+      expect(result.metrics.internalLinkCount).toBe(1)
+      expect(result.metrics.headingLevelSkips).toBe(0)
+    })
+
+    it('scores French prose as readable instead of unreadable', () => {
+      // Regression guard on the syllable bug: counting vowel CHARACTERS drove
+      // this ratio to ~2.7 and the Flesch score below zero, which made
+      // READABILITY_DIFFICULT fire on 100% of French pages.
+      const result = validator.validate({ title: TITLE, content: VALID_ARTICLE })
+
+      expect(result.metrics.averageSyllablePerWord).toBeLessThan(2.1)
+      expect(result.metrics.fleschReadingEase).toBeGreaterThan(40)
+      expect(result.warnings.some(w => w.code === 'READABILITY_DIFFICULT')).toBe(false)
+    })
+  })
+
+  describe('blocking errors', () => {
+    it('blocks a missing title', () => {
+      const result = validator.validate({ content: VALID_ARTICLE })
 
       expect(result.isValid).toBe(false)
       expect(result.errors.some(e => e.code === 'MISSING_TITLE')).toBe(true)
     })
 
-    it('should detect title too long', () => {
-      const content = {
-        title: 'A'.repeat(100),
-        content: '<p>Contenu.</p>'.repeat(10),
-      }
+    it('blocks a missing H1', () => {
+      const withoutH1 = VALID_ARTICLE.replace(/<h1[^>]*>[\s\S]*?<\/h1>/i, '')
+      const result = validator.validate({ title: TITLE, content: withoutH1 })
 
-      const result = validator.validate(content)
-
-      expect(result.warnings.some(w => w.code === 'TITLE_TOO_LONG')).toBe(true)
+      expect(result.isValid).toBe(false)
+      expect(result.errors.some(e => e.code === 'MISSING_H1')).toBe(true)
     })
 
-    it('should detect word count too low', () => {
-      const content = {
-        title: 'Titre',
-        content: '<p>Très court.</p>',
-      }
-
-      const result = validator.validate(content)
+    it('blocks thin content', () => {
+      const result = validator.validate({ title: TITLE, content: `<h1>Titre</h1>${PARAGRAPH}` })
 
       expect(result.errors.some(e => e.code === 'WORD_COUNT_TOO_LOW')).toBe(true)
     })
 
-    it('should detect missing H2 headings', () => {
-      const content = {
-        title: 'Titre',
-        content: '<p>Paragraphe sans sous-titres.</p>'.repeat(20),
-      }
-
-      const result = validator.validate(content)
+    it('blocks a full-length article with no H2 at all', () => {
+      const withoutH2 = VALID_ARTICLE.replace(/<h2[^>]*>[\s\S]*?<\/h2>/gi, '')
+      const result = validator.validate({ title: TITLE, content: withoutH2 })
 
       expect(result.errors.some(e => e.code === 'MISSING_H2')).toBe(true)
     })
 
-    it('should detect images without alt text', () => {
-      const content = {
-        title: 'Test',
-        content: `
-          <p>Contenu.</p>${'<p>Paragraph.</p>'.repeat(20)}
-          <img src="test.jpg" />
-          <img src="test2.jpg" alt="Description" />
-        `,
-      }
+    it('can be told the H1 comes from the CMS title', () => {
+      const withoutH1 = VALID_ARTICLE.replace(/<h1[^>]*>[\s\S]*?<\/h1>/i, '')
+      const lenient = new ContentQualityValidator({ requireH1: false })
 
-      const result = validator.validate(content)
+      expect(lenient.validate({ title: TITLE, content: withoutH1 }).isValid).toBe(true)
+    })
+  })
 
-      expect(result.errors.some(e => e.code === 'IMAGES_MISSING_ALT')).toBe(true)
+  describe('warnings that must NOT block', () => {
+    it('does not block a page without images', () => {
+      // The generator returns image ALT SUGGESTIONS, never <img> tags, and
+      // campaigns can disable images. NO_IMAGES used to be an error, which
+      // would have rejected every page the engine produces.
+      const result = validator.validate({ title: TITLE, content: VALID_ARTICLE })
+
+      expect(result.metrics.imageCount).toBe(0)
+      expect(result.errors.some(e => e.code === 'NO_IMAGES')).toBe(false)
+      expect(result.warnings.some(w => w.code === 'IMAGE_COUNT_LOW')).toBe(true)
+      expect(result.isValid).toBe(true)
     })
 
-    it('should warn about low readability', () => {
-      const content = {
-        title: 'Test',
-        content: `
-          <h2>Section</h2>
-          <p>${'Mottrèslongquetraversedansuntxtetsansaucunmomdutilisé '.repeat(50)}</p>
-        `.repeat(10),
-      }
+    it('does not block an image missing its alt text', () => {
+      const result = validator.validate({
+        title: TITLE,
+        content: `${VALID_ARTICLE}<img src="/plombier.jpg">`,
+      })
 
-      const result = validator.validate(content)
-
-      // Should have readability warnings
-      expect(result.warnings.length).toBeGreaterThan(0)
+      expect(result.warnings.some(w => w.code === 'IMAGES_MISSING_ALT')).toBe(true)
+      expect(result.errors.some(e => e.code === 'IMAGES_MISSING_ALT')).toBe(false)
+      expect(result.isValid).toBe(true)
     })
 
-    it('should warn about missing internal links', () => {
-      const content = {
-        title: 'Test',
-        content: '<p>Contenu sans liens internes.</p>'.repeat(20),
-      }
-
-      const result = validator.validate(content)
+    it('does not block a page without internal links', () => {
+      const withoutLinks = VALID_ARTICLE.replace(/<a[\s\S]*?<\/a>/gi, '')
+      const result = validator.validate({ title: TITLE, content: withoutLinks })
 
       expect(result.warnings.some(w => w.code === 'INTERNAL_LINKS_LOW')).toBe(true)
+      expect(result.isValid).toBe(true)
     })
 
-    it('should calculate correct word count', () => {
-      const content = {
+    it('does not block hard-to-read prose', () => {
+      const dense =
+        '<h1>Reglementation</h1>' +
+        ('<p>La reglementation thermique impose desormais aux professionnels certifies une ' +
+          'verification systematique des installations existantes avant toute intervention ' +
+          'corrective sur les equipements de production de chaleur individuels ou collectifs ' +
+          'situes en zone urbaine dense</p>').repeat(15) +
+        '<h2>Precisions</h2>'
+
+      const result = validator.validate({ title: TITLE, content: dense })
+
+      expect(result.metrics.fleschReadingEase).toBeLessThan(40)
+      expect(result.errors.some(e => e.category === 'readability')).toBe(false)
+      expect(result.warnings.some(w => w.category === 'readability')).toBe(true)
+    })
+
+    it('does not block long-form content', () => {
+      const long = [
+        '<h1>Guide complet</h1>',
+        PARAGRAPH.repeat(200),
+        '<h2>Section</h2>',
+      ].join('\n')
+
+      const result = validator.validate({ title: TITLE, content: long })
+
+      expect(result.metrics.wordCount).toBeGreaterThan(5000)
+      expect(result.warnings.some(w => w.code === 'WORD_COUNT_TOO_HIGH')).toBe(true)
+      expect(result.errors.some(e => e.code === 'WORD_COUNT_TOO_HIGH')).toBe(false)
+    })
+
+    it('warns about a long title without blocking', () => {
+      const result = validator.validate({ title: 'A'.repeat(100), content: VALID_ARTICLE })
+
+      expect(result.warnings.some(w => w.code === 'TITLE_TOO_LONG')).toBe(true)
+      expect(result.isValid).toBe(true)
+    })
+
+    it('warns about several H1 without blocking', () => {
+      const result = validator.validate({
+        title: TITLE,
+        content: `${VALID_ARTICLE}<h1>Un second titre</h1>`,
+      })
+
+      expect(result.warnings.some(w => w.code === 'MULTIPLE_H1')).toBe(true)
+      expect(result.isValid).toBe(true)
+    })
+
+    it('warns about a skipped heading level', () => {
+      const skipped = VALID_ARTICLE.replace('<h2>Comment', '<h4>Comment').replace(
+        'l Aube ?</h2>',
+        'l Aube ?</h4>'
+      )
+      const result = validator.validate({ title: TITLE, content: skipped })
+
+      expect(result.metrics.headingLevelSkips).toBe(1)
+      expect(result.warnings.some(w => w.code === 'HEADING_LEVEL_SKIP')).toBe(true)
+      expect(result.isValid).toBe(true)
+    })
+  })
+
+  describe('parsing', () => {
+    it('calculates an exact word count', () => {
+      const result = validator.validate({
         title: 'Test',
         content: '<p>Un deux trois quatre cinq six sept huit neuf dix.</p>'.repeat(10),
-      }
+      })
 
-      const result = validator.validate(content)
-
-      expect(result.metrics.wordCount).toBe(100) // 10 mots * 10 répétitions
+      expect(result.metrics.wordCount).toBe(100)
     })
 
-    it('should parse HTML correctly', () => {
-      const content = {
-        title: 'Test',
-        content: `
-          <h1>Heading 1</h1>
-          <h2>Heading 2</h2>
-          <h2>Another H2</h2>
-          <h3>Heading 3</h3>
-          <p>Paragraph 1</p>
-          <p>Paragraph 2</p>
-          <ul><li>Item 1</li><li>Item 2</li></ul>
-          <blockquote>Quote</blockquote>
-          <img src="test.jpg" alt="Alt text" />
-        `.repeat(20),
-      }
+    it('counts single-quoted internal links, which is what the generator emits', () => {
+      const result = validator.validate({
+        title: TITLE,
+        content: `${VALID_ARTICLE}<p><a href='/autre-page-longue-traine-troyes'>Autre page</a></p>`,
+      })
 
-      const result = validator.validate(content)
+      expect(result.metrics.internalLinkCount).toBe(2)
+    })
 
-      expect(result.metrics.h1Count).toBeGreaterThanOrEqual(1)
-      expect(result.metrics.h2Count).toBeGreaterThanOrEqual(1)
-      expect(result.metrics.h3Count).toBeGreaterThanOrEqual(1)
-      expect(result.metrics.imageCount).toBeGreaterThanOrEqual(1)
-      expect(result.metrics.imagesWithAlt).toBeGreaterThanOrEqual(1)
+    it('separates internal from external links', () => {
+      const result = validator.validate({
+        title: TITLE,
+        content: `${VALID_ARTICLE}<p><a href="https://www.service-public.fr/x">Source</a></p>`,
+      })
+
+      expect(result.metrics.externalLinkCount).toBe(1)
+      expect(result.metrics.internalLinkCount).toBe(1)
+    })
+
+    it('parses the heading outline with levels', () => {
+      const result = validator.validate({
+        title: TITLE,
+        content: '<h1>A</h1><h2>B</h2><h3>C</h3>' + PARAGRAPH.repeat(12),
+      })
+
+      expect(result.metrics.headingOutline).toEqual([
+        { level: 1, text: 'A' },
+        { level: 2, text: 'B' },
+        { level: 3, text: 'C' },
+      ])
     })
   })
 
   describe('custom configuration', () => {
-    it('should respect custom minWordCount', () => {
-      const config: ContentQualityConfig = {
-        minWordCount: 1000,
-      }
-      const customValidator = new ContentQualityValidator(config)
-
-      const content = {
-        title: 'Test',
-        content: '<p>Mots.</p>'.repeat(100), // ~400 mots
-      }
-
-      const result = customValidator.validate(content)
+    it('respects a custom minWordCount', () => {
+      const customValidator = new ContentQualityValidator({ minWordCount: 1000 })
+      const result = customValidator.validate({ title: TITLE, content: VALID_ARTICLE })
 
       expect(result.errors.some(e => e.code === 'WORD_COUNT_TOO_LOW')).toBe(true)
     })
 
-    it('should respect custom minImageCount', () => {
-      const config: ContentQualityConfig = {
-        minImageCount: 3,
-      }
+    it('respects a custom minImageCount', () => {
+      const config: ContentQualityConfig = { minImageCount: 3 }
       const customValidator = new ContentQualityValidator(config)
 
-      const content = {
-        title: 'Test',
-        content: `
-          <p>Contenu.</p>${'<p>More.</p>'.repeat(30)}
-          <img src="1.jpg" alt="1" />
-          <img src="2.jpg" alt="2" />
-        `,
-      }
-
-      const result = customValidator.validate(content)
+      const result = customValidator.validate({
+        title: TITLE,
+        content: `${VALID_ARTICLE}<img src="1.jpg" alt="1"><img src="2.jpg" alt="2">`,
+      })
 
       expect(result.warnings.some(w => w.code === 'IMAGE_COUNT_LOW')).toBe(true)
+    })
+
+    it('respects a custom readability floor', () => {
+      const strict = new ContentQualityValidator({ minReadabilityScore: 95 })
+      const result = strict.validate({ title: TITLE, content: VALID_ARTICLE })
+
+      expect(result.warnings.some(w => w.code === 'READABILITY_BELOW_RECOMMENDED')).toBe(true)
+      expect(result.isValid).toBe(true)
     })
   })
 
   describe('score calculation', () => {
-    it('should calculate structure score correctly', () => {
-      const content = {
-        title: 'Test',
-        content: `
-          <h2>Section 1</h2>
-          <p>Paragraphe avec suffisamment de mots pour dépasser le minimum requis par le validateur de contenu SEO.</p>
-          <p>Deuxième paragraphe pour atteindre la densité de mots nécessaire.</p>
-          <img src="test.jpg" alt="Test" />
-          <a href="/page">Lien interne</a>
-        `.repeat(30),
-      }
-
-      const result = validator.validate(content)
+    it('gives a normal article a normal structure score', () => {
+      // The old rubric subtracted (20 - imageCount) * 3 and (10 - links) * 5,
+      // so a page with one image and two links scored 3/100.
+      const result = validator.validate({ title: TITLE, content: VALID_ARTICLE })
 
       expect(result.score.structure).toBeGreaterThan(70)
+      expect(result.score.overall).toBeGreaterThan(60)
     })
 
-    it('should return correct grade based on score', () => {
-      const goodContent = {
-        title: 'Comment trouver un plombier',
-        content: `
-          <h2>Introduction</h2>
-          <p>Les plombiers professionnels à Troyes offrent des services de dépannage urgents 24h/24.</p>
-          <h2>Services proposés</h2>
-          <p>Nous proposons la réparation de fuites d'eau, le débouchage de canalisations, l'installation de sanitaires.</p>
-          <img src="plombier.jpg" alt="Plombier professionnel" />
-          <a href="/contact">Contactez-nous</a>
-          <h2>Questions fréquentes</h2>
-          <p>Quels sont vos tarifs?</p>
-          <p>Êtes-vous disponible le week-end?</p>
-        `.repeat(30),
-      }
+    it('collapses the score of a page that is missing everything', () => {
+      const result = validator.validate({ content: '<p>Trop court.</p>' })
 
-      const result = validator.validate(goodContent)
+      expect(result.score.overall).toBeLessThan(60)
+      expect(result.score.grade).toBe('F')
+    })
+
+    it('returns a grade in the expected range', () => {
+      const result = validator.validate({ title: TITLE, content: VALID_ARTICLE })
 
       expect(['A', 'B', 'C', 'D', 'F']).toContain(result.score.grade)
     })
@@ -247,10 +296,7 @@ describe('ContentQualityValidator', () => {
     })
 
     it('should create validator with custom config', () => {
-      const config: ContentQualityConfig = {
-        minWordCount: 500,
-        minImageCount: 2,
-      }
+      const config: ContentQualityConfig = { minWordCount: 500, minImageCount: 2 }
       const v = createContentQualityValidator(config)
       expect(v).toBeInstanceOf(ContentQualityValidator)
     })

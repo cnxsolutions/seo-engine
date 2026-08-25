@@ -77,17 +77,17 @@ COMMENT ON TABLE vector_embeddings IS 'Embeddings vectoriels pour RAG avec méta
 -- ─── Index HNSW pour recherche vectorielle performante ─────────────────────────
 -- HNSW (Hierarchical Navigable Small World) est plus rapide que IVFFlat
 
-CREATE INDEX idx_embeddings_hnsw ON vector_embeddings
+CREATE INDEX IF NOT EXISTS idx_embeddings_hnsw ON vector_embeddings
     USING hnsw (embedding vector_cosine_ops)
     WITH (m = 16, ef_construction = 64);
 
 -- ─── Index secondaires pour filtering ──────────────────────────────────────────
 
-CREATE INDEX idx_embeddings_site ON vector_embeddings(site_id) WHERE site_id IS NOT NULL;
-CREATE INDEX idx_embeddings_doc_type ON vector_embeddings(document_type);
-CREATE INDEX idx_embeddings_content_type ON vector_embeddings(content_type_key) WHERE content_type_key IS NOT NULL;
-CREATE INDEX idx_embeddings_keyword ON vector_embeddings(focus_keyword) WHERE focus_keyword IS NOT NULL;
-CREATE INDEX idx_embeddings_created ON vector_embeddings(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_embeddings_site ON vector_embeddings(site_id) WHERE site_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_embeddings_doc_type ON vector_embeddings(document_type);
+CREATE INDEX IF NOT EXISTS idx_embeddings_content_type ON vector_embeddings(content_type_key) WHERE content_type_key IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_embeddings_keyword ON vector_embeddings(focus_keyword) WHERE focus_keyword IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_embeddings_created ON vector_embeddings(created_at DESC);
 
 -- ─── Table: schema_embeddings ───────────────────────────────────────────────────
 -- Stocket les embeddings spécifiques aux schémas de contenu
@@ -138,8 +138,8 @@ CREATE TABLE IF NOT EXISTS schema_embeddings (
 
 COMMENT ON TABLE schema_embeddings IS 'Embeddings optimisés pour les schémas de contenu RAG';
 
-CREATE INDEX idx_schema_embeddings_schema ON schema_embeddings(schema_id);
-CREATE INDEX idx_schema_embeddings_hnsw ON schema_embeddings USING hnsw (schema_embedding vector_cosine_ops);
+CREATE INDEX IF NOT EXISTS idx_schema_embeddings_schema ON schema_embeddings(schema_id);
+CREATE INDEX IF NOT EXISTS idx_schema_embeddings_hnsw ON schema_embeddings USING hnsw (schema_embedding vector_cosine_ops);
 
 -- ─── Table: content_embeddings ──────────────────────────────────────────────────
 -- Stocke les embeddings du contenu existant des sites
@@ -190,10 +190,10 @@ CREATE TABLE IF NOT EXISTS content_embeddings (
 
 COMMENT ON TABLE content_embeddings IS 'Embeddings du contenu existant pour contexte RAG';
 
-CREATE INDEX idx_content_embeddings_site ON content_embeddings(federated_site_id);
-CREATE INDEX idx_content_embeddings_type ON content_embeddings(content_type_key);
-CREATE INDEX idx_content_embeddings_hnsw ON content_embeddings USING hnsw (content_embedding vector_cosine_ops);
-CREATE INDEX idx_content_embeddings_keyword ON content_embeddings(focus_keyword) WHERE focus_keyword IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_content_embeddings_site ON content_embeddings(federated_site_id);
+CREATE INDEX IF NOT EXISTS idx_content_embeddings_type ON content_embeddings(content_type_key);
+CREATE INDEX IF NOT EXISTS idx_content_embeddings_hnsw ON content_embeddings USING hnsw (content_embedding vector_cosine_ops);
+CREATE INDEX IF NOT EXISTS idx_content_embeddings_keyword ON content_embeddings(focus_keyword) WHERE focus_keyword IS NOT NULL;
 
 -- ─── Table: rag_context_cache ───────────────────────────────────────────────────
 -- Cache les contextes RAG générés pour éviter de recalculer
@@ -240,9 +240,9 @@ CREATE TABLE IF NOT EXISTS rag_context_cache (
 
 COMMENT ON TABLE rag_context_cache IS 'Cache des contextes RAG pour optimisation';
 
-CREATE INDEX idx_rag_cache_key ON rag_context_cache(cache_key);
-CREATE INDEX idx_rag_cache_expires ON rag_context_cache(expires_at);
-CREATE INDEX idx_rag_cache_site ON rag_context_cache((params->>'siteId')) WHERE params->>'siteId' IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_rag_cache_key ON rag_context_cache(cache_key);
+CREATE INDEX IF NOT EXISTS idx_rag_cache_expires ON rag_context_cache(expires_at);
+CREATE INDEX IF NOT EXISTS idx_rag_cache_site ON rag_context_cache((params->>'siteId')) WHERE params->>'siteId' IS NOT NULL;
 
 -- ─── Table: indexing_queue ──────────────────────────────────────────────────────
 -- File d'attente pour l'indexation asynchrone
@@ -286,11 +286,15 @@ CREATE TABLE IF NOT EXISTS indexing_queue (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-COMMENT ON TABLE indexing_queue IS 'File d\'attente pour l\'indexation vectorielle';
+-- Quotes doubled, not backslash-escaped: PostgreSQL runs with
+-- standard_conforming_strings on, so `\'` ends the literal and the rest of the
+-- line is parsed as SQL. This file had never been executed, so the error sat
+-- here unnoticed.
+COMMENT ON TABLE indexing_queue IS 'File d''attente pour l''indexation vectorielle';
 
-CREATE INDEX idx_indexing_queue_status ON indexing_queue(status) WHERE status IN ('pending', 'running');
-CREATE INDEX idx_indexing_queue_priority ON indexing_queue(priority DESC, scheduled_for ASC) WHERE status = 'pending';
-CREATE INDEX idx_indexing_queue_site ON indexing_queue(site_id) WHERE site_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_indexing_queue_status ON indexing_queue(status) WHERE status IN ('pending', 'running');
+CREATE INDEX IF NOT EXISTS idx_indexing_queue_priority ON indexing_queue(priority DESC, scheduled_for ASC) WHERE status = 'pending';
+CREATE INDEX IF NOT EXISTS idx_indexing_queue_site ON indexing_queue(site_id) WHERE site_id IS NOT NULL;
 
 -- ─── Table: similarity_cache ─────────────────────────────────────────────────────
 -- Cache les résultats de similarité pour éviter les recalculs
@@ -318,8 +322,8 @@ CREATE TABLE IF NOT EXISTS similarity_cache (
 
 COMMENT ON TABLE similarity_cache IS 'Cache des recherches de similarité';
 
-CREATE INDEX idx_similarity_hash ON similarity_cache(query_hash);
-CREATE INDEX idx_similarity_expires ON similarity_cache(expires_at);
+CREATE INDEX IF NOT EXISTS idx_similarity_hash ON similarity_cache(query_hash);
+CREATE INDEX IF NOT EXISTS idx_similarity_expires ON similarity_cache(expires_at);
 
 -- ─── Triggers ──────────────────────────────────────────────────────────────────
 
@@ -332,22 +336,27 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+DROP TRIGGER IF EXISTS tr_vector_embeddings_updated ON vector_embeddings;
 CREATE TRIGGER tr_vector_embeddings_updated
     BEFORE UPDATE ON vector_embeddings
     FOR EACH ROW EXECUTE FUNCTION update_vector_embeddings_updated_at();
 
+DROP TRIGGER IF EXISTS tr_schema_embeddings_updated ON schema_embeddings;
 CREATE TRIGGER tr_schema_embeddings_updated
     BEFORE UPDATE ON schema_embeddings
     FOR EACH ROW EXECUTE FUNCTION update_vector_embeddings_updated_at();
 
+DROP TRIGGER IF EXISTS tr_content_embeddings_updated ON content_embeddings;
 CREATE TRIGGER tr_content_embeddings_updated
     BEFORE UPDATE ON content_embeddings
     FOR EACH ROW EXECUTE FUNCTION update_vector_embeddings_updated_at();
 
+DROP TRIGGER IF EXISTS tr_rag_context_cache_updated ON rag_context_cache;
 CREATE TRIGGER tr_rag_context_cache_updated
     BEFORE UPDATE ON rag_context_cache
     FOR EACH ROW EXECUTE FUNCTION update_vector_embeddings_updated_at();
 
+DROP TRIGGER IF EXISTS tr_indexing_queue_updated ON indexing_queue;
 CREATE TRIGGER tr_indexing_queue_updated
     BEFORE UPDATE ON indexing_queue
     FOR EACH ROW EXECUTE FUNCTION update_vector_embeddings_updated_at();
@@ -374,7 +383,11 @@ BEGIN
     SELECT
         ve.id,
         ve.content,
-        1 - (ve.embedding <=> p_embedding) AS score,
+        -- Cast explicit: the `<=>` operator yields double precision while the
+        -- RETURNS TABLE above declares `score REAL`. RETURN QUERY compares the
+        -- row type strictly, so without this the function creates cleanly and
+        -- then fails on its first call with "structure of query does not match".
+        (1 - (ve.embedding <=> p_embedding))::REAL AS score,
         ve.metadata
     FROM vector_embeddings ve
     WHERE
@@ -398,19 +411,22 @@ RETURNS TABLE (
 BEGIN
     RETURN QUERY
     SELECT
-        COUNT(*)::BIGINT,
+        -- `FROM vector_embeddings` is load-bearing: without it COUNT(*) counts
+        -- the single implicit row of a FROM-less SELECT and this function reports
+        -- exactly 1 document forever, however full the index really is.
+        (SELECT COUNT(*) FROM vector_embeddings)::BIGINT,
         (
-            SELECT jsonb_object_agg(doc_type, count)
+            SELECT COALESCE(jsonb_object_agg(doc_type, n), '{}'::JSONB)
             FROM (
-                SELECT document_type AS doc_type, COUNT(*) AS count
+                SELECT document_type AS doc_type, COUNT(*) AS n
                 FROM vector_embeddings
                 GROUP BY document_type
             ) sub
         )::JSONB,
         (
-            SELECT COALESCE(jsonb_object_agg(site_id::TEXT, count), '{}'::JSONB)
+            SELECT COALESCE(jsonb_object_agg(site_id::TEXT, n), '{}'::JSONB)
             FROM (
-                SELECT site_id, COUNT(*) AS count
+                SELECT site_id, COUNT(*) AS n
                 FROM vector_embeddings
                 WHERE site_id IS NOT NULL
                 GROUP BY site_id
@@ -425,12 +441,17 @@ CREATE OR REPLACE FUNCTION cleanup_expired_cache()
 RETURNS TABLE (deleted_count BIGINT) AS $$
 DECLARE
     v_deleted BIGINT;
+    v_batch   BIGINT;
 BEGIN
     DELETE FROM rag_context_cache WHERE expires_at < NOW();
     GET DIAGNOSTICS v_deleted = ROW_COUNT;
 
     DELETE FROM similarity_cache WHERE expires_at < NOW();
-    GET DIAGNOSTICS v_deleted = v_deleted + ROW_COUNT;
+    -- GET DIAGNOSTICS assigns a diagnostic item to a variable; it cannot evaluate
+    -- an expression, so `v_deleted = v_deleted + ROW_COUNT` is a syntax error.
+    -- The second count lands in its own variable and is added afterwards.
+    GET DIAGNOSTICS v_batch = ROW_COUNT;
+    v_deleted := v_deleted + v_batch;
 
     RETURN QUERY SELECT v_deleted;
 END;

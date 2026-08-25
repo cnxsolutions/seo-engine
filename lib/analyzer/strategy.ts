@@ -4,6 +4,7 @@
  */
 
 import { generateJson } from '@/lib/ai/provider'
+import { getGscPlanningSignals, type GscPlanningSignals } from '@/lib/google/performance'
 import type { CrawlResult } from './crawler'
 import type { PageType } from '@/lib/types'
 
@@ -67,19 +68,28 @@ export interface GenerateStrategyOptions {
   businessName?: string
   targetCities?: string[]
   model?: string
+  /**
+   * When given, the strategy is confronted with the site's real Search Console
+   * data instead of being deduced from the crawl alone. A crawl says what the
+   * site contains; only Search Console says what it obtains.
+   */
+  siteId?: string
+  /** Pre-loaded signals; skips the read when the caller already has them. */
+  gscSignals?: GscPlanningSignals | null
 }
 
 export async function generateSeoStrategy(opts: GenerateStrategyOptions): Promise<SeoStrategy> {
   const { crawlResult, businessType, businessName, targetCities, model = 'gpt-4o' } = opts
 
   const analysis = analyzeLocally(crawlResult)
+  const signals = await resolveSignals(opts)
 
   const systemPrompt = `Tu es un consultant SEO senior avec 15 ans d'experience en strategie de contenu, SEO local et maillage interne.
 Tu analyses des sites web et produis des strategies de contenu actionnables et priorisees.
 Tu connais parfaitement les strategies pilier/fille, les pages comparatives, alternatives, et le local pack Google.
 Reponds UNIQUEMENT en JSON valide.`
 
-  const userPrompt = buildStrategyPrompt(crawlResult, analysis, { businessType, businessName, targetCities })
+  const userPrompt = buildStrategyPrompt(crawlResult, analysis, { businessType, businessName, targetCities, signals })
 
   const raw = await generateJson({
     systemPrompt,
@@ -91,10 +101,20 @@ Reponds UNIQUEMENT en JSON valide.`
 
   try {
     const parsed = JSON.parse(raw) as Partial<SeoStrategy>
-    return normalizeStrategy(parsed, analysis)
+    return normalizeStrategy(parsed, analysis, signals)
   } catch {
     throw new Error('Erreur lors de la generation de la strategie SEO (JSON invalide)')
   }
+}
+
+async function resolveSignals(opts: GenerateStrategyOptions): Promise<GscPlanningSignals | null> {
+  const provided = opts.gscSignals !== undefined
+    ? opts.gscSignals
+    : opts.siteId
+      ? await getGscPlanningSignals(opts.siteId).catch(() => null)
+      : null
+
+  return provided && provided.available ? provided : null
 }
 
 interface LocalAnalysis {
@@ -180,7 +200,7 @@ function analyzeLocally(crawl: CrawlResult): LocalAnalysis {
 function buildStrategyPrompt(
   crawl: CrawlResult,
   analysis: LocalAnalysis,
-  opts: { businessType?: string; businessName?: string; targetCities?: string[] }
+  opts: { businessType?: string; businessName?: string; targetCities?: string[]; signals: GscPlanningSignals | null }
 ): string {
   const pageSummaries = crawl.pages.slice(0, 25).map((p) => ({
     path: p.path,
@@ -224,7 +244,7 @@ ${analysis.existingCities.join(', ') || 'Aucun signal geo detecte'}
 
 ## Pages crawlees (echantillon)
 ${JSON.stringify(pageSummaries, null, 1)}
-
+${buildSearchConsoleSection(opts.signals)}
 ## GENERE en JSON:
 {
   "audit": {
@@ -290,10 +310,58 @@ REGLES:
 5. Les villes cibles doivent couvrir la zone d'activite detectee.
 6. Le planning doit etre realiste (pas plus de 1 page/jour en rythme de croisiere).
 7. Les quick wins sont des actions faisables en < 1 semaine avec impact mesurable.
+8. Si une section "PERFORMANCE REELLE" est presente, elle prime sur le crawl : ce que Google
+   montre deja du site vaut plus qu'une deduction faite sur son HTML.
 `.trim()
 }
 
-function normalizeStrategy(parsed: Partial<SeoStrategy>, analysis: LocalAnalysis): SeoStrategy {
+/**
+ * What the site obtains, next to what it contains.
+ *
+ * Empty when no Search Console history exists, so a new site produces exactly
+ * the strategy prompt it produced before.
+ */
+function buildSearchConsoleSection(signals: GscPlanningSignals | null): string {
+  if (!signals) return ''
+
+  const lines: string[] = [
+    '',
+    `## PERFORMANCE REELLE (Search Console, ${signals.windowStart} -> ${signals.windowEnd})`,
+  ]
+
+  if (signals.strikingDistance.length > 0) {
+    lines.push(
+      'Requetes en position 5-20 (a renforcer avant toute nouvelle page):',
+      ...signals.strikingDistance.slice(0, 12).map((o) => `- "${o.query}" pos. ${o.position}, ${o.impressions} impressions -> ${o.pageUrl}`)
+    )
+  }
+
+  if (signals.lowCtrPages.length > 0) {
+    lines.push(
+      'Pages a fort affichage et faible CTR (reecrire title/meta, ne pas reecrire le contenu):',
+      ...signals.lowCtrPages.slice(0, 8).map((p) => `- ${p.pageUrl} : ${p.impressions} impressions, CTR ${(p.ctr * 100).toFixed(2)}%, pos. ${p.position}`)
+    )
+  }
+
+  if (signals.cannibalized.length > 0) {
+    lines.push(
+      'Cannibalisation interne (consolider, ne pas ajouter):',
+      ...signals.cannibalized.slice(0, 8).map((c) => `- "${c.query}" : ${c.pages.length} pages du site en concurrence, garder ${c.winner}`)
+    )
+  }
+
+  if (signals.deadPages.length > 0) {
+    lines.push(`Pages sans aucune impression apres 30 jours: ${signals.deadPages.length} (sujets a abandonner)`)
+  }
+
+  return lines.length > 2 ? `${lines.join('\n')}\n` : ''
+}
+
+function normalizeStrategy(
+  parsed: Partial<SeoStrategy>,
+  analysis: LocalAnalysis,
+  signals: GscPlanningSignals | null
+): SeoStrategy {
   return {
     audit: parsed.audit || {
       strengths: [],
@@ -317,6 +385,35 @@ function normalizeStrategy(parsed: Partial<SeoStrategy>, analysis: LocalAnalysis
       estimatedDuration: '6 semaines',
       phasedPlan: [],
     },
-    quickWins: parsed.quickWins || [],
+    // Measured quick wins first: they are the only items on this list backed by
+    // an observed impression count rather than by the model's judgement.
+    quickWins: [...measuredQuickWins(signals), ...(parsed.quickWins || [])].slice(0, 8),
   }
+}
+
+function measuredQuickWins(signals: GscPlanningSignals | null): string[] {
+  if (!signals) return []
+
+  const wins: string[] = []
+
+  for (const opportunity of signals.strikingDistance.slice(0, 2)) {
+    wins.push(
+      `Renforcer ${opportunity.pageUrl} sur "${opportunity.query}" : position ${opportunity.position} pour ${opportunity.impressions} impressions, le top 3 est a portee.`
+    )
+  }
+
+  for (const page of signals.lowCtrPages.slice(0, 2)) {
+    wins.push(
+      `Reecrire le title et la meta description de ${page.pageUrl} : ${page.impressions} affichages pour un CTR de ${(page.ctr * 100).toFixed(2)}% en position ${page.position}.`
+    )
+  }
+
+  if (signals.cannibalized.length > 0) {
+    const first = signals.cannibalized[0]
+    wins.push(
+      `Consolider les ${first.pages.length} pages qui se disputent "${first.query}" vers ${first.winner} (liens internes, canonique ou fusion).`
+    )
+  }
+
+  return wins
 }

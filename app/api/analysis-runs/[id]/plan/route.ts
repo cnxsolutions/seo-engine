@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createCampaign, createCyclePlan, getAnalysisRunById, getCampaignById, getLatestCyclePlan } from '@/lib/db'
+import { createCampaign, createCyclePlan, getAnalysisRunById, getCampaignByIdSafe, getLatestCyclePlan } from '@/lib/db'
 import { normalizeCommunes } from '@/lib/geo/locations'
 import { generateBriefPlan } from '@/lib/planning/brief-plan'
+import { DEFAULT_GENERATION_MODEL } from '@/lib/ai/provider'
 
 const FREQUENCY_TO_HOURS: Record<string, number> = {
   manual: 0,
@@ -24,8 +25,10 @@ export async function POST(req: NextRequest, context: { params: Promise<{ id: st
       return NextResponse.json({ error: 'Analyse introuvable' }, { status: 404 })
     }
 
+    // Both branches yield a campaign WITHOUT the site credentials: this handler
+    // returns `campaign` in its response body, and planning never publishes.
     const campaign = body.campaign_id
-      ? await getCampaignById(body.campaign_id)
+      ? await getCampaignByIdSafe(body.campaign_id)
       : await createCampaignFromAnalysis(body, analysisRun)
 
     if (!campaign) {
@@ -91,7 +94,7 @@ async function createCampaignFromAnalysis(body: Record<string, unknown>, analysi
     schedule_frequency: scheduleFrequency as 'manual' | 'daily' | 'every_2_days' | 'every_3_days' | 'weekly' | 'biweekly' | 'monthly' | 'custom',
     schedule_days: Array.isArray(body.schedule_days) ? body.schedule_days as number[] : [],
     schedule_time: String(body.schedule_time || '09:00'),
-    ai_model: String(body.ai_model || 'gpt-4o-mini'),
+    ai_model: String(body.ai_model || DEFAULT_GENERATION_MODEL),
     page_types: Array.isArray(body.page_types) ? body.page_types as ['pillar', 'child'] : ['pillar', 'child', 'local_pack'],
     publish_status: (body.publish_status as 'publish' | 'draft' | 'pending') || 'draft',
     auto_publish: Boolean(body.auto_publish),

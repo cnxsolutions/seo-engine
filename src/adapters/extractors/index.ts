@@ -9,13 +9,6 @@ export {
   WordPressRestExtractor,
   AcfExtractor,
   SeoMetaExtractor,
+  WordPressApiError,
   createWordPressExtractor,
 } from './wordpress/WordPressExtractor'
-
-// Sanity Extractors
-export {
-  SanityExtractor,
-  SanityClient,
-  SanityTypeAnalyzer,
-  createSanityExtractor,
-} from './sanity/SanityExtractor'

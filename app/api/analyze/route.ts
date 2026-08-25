@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { crawlWebsite } from '@/lib/analyzer/crawler'
 import { generateSeoStrategy } from '@/lib/analyzer/strategy'
 import { upsertSitePages } from '@/lib/db'
+import { indexSitePages, type IndexingReport } from '@/src/adapters/rag/VectorIndexingService'
 
 export async function POST(req: NextRequest) {
   try {
@@ -33,6 +34,8 @@ export async function POST(req: NextRequest) {
     }
 
     // Step 2: Save crawled pages to database if site is linked
+    let indexing: IndexingReport | null = null
+
     if (siteId) {
       const sitePages = crawlResult.pages.map(page => ({
         site_id: siteId,
@@ -52,10 +55,21 @@ export async function POST(req: NextRequest) {
         has_faq: page.hasFaq,
         has_local_business: page.hasLocalBusiness,
         geo_signals: page.geoSignals,
+        content_excerpt: page.textExcerpt || null,
         crawled_at: crawlResult.crawledAt,
       }))
 
       await upsertSitePages(siteId, sitePages as Parameters<typeof upsertSitePages>[1]).catch(() => null)
+
+      // Step 2b: feed the vector index with what was just crawled.
+      //
+      // This is the only moment the semantic index can learn what a site already
+      // says; without it every RAG query below runs against an empty store. It is
+      // deliberately non-blocking for the caller's success: a failed embedding
+      // must never turn a successful crawl into a 500, so the report comes back
+      // in the response instead of an exception. Pages whose text has not moved
+      // since the previous crawl are recognised by hash and cost nothing.
+      indexing = await indexSitePages(siteId, { source: 'crawl' }).catch(() => null)
     }
 
     // Step 3: Generate SEO strategy
@@ -65,6 +79,9 @@ export async function POST(req: NextRequest) {
       businessName,
       targetCities: targetCities ? (Array.isArray(targetCities) ? targetCities : [targetCities]) : undefined,
       model,
+      // Confronts the strategy with what Search Console actually reports, so the
+      // quick wins are backed by observed impressions rather than guessed.
+      siteId,
     })
 
     return NextResponse.json({
@@ -84,6 +101,13 @@ export async function POST(req: NextRequest) {
           hasSchema: p.hasSchema,
           hasFaq: p.hasFaq,
         })),
+      },
+      indexing: indexing && {
+        documentsIndexed: indexing.documentsIndexed,
+        documentsSkipped: indexing.documentsSkipped,
+        documentsFailed: indexing.documentsFailed,
+        embeddingRequests: indexing.embeddingRequests,
+        durationMs: indexing.durationMs,
       },
       strategy,
     })

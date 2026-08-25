@@ -93,6 +93,16 @@ export interface ValidatableContent {
   contentType: string
 }
 
+// ─── Date Formats ────────────────────────────────────────────────────────────
+
+/**
+ * Formes ISO 8601 acceptées pour les champs date / datetime.
+ * L'heure, les secondes et le fuseau sont optionnels : WordPress renvoie
+ * "2024-01-15T10:30:00" sans suffixe, Sanity renvoie "2024-01-15T10:30:00Z",
+ * et un date_picker ACF renvoie "2024-01-15".
+ */
+const ISO_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}([T ]\d{2}:\d{2}(:\d{2})?(\.\d+)?(Z|[+-]\d{2}:?\d{2})?)?$/
+
 /**
  * Validateur de schéma
  */
@@ -296,6 +306,7 @@ export class SchemaValidator {
     const stringTypes = ['text', 'slug', 'email', 'url', 'html', 'rich-text', 'meta', 'phone', 'address', 'json']
     const numberTypes = ['number']
     const booleanTypes = ['boolean']
+    const dateTypes = ['date', 'datetime']
     const arrayTypes = ['array', 'gallery', 'flexible-content', 'repeater']
     const objectTypes = ['object', 'group', 'block-content']
     const mediaTypes = ['image', 'file']
@@ -313,6 +324,8 @@ export class SchemaValidator {
       if (typeof value !== 'boolean') {
         return `Expected boolean for field "${field.key}", got ${typeof value}`
       }
+    } else if (dateTypes.includes(type)) {
+      return this.checkDateValue(field, value)
     } else if (arrayTypes.includes(type)) {
       if (!Array.isArray(value)) {
         return `Expected array for field "${field.key}", got ${typeof value}`
@@ -325,6 +338,29 @@ export class SchemaValidator {
       if (typeof value !== 'object') {
         return `Expected object for field "${field.key}"`
       }
+    }
+
+    return null
+  }
+
+  /**
+   * Vérifie qu'une valeur date / datetime est réellement exploitable par le CMS.
+   * Date.parse() seul est trop permissif ("42" devient l'année 2042) : on impose donc
+   * d'abord la forme ISO, puis on écarte les dates qui n'existent pas (2024-13-45).
+   */
+  private checkDateValue(field: ContentField, value: unknown): string | null {
+    if (value instanceof Date) {
+      return Number.isNaN(value.getTime())
+        ? `Expected a valid date for field "${field.key}", got an invalid Date`
+        : null
+    }
+
+    if (typeof value !== 'string') {
+      return `Expected ISO date string for field "${field.key}", got ${typeof value}`
+    }
+
+    if (!ISO_DATE_PATTERN.test(value) || Number.isNaN(Date.parse(value))) {
+      return `Expected ISO date (YYYY-MM-DD or YYYY-MM-DDTHH:mm:ssZ) for field "${field.key}", got "${value}"`
     }
 
     return null

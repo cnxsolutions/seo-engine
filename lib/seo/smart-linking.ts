@@ -1,5 +1,16 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// Smart Linking
+// SEO Engine - Builds the internal mesh of a generated page from the pages that
+//              already exist on the site
+// ─────────────────────────────────────────────────────────────────────────────
+
 import type { Generation, PageType, ExternalLink } from '@/lib/types'
-import { injectInternalLinks, type InternalLinkTarget } from './internal-linking'
+import {
+  escapeAttribute,
+  injectAnchors,
+  injectInternalLinks,
+  type InternalLinkTarget,
+} from './internal-linking'
 
 export interface LinkGraph {
   pillarId: string
@@ -10,7 +21,10 @@ export interface LinkGraph {
 
 export interface SmartLinkResult {
   htmlContent: string
+  /** Anchors woven into the copy. */
   injectedInternalLinks: string[]
+  /** Anchors listed in the "see also" / hub block. */
+  navigationLinks: string[]
   injectedExternalLinks: string[]
   linkCount: { internal: number; external: number }
 }
@@ -41,6 +55,15 @@ export function applySmartLinking(opts: {
   linkGraph: LinkGraph[]
   siteUrl: string
   externalLinks?: ExternalLink[]
+  /**
+   * Destinations that exist on the site but are not in the pillar/child graph.
+   *
+   * Without these the linker is empty-handed on almost every page: the graph is
+   * built from `parent_generation_id`, which the scheduler never sets, so a
+   * freshly generated child page finds no parent and no siblings. The caller
+   * supplies real published pages instead, and they are used after the graph.
+   */
+  extraTargets?: InternalLinkTarget[]
   maxInternalLinks?: number
   maxExternalLinks?: number
 }): SmartLinkResult {
@@ -50,17 +73,18 @@ export function applySmartLinking(opts: {
     linkGraph,
     siteUrl,
     externalLinks = [],
+    extraTargets = [],
     maxInternalLinks = 5,
     maxExternalLinks = 3,
   } = opts
 
-  const internalTargets: InternalLinkTarget[] = []
+  const graphTargets: InternalLinkTarget[] = []
 
   if (currentPage.pageType === 'pillar') {
     const graph = linkGraph.find((g) => g.pillarSlug === currentPage.slug)
     if (graph) {
-      for (const child of graph.children.slice(0, maxInternalLinks)) {
-        internalTargets.push({ anchor: child.title, href: `/${child.slug}` })
+      for (const child of graph.children) {
+        graphTargets.push({ anchor: child.title, href: `/${child.slug}` })
       }
     }
   } else {
@@ -68,13 +92,15 @@ export function applySmartLinking(opts: {
       g.children.some((c) => c.id === currentPage.id) || g.pillarId === currentPage.parentGenerationId
     )
     if (parentGraph) {
-      internalTargets.push({ anchor: parentGraph.pillarTitle, href: `/${parentGraph.pillarSlug}` })
-      const siblings = parentGraph.children.filter((c) => c.id !== currentPage.id)
-      for (const sibling of siblings.slice(0, maxInternalLinks - 1)) {
-        internalTargets.push({ anchor: sibling.title, href: `/${sibling.slug}` })
+      graphTargets.push({ anchor: parentGraph.pillarTitle, href: `/${parentGraph.pillarSlug}` })
+      for (const sibling of parentGraph.children.filter((c) => c.id !== currentPage.id)) {
+        graphTargets.push({ anchor: sibling.title, href: `/${sibling.slug}` })
       }
     }
   }
+
+  const internalTargets = dedupeTargets([...graphTargets, ...extraTargets], currentPage.slug)
+    .slice(0, maxInternalLinks)
 
   const { htmlContent: linkedHtml, injectedLinks: injectedInternalLinks } =
     injectInternalLinks(htmlContent, internalTargets)
@@ -83,61 +109,105 @@ export function applySmartLinking(opts: {
   const injectedExternalLinks: string[] = []
 
   if (externalLinks.length > 0) {
-    const linksToAdd = externalLinks.slice(0, maxExternalLinks)
-    finalHtml = injectExternalLinks(finalHtml, linksToAdd, injectedExternalLinks)
+    finalHtml = injectExternalLinks(finalHtml, externalLinks.slice(0, maxExternalLinks), injectedExternalLinks)
   }
 
-  if (currentPage.pageType !== 'pillar' && internalTargets.length > 0) {
-    const navBlock = buildChildNavigationBlock(internalTargets, siteUrl)
-    finalHtml = insertBeforeCta(finalHtml, navBlock)
-  }
+  // Anything already woven into a sentence is left out of the block below: two
+  // links to the same page on one page is one link and one distraction.
+  const injectedHrefs = new Set(
+    internalTargets
+      .filter((target) => injectedInternalLinks.some((html) => html.includes(`href="${escapeAttribute(target.href)}"`)))
+      .map((target) => target.href)
+  )
+  const navigationTargets = internalTargets.filter((target) => !injectedHrefs.has(target.href))
 
   if (currentPage.pageType === 'pillar') {
     const graph = linkGraph.find((g) => g.pillarSlug === currentPage.slug)
     if (graph && graph.children.length > 0) {
-      const hubBlock = buildPillarHubBlock(graph, siteUrl)
-      finalHtml = insertBeforeCta(finalHtml, hubBlock)
+      finalHtml = insertBeforeCta(finalHtml, buildPillarHubBlock(graph, siteUrl))
+    } else if (navigationTargets.length > 0) {
+      finalHtml = insertBeforeCta(finalHtml, buildChildNavigationBlock(navigationTargets, siteUrl))
     }
+  } else if (navigationTargets.length > 0) {
+    finalHtml = insertBeforeCta(finalHtml, buildChildNavigationBlock(navigationTargets, siteUrl))
   }
+
+  const navigationLinks = navigationTargets.map((target) => target.href)
 
   return {
     htmlContent: finalHtml,
     injectedInternalLinks,
+    navigationLinks,
     injectedExternalLinks,
     linkCount: {
-      internal: injectedInternalLinks.length,
+      internal: injectedInternalLinks.length + navigationLinks.length,
       external: injectedExternalLinks.length,
     },
   }
 }
 
-function injectExternalLinks(html: string, links: ExternalLink[], injected: string[]): string {
-  let result = html
-  for (const link of links) {
-    const linkHtml = `<a href="${link.url}" target="_blank" rel="noopener noreferrer" title="${link.relevance}">${link.anchor}</a>`
-    const anchorPattern = new RegExp(`(>[^<]*)(${escapeRegExp(link.anchor)})([^<]*<)`, 'i')
+/**
+ * One entry per destination, self-links dropped.
+ *
+ * A page linking to itself is not a mesh, and the generator proposes it often —
+ * its own slug is the one it has just been told about.
+ */
+function dedupeTargets(targets: InternalLinkTarget[], currentSlug: string): InternalLinkTarget[] {
+  const self = normalizeSlug(currentSlug)
+  const seen = new Set<string>()
+  const result: InternalLinkTarget[] = []
 
-    if (anchorPattern.test(result)) {
-      result = result.replace(anchorPattern, (_match, before, anchor, after) => {
-        injected.push(linkHtml)
-        return `${before}<a href="${link.url}" target="_blank" rel="noopener noreferrer" title="${link.relevance}">${anchor}</a>${after}`
-      })
-    } else {
-      const lastP = result.lastIndexOf('</p>')
-      if (lastP !== -1) {
-        const externalRefHtml = `\n<p class="external-ref">Source : ${linkHtml}</p>`
-        result = result.slice(0, lastP + 4) + externalRefHtml + result.slice(lastP + 4)
-        injected.push(linkHtml)
-      }
-    }
+  for (const target of targets) {
+    const anchor = (target.anchor || '').trim()
+    const href = (target.href || '').trim()
+    if (!anchor || !href) continue
+
+    const key = normalizeSlug(href)
+    if (!key || key === self || seen.has(key)) continue
+
+    seen.add(key)
+    result.push({ anchor, href })
   }
+
+  return result
+}
+
+function normalizeSlug(value: string): string {
+  return (value || '').trim().replace(/^\/+/, '').replace(/\/+$/, '').toLowerCase()
+}
+
+function injectExternalLinks(html: string, links: ExternalLink[], injected: string[]): string {
+  const render = (link: ExternalLink) => (text: string) =>
+    `<a href="${escapeAttribute(link.url)}" target="_blank" rel="noopener noreferrer" title="${escapeAttribute(link.relevance)}">${text}</a>`
+
+  const { htmlContent, injectedLinks } = injectAnchors(
+    html,
+    links.map((link) => ({ anchor: link.anchor, key: link.url, render: render(link) }))
+  )
+  injected.push(...injectedLinks)
+
+  // Sources whose anchor phrase is nowhere in the copy still have to be cited:
+  // the generator was asked for them, and a source that is not linked is not a
+  // source. They go at the end rather than being forced into a sentence.
+  let result = htmlContent
+  for (const link of links) {
+    if (injectedLinks.some((anchorHtml) => anchorHtml.includes(`href="${escapeAttribute(link.url)}"`))) continue
+
+    const anchorHtml = render(link)(escapeAttribute(link.anchor))
+    const lastP = result.lastIndexOf('</p>')
+    if (lastP === -1) continue
+
+    result = `${result.slice(0, lastP + 4)}\n<p class="external-ref">Source : ${anchorHtml}</p>${result.slice(lastP + 4)}`
+    injected.push(anchorHtml)
+  }
+
   return result
 }
 
 function buildChildNavigationBlock(links: InternalLinkTarget[], siteUrl: string): string {
   const baseUrl = siteUrl.replace(/\/$/, '')
   const listItems = links
-    .map((l) => `<li><a href="${baseUrl}${l.href}">${l.anchor}</a></li>`)
+    .map((l) => `<li><a href="${escapeAttribute(baseUrl + l.href)}">${escapeAttribute(l.anchor)}</a></li>`)
     .join('\n    ')
   return `
 <nav class="related-pages" aria-label="Pages associées">
@@ -152,11 +222,11 @@ function buildPillarHubBlock(graph: LinkGraph, siteUrl: string): string {
   const baseUrl = siteUrl.replace(/\/$/, '')
   const cards = graph.children
     .map((child) => {
-      const typeLabel = PAGE_TYPE_LABELS[child.pageType] || child.pageType
+      const typeLabel = PUBLIC_PAGE_TYPE_LABELS[child.pageType] || child.pageType
       return `<li>
-      <a href="${baseUrl}/${child.slug}" class="hub-link">
-        <span class="hub-type">${typeLabel}</span>
-        <span class="hub-title">${child.title}</span>
+      <a href="${escapeAttribute(`${baseUrl}/${child.slug}`)}" class="hub-link">
+        <span class="hub-type">${escapeAttribute(typeLabel)}</span>
+        <span class="hub-title">${escapeAttribute(child.title)}</span>
       </a>
     </li>`
     })
@@ -171,7 +241,19 @@ function buildPillarHubBlock(graph: LinkGraph, siteUrl: string): string {
 </section>`
 }
 
-const PAGE_TYPE_LABELS: Record<PageType, string> = {
+/**
+ * Libellés destinés aux VISITEURS du site du client, pas à l'opérateur.
+ *
+ * Volontairement distincts de `PAGE_TYPE_LABELS` (lib/types.ts), qui nomme les
+ * mêmes types pour le tableau de bord : « Pilier », « Enfant », « Local pack ».
+ * Ces mots-là décrivent une mécanique interne et n'ont aucun sens pour
+ * quelqu'un qui lit la page — les fusionner au nom du DRY afficherait
+ * « Enfant » dans le maillage d'un site en production.
+ *
+ * Deux publics, deux vocabulaires. Le nom porte la distinction pour que la
+ * prochaine passe de déduplication ne les rapproche pas par erreur.
+ */
+const PUBLIC_PAGE_TYPE_LABELS: Record<PageType, string> = {
   pillar: 'Guide complet',
   child: 'Détail',
   alternative: 'Alternatives',
@@ -196,8 +278,4 @@ function insertBeforeCta(html: string, block: string): string {
     return html.slice(0, lastSection) + block + '\n' + html.slice(lastSection)
   }
   return html + block
-}
-
-function escapeRegExp(value: string) {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }

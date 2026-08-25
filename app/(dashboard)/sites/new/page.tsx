@@ -1,31 +1,45 @@
 'use client'
 
 import { useState } from 'react'
-import { Globe2, Code2, CheckCircle, ArrowRight, Eye, EyeOff, Globe } from 'lucide-react'
+import {
+  ArrowRight, CheckCircle2, Code2, Eye, EyeOff, Globe, Globe2, PlugZap, type LucideIcon,
+} from 'lucide-react'
 import { useRouter } from 'next/navigation'
-import { PageHeader, FormField } from '@/components/ui'
+import { Button, FormField, IconBox, Notice, PageHeader } from '@/components/ui'
+import type { SiteType } from '@/lib/types'
 
-type SiteType = 'wordpress' | 'nextjs'
-
-const SITE_TYPES = [
-  { type: 'wordpress' as SiteType, icon: Globe2, label: 'WordPress', desc: 'REST API + App Password', color: '#6366f1' },
-  { type: 'nextjs' as SiteType, icon: Code2, label: 'Next.js', desc: 'GitHub API + MDX', color: '#a855f7' },
+/**
+ * Both connectors are alive: WordPress publishes through the REST API with an
+ * application password, Next.js publishes by committing a page to a GitHub
+ * repository. Neither is legacy — the form simply asks for the credentials the
+ * chosen one needs.
+ */
+const SITE_TYPES: Array<{ type: SiteType; icon: LucideIcon; label: string; desc: string; color: string }> = [
+  { type: 'wordpress', icon: Globe2, label: 'WordPress', desc: 'API REST + Application Password', color: 'var(--series-1)' },
+  { type: 'nextjs', icon: Code2, label: 'Next.js', desc: 'Publication par commit GitHub', color: 'var(--series-7)' },
 ]
 
 export default function NewSitePage() {
   const router = useRouter()
   const [siteType, setSiteType] = useState<SiteType>('wordpress')
-  const [loading, setLoading] = useState(false)
+  const [saving, setSaving] = useState(false)
   const [testing, setTesting] = useState(false)
-  const [testResult, setTestResult] = useState<{ ok: boolean; message: string } | null>(null)
+  const [testResult, setTestResult] = useState<{ ok: boolean; message: string; details?: string[] } | null>(null)
+  const [error, setError] = useState('')
   const [showPassword, setShowPassword] = useState(false)
   const [form, setForm] = useState({
     name: '', url: '', wp_username: '', wp_app_password: '',
-    github_repo: '', github_token: '', github_mdx_path: 'content/pages',
+    github_repo: '', github_token: '', github_branch: '',
+    // On by default whenever a branch is set. Off was the old behaviour and it
+    // meant every published page sat in a branch nobody deployed.
+    auto_promote: true,
   })
 
   const handle = (e: React.ChangeEvent<HTMLInputElement>) =>
-    setForm(p => ({ ...p, [e.target.name]: e.target.value }))
+    setForm((prev) => ({
+      ...prev,
+      [e.target.name]: e.target.type === 'checkbox' ? e.target.checked : e.target.value,
+    }))
 
   const testConnection = async () => {
     setTesting(true)
@@ -37,7 +51,18 @@ export default function NewSitePage() {
         body: JSON.stringify({ type: siteType, ...form }),
       })
       const data = await res.json()
-      setTestResult({ ok: data.success, message: data.siteName || data.error })
+
+      // The site NAME is not a diagnosis.
+      //
+      // `data.siteName || data.error` put the name first, so a connection that
+      // reached the site and was refused by it displayed « Connexion refusée »
+      // followed by the name of the site — the one thing that had worked. The
+      // reason, which is the whole point of this button, never appeared.
+      setTestResult(
+        data.success
+          ? { ok: true, message: data.siteName || 'Connexion établie', details: data.details }
+          : { ok: false, message: data.error || 'Réponse inattendue', details: data.details }
+      )
     } catch {
       setTestResult({ ok: false, message: 'Impossible de joindre le serveur' })
     } finally {
@@ -45,122 +70,205 @@ export default function NewSitePage() {
     }
   }
 
+  /**
+   * The response used to be discarded: a rejected payload (missing credentials,
+   * duplicate URL) still navigated to /sites, where the founder looked for a
+   * site that had never been created.
+   */
   const submit = async () => {
-    setLoading(true)
+    setSaving(true)
+    setError('')
     try {
-      await fetch('/api/sites', {
+      const res = await fetch('/api/sites', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ type: siteType, ...form }),
       })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setError(data.error || `Enregistrement refusé (erreur ${res.status})`)
+        return
+      }
       router.push('/sites')
     } catch {
-      setLoading(false)
+      setError('Impossible de joindre le serveur')
+    } finally {
+      setSaving(false)
     }
   }
 
+  // Testing needs the credentials; saving also needs a name to file the site under.
+  const credentialsFilled = siteType === 'wordpress'
+    ? Boolean(form.url && form.wp_username && form.wp_app_password)
+    : Boolean(form.url && form.github_repo && form.github_token)
+  const complete = credentialsFilled && Boolean(form.name)
+
   return (
-    <div style={{ maxWidth: 640 }}>
+    <div style={{ maxWidth: 680 }}>
       <PageHeader
         icon={Globe}
-        iconColor="#6366f1"
-        badge="Sites"
+        badge="Étape 1"
         title="Ajouter un site"
-        subtitle="Connectez un site WordPress ou Next.js pour y publier vos pages SEO."
+        subtitle="Connectez le site qui recevra les pages générées. Les identifiants restent côté serveur : ils ne repartent jamais dans une réponse HTTP."
+        backHref="/sites"
       />
 
-      {/* Type selector */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem', marginBottom: '1.5rem' }}>
-        {SITE_TYPES.map(({ type, icon: Icon, label, desc, color }) => (
-          <button
-            key={type}
-            onClick={() => setSiteType(type)}
-            style={{
-              background: siteType === type ? `${color}15` : 'var(--bg-card)',
-              border: `1px solid ${siteType === type ? color : 'var(--border)'}`,
-              borderRadius: 12, padding: '1rem', cursor: 'pointer',
-              display: 'flex', gap: '0.75rem', alignItems: 'center', textAlign: 'left', transition: 'all 0.2s',
-            }}
-          >
-            <Icon size={22} color={siteType === type ? color : 'var(--text-muted)'} />
-            <div>
-              <div style={{ fontWeight: 700, fontSize: '0.9rem', color: siteType === type ? 'var(--text-primary)' : 'var(--text-secondary)' }}>{label}</div>
-              <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{desc}</div>
-            </div>
-            {siteType === type && <CheckCircle size={16} color={color} style={{ marginLeft: 'auto' }} />}
-          </button>
-        ))}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-3)', marginBottom: 'var(--space-5)' }}>
+        {SITE_TYPES.map(({ type, icon: Icon, label, desc, color }) => {
+          const selected = siteType === type
+          return (
+            <button
+              key={type}
+              type="button"
+              onClick={() => setSiteType(type)}
+              aria-pressed={selected}
+              className="card card--interactive"
+              style={{
+                display: 'flex', gap: 'var(--space-3)', alignItems: 'center', textAlign: 'left',
+                padding: 'var(--space-4)',
+                borderColor: selected ? 'var(--accent)' : 'var(--line)',
+                boxShadow: selected ? '0 0 0 1px var(--accent-wash)' : 'var(--shadow-xs)',
+              }}
+            >
+              <IconBox icon={Icon} color={color} boxSize={34} size={17} />
+              <span style={{ minWidth: 0 }}>
+                <span style={{ display: 'block', fontWeight: 600, color: 'var(--ink-primary)', fontSize: 'var(--fs-md)' }}>{label}</span>
+                <span className="meta">{desc}</span>
+              </span>
+              {selected && <CheckCircle2 size={16} color="var(--accent)" style={{ marginLeft: 'auto', flexShrink: 0 }} />}
+            </button>
+          )
+        })}
       </div>
 
-      {/* Form */}
-      <div className="glass-card" style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-        <FormField label="Nom du site">
-          <input suppressHydrationWarning name="name" value={form.name} onChange={handle} className="input" placeholder="BoxnFit – Site principal" />
-        </FormField>
-
-        <FormField label="URL du site">
-          <input suppressHydrationWarning name="url" value={form.url} onChange={handle} className="input" placeholder="https://boxnfit.fr" />
-        </FormField>
-
-        {siteType === 'wordpress' && (<>
-          <FormField label="Nom d'utilisateur WordPress">
-            <input suppressHydrationWarning name="wp_username" value={form.wp_username} onChange={handle} className="input" placeholder="admin" />
+      <div className="panel">
+        <div className="panel__body" style={{ display: 'grid', gap: 'var(--space-4)' }}>
+          <FormField label="Nom du site" required htmlFor="site-name">
+            <input suppressHydrationWarning id="site-name" name="name" value={form.name} onChange={handle} className="input" placeholder="BoxnFit – Site principal" />
           </FormField>
-          <FormField label="Application Password" hint="← WordPress → Utilisateurs → Votre profil → Application Passwords">
-            <div style={{ position: 'relative' }}>
-              <input
-                suppressHydrationWarning
-                name="wp_app_password"
-                type={showPassword ? 'text' : 'password'}
-                value={form.wp_app_password}
-                onChange={handle}
-                className="input"
-                placeholder="xxxx xxxx xxxx xxxx xxxx xxxx"
-                style={{ paddingRight: '2.5rem' }}
-              />
-              <button
-                type="button"
-                onClick={() => setShowPassword(p => !p)}
-                style={{ position: 'absolute', right: '0.75rem', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}
+
+          <FormField label="URL du site" required htmlFor="site-url" hint="avec https://">
+            <input suppressHydrationWarning id="site-url" name="url" value={form.url} onChange={handle} className="input" placeholder="https://boxnfit.fr" />
+          </FormField>
+
+          {siteType === 'wordpress' && (
+            <>
+              <FormField label="Nom d’utilisateur WordPress" required htmlFor="wp-user">
+                <input suppressHydrationWarning id="wp-user" name="wp_username" value={form.wp_username} onChange={handle} className="input" placeholder="admin" />
+              </FormField>
+              <FormField
+                label="Application Password"
+                required
+                htmlFor="wp-password"
+                hint="WordPress → Utilisateurs → Profil → Application Passwords"
               >
-                {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
-              </button>
-            </div>
-          </FormField>
-        </>)}
+                <div style={{ position: 'relative' }}>
+                  <input
+                    suppressHydrationWarning
+                    id="wp-password"
+                    name="wp_app_password"
+                    type={showPassword ? 'text' : 'password'}
+                    value={form.wp_app_password}
+                    onChange={handle}
+                    className="input"
+                    placeholder="xxxx xxxx xxxx xxxx xxxx xxxx"
+                    style={{ paddingRight: '2.5rem' }}
+                  />
+                  <button
+                    type="button"
+                    className="btn-icon"
+                    onClick={() => setShowPassword((prev) => !prev)}
+                    aria-label={showPassword ? 'Masquer le mot de passe' : 'Afficher le mot de passe'}
+                    style={{ position: 'absolute', right: 4, top: '50%', transform: 'translateY(-50%)', border: 0 }}
+                  >
+                    {showPassword ? <EyeOff size={15} /> : <Eye size={15} />}
+                  </button>
+                </div>
+              </FormField>
+            </>
+          )}
 
-        {siteType === 'nextjs' && (<>
-          <FormField label="Repo GitHub (format: owner/repo)">
-            <input suppressHydrationWarning name="github_repo" value={form.github_repo} onChange={handle} className="input" placeholder="moncompte/mon-site-nextjs" />
-          </FormField>
-          <FormField label="GitHub Personal Access Token">
-            <input suppressHydrationWarning name="github_token" type="password" value={form.github_token} onChange={handle} className="input" placeholder="ghp_xxxxxxxxxxxx" />
-          </FormField>
-          <FormField label="Dossier MDX (dans le repo)">
-            <input suppressHydrationWarning name="github_mdx_path" value={form.github_mdx_path} onChange={handle} className="input" placeholder="content/pages" />
-          </FormField>
-        </>)}
+          {siteType === 'nextjs' && (
+            <>
+              <FormField label="Dépôt GitHub" required htmlFor="gh-repo" hint="format owner/repo">
+                <input suppressHydrationWarning id="gh-repo" name="github_repo" value={form.github_repo} onChange={handle} className="input" placeholder="moncompte/mon-site-nextjs" />
+              </FormField>
+              <FormField label="Personal Access Token" required htmlFor="gh-token">
+                <input suppressHydrationWarning id="gh-token" name="github_token" type="password" value={form.github_token} onChange={handle} className="input" placeholder="ghp_xxxxxxxxxxxx" />
+              </FormField>
+              <FormField
+                label="Branche cible"
+                htmlFor="gh-branch"
+                hint="recommandé"
+              >
+                <input suppressHydrationWarning id="gh-branch" name="github_branch" value={form.github_branch} onChange={handle} className="input" placeholder="seo-engine" />
+                <p className="meta" style={{ marginTop: 'var(--space-2)' }}>
+                  Laissée vide, les pages sont commitées sur la branche par défaut — en production, sans relecture ni
+                  vérification de build. Une branche dédiée permet de relire avant de fusionner.
+                </p>
+              </FormField>
 
-        {testResult && (
-          <div style={{
-            padding: '0.75rem 1rem', borderRadius: 8, fontSize: '0.875rem',
-            background: testResult.ok ? 'rgba(16,185,129,0.1)' : 'rgba(239,68,68,0.1)',
-            border: `1px solid ${testResult.ok ? 'rgba(16,185,129,0.3)' : 'rgba(239,68,68,0.3)'}`,
-            color: testResult.ok ? '#10b981' : '#ef4444',
-          }}>
-            {testResult.ok ? '✅ Connexion réussie : ' : '❌ Erreur : '}{testResult.message}
-          </div>
-        )}
+              {form.github_branch.trim() !== '' && (
+                <FormField label="Mise en ligne" htmlFor="auto-promote">
+                  <label
+                    htmlFor="auto-promote"
+                    style={{ display: 'flex', gap: 'var(--space-2)', alignItems: 'flex-start', cursor: 'pointer' }}
+                  >
+                    <input
+                      suppressHydrationWarning
+                      id="auto-promote"
+                      name="auto_promote"
+                      type="checkbox"
+                      checked={form.auto_promote}
+                      onChange={handle}
+                      style={{ marginTop: 3 }}
+                    />
+                    <span>Fusionner automatiquement dans la branche de production après publication</span>
+                  </label>
+                  {/*
+                    Says what happens either way. Leaving this off silently is
+                    what made every page published so far invisible: the branch
+                    collected commits while the host kept deploying another one.
+                  */}
+                  <p className="meta" style={{ marginTop: 'var(--space-2)' }}>
+                    {form.auto_promote
+                      ? `Chaque page publiée sera reportée sur la branche par défaut, donc déployée. La branche « ${form.github_branch.trim()} » garde la trace et permet de revenir en arrière.`
+                      : `Les pages resteront sur « ${form.github_branch.trim()} » jusqu’à une fusion manuelle. Tant qu’elle n’a pas lieu, elles ne sont visibles nulle part.`}
+                  </p>
+                </FormField>
+              )}
+            </>
+          )}
 
-        <div style={{ display: 'flex', gap: '0.75rem', marginTop: '0.5rem' }}>
-          <button onClick={testConnection} disabled={testing} className="btn-ghost">
-            {testing ? <><div className="spinner" /> Test...</> : '🔌 Tester la connexion'}
-          </button>
-          <button onClick={submit} disabled={loading || !form.name || !form.url} className="btn-primary" style={{ flex: 1, justifyContent: 'center' }}>
-            {loading ? <><div className="spinner" /> Sauvegarde...</> : <><ArrowRight size={15} /> Enregistrer le site</>}
-          </button>
+          {testResult && (
+            <Notice
+              inline
+              tone={testResult.ok ? 'good' : 'critical'}
+              title={testResult.ok ? 'Connexion réussie' : 'Connexion refusée'}
+              body={[testResult.message, ...(testResult.details ?? [])]
+                .filter((line, index, all) => line && all.indexOf(line) === index)
+                .join(' · ')}
+            />
+          )}
+
+          {error && <Notice inline tone="critical" title="Site non enregistré" body={error} />}
+        </div>
+
+        <div className="panel__footer" style={{ display: 'flex', gap: 'var(--space-3)', alignItems: 'center' }}>
+          <Button variant="ghost" icon={PlugZap} loading={testing} onClick={testConnection} disabled={!credentialsFilled}>
+            Tester la connexion
+          </Button>
+          <div style={{ flex: 1 }} />
+          <Button iconRight={ArrowRight} loading={saving} onClick={submit} disabled={!complete}>
+            Enregistrer le site
+          </Button>
         </div>
       </div>
     </div>
   )
 }
+
+// The third copy of the notice — the one whose own comment said "same shape as
+// the notice used on the Google page" — is gone. Both call sites above pass
+// `inline`, which is what reproduces the `.inset` frame this copy hard-coded:
+// they sit inside a `.panel__body`, where a second card frame would nest.

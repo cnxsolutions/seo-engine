@@ -1,5 +1,6 @@
 import { crawlWebsite, type CrawledPage, type CrawlResult } from './crawler'
 import { generateJson } from '@/lib/ai/provider'
+import { getGscPlanningSignals, type GscPlanningSignals } from '@/lib/google/performance'
 import type { AnalysisRunData } from '@/lib/types'
 
 export interface CompetitiveAnalysisOptions {
@@ -8,6 +9,14 @@ export interface CompetitiveAnalysisOptions {
   businessType?: string
   businessName?: string
   targetCities?: string[]
+  /**
+   * When given, the gap analysis is confronted with what the site already ranks
+   * on. Without it a "missing keyword" can be a query the site is third on —
+   * and the plan then opens a competing page against its own best asset.
+   */
+  siteId?: string
+  /** Pre-loaded signals; skips the read when the caller already has them. */
+  gscSignals?: GscPlanningSignals | null
 }
 
 export async function analyzeCompetitors(opts: CompetitiveAnalysisOptions): Promise<AnalysisRunData> {
@@ -46,6 +55,8 @@ export async function analyzeCompetitors(opts: CompetitiveAnalysisOptions): Prom
     pages: summarizePages(opts.siteCrawl.pages),
   }
 
+  const signals = await resolveSignals(opts)
+
   const gapAnalysis = await buildGapAnalysisWithAI({
     sitePages: opts.siteCrawl.pages,
     siteData,
@@ -53,9 +64,43 @@ export async function analyzeCompetitors(opts: CompetitiveAnalysisOptions): Prom
     businessType: opts.businessType,
     businessName: opts.businessName,
     targetCities: opts.targetCities,
+    signals,
   })
 
-  return { site: siteData, competitors, gapAnalysis }
+  return { site: siteData, competitors, gapAnalysis: applyOwnedQueries(gapAnalysis, signals) }
+}
+
+async function resolveSignals(opts: CompetitiveAnalysisOptions): Promise<GscPlanningSignals | null> {
+  const provided = opts.gscSignals !== undefined
+    ? opts.gscSignals
+    : opts.siteId
+      ? await getGscPlanningSignals(opts.siteId).catch(() => null)
+      : null
+
+  return provided && provided.available ? provided : null
+}
+
+/**
+ * A gap is only a gap if the site is not already there.
+ *
+ * `missingKeywords` feeds the campaign seed keywords (see the analysis-runs
+ * plan route), so a query the site already owns coming back as "missing" is how
+ * a second page gets written against the first — the exact cannibalization the
+ * Search Console data exposes.
+ */
+function applyOwnedQueries(
+  gapAnalysis: AnalysisRunData['gapAnalysis'],
+  signals: GscPlanningSignals | null
+): AnalysisRunData['gapAnalysis'] {
+  if (!signals) return gapAnalysis
+
+  const owned = new Set(signals.blockedQueries.map((query) => query.toLowerCase().trim()))
+  if (owned.size === 0) return gapAnalysis
+
+  return {
+    ...gapAnalysis,
+    missingKeywords: gapAnalysis.missingKeywords.filter((keyword) => !owned.has(keyword.toLowerCase().trim())),
+  }
 }
 
 export function summarizePages(pages: CrawledPage[]): AnalysisRunData['site']['pages'] {
@@ -110,10 +155,11 @@ interface GapAnalysisInput {
   businessType?: string
   businessName?: string
   targetCities?: string[]
+  signals: GscPlanningSignals | null
 }
 
 async function buildGapAnalysisWithAI(input: GapAnalysisInput): Promise<AnalysisRunData['gapAnalysis']> {
-  const { sitePages, siteData, competitors, businessType, businessName, targetCities } = input
+  const { sitePages, siteData, competitors, businessType, businessName, targetCities, signals } = input
 
   const siteSummary = siteData.pages.slice(0, 20).map((p) => `- ${p.path}: "${p.title}" (${p.wordCount} mots, kw: ${p.keywords.slice(0, 3).join(', ')})`).join('\n')
   const competitorSummary = competitors.map((c) => {
@@ -139,7 +185,7 @@ ${competitorSummary}
 - Site a FAQ: ${siteHasFaq ? 'oui' : 'non'}
 - Site a Schema.org: ${siteHasSchema ? 'oui' : 'non'}
 - Signaux geo concurrents: ${localSignals.join(', ') || 'aucun'}
-
+${buildOwnPerformanceSection(signals)}
 ## CONSIGNES:
 Analyse les gaps entre le site et ses concurrents. Identifie:
 1. Les mots-cles/expressions SEO que les concurrents ciblent mais PAS le site (expressions de 2-4 mots pertinentes pour le business, pas des mots generiques)
@@ -175,6 +221,36 @@ Reponds en JSON avec cette structure exacte:
   } catch {
     return buildGapAnalysisFallback(sitePages, competitors, localSignals, siteHasFaq, siteHasSchema)
   }
+}
+
+/**
+ * Empty string when Search Console has nothing to say, so a site without a
+ * Google connection gets the prompt it always got.
+ */
+function buildOwnPerformanceSection(signals: GscPlanningSignals | null): string {
+  if (!signals) return ''
+
+  const lines: string[] = ['', '## PERFORMANCE REELLE DU SITE (Search Console, pas une estimation):']
+
+  if (signals.strikingDistance.length > 0) {
+    lines.push(
+      `- Deja positionne 5-20 sur: ${signals.strikingDistance.slice(0, 12).map((o) => `"${o.query}" (pos. ${o.position})`).join(', ')}`
+    )
+  }
+
+  if (signals.cannibalized.length > 0) {
+    lines.push(
+      `- Cannibalisation interne sur: ${signals.cannibalized.slice(0, 8).map((c) => `"${c.query}" (${c.pages.length} pages)`).join(', ')}`
+    )
+  }
+
+  if (signals.blockedQueries.length > 0) {
+    lines.push(
+      `- Ne propose PAS ces expressions en missingKeywords, le site les tient deja ou s'y auto-concurrence: ${signals.blockedQueries.slice(0, 30).join(', ')}`
+    )
+  }
+
+  return lines.length > 2 ? `${lines.join('\n')}\n` : ''
 }
 
 function buildGapAnalysisFallback(

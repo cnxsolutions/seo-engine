@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { analyzeCompetitors } from '@/lib/analyzer/competitive'
-import { crawlWebsite, type CrawledPage, type CrawlResult } from '@/lib/analyzer/crawler'
+import { crawlWebsite } from '@/lib/analyzer/crawler'
+import { toSitePagePayloads } from '@/lib/analyzer/to-site-pages'
 import { createAnalysisRun, getSiteById, upsertSitePages } from '@/lib/db'
+import { indexSitePages } from '@/src/adapters/rag/VectorIndexingService'
 
 export async function POST(req: NextRequest) {
   try {
@@ -44,7 +46,34 @@ export async function POST(req: NextRequest) {
     }
 
     if (site?.id) {
-      await upsertSitePages(site.id, toSitePagePayload(site.id, siteCrawl) as Parameters<typeof upsertSitePages>[1]).catch(() => null)
+      // L'echec est JOURNALISE, plus avale. `.catch(() => null)` a masque
+      // pendant toute la vie du produit un echec d'upsert qui laissait
+      // `site_pages` vide : l'analyse repondait 200, l'operateur voyait un
+      // succes, et l'inventaire ne se remplissait jamais. Un inventaire vide
+      // reste non bloquant — c'est la regle du chantier — mais il cesse d'etre
+      // silencieux.
+      await upsertSitePages(
+        site.id,
+        toSitePagePayloads(site.id, siteCrawl) as Parameters<typeof upsertSitePages>[1]
+      ).catch((error: unknown) => {
+        console.error(
+          `[analysis-runs] site_pages non ecrit site=${site.id}:`,
+          error instanceof Error ? error.message : error
+        )
+        return null
+      })
+
+      // Feed the vector store. THIS is the crawl path the UI actually calls
+      // (app/(dashboard)/strategy/new/page.tsx posts here, not to /api/analyze),
+      // so without this line the index stays empty no matter how many crawls run.
+      //
+      // `indexSitePages` never throws by contract and is nearly free when
+      // nothing changed (documents are skipped by content hash), so it is
+      // awaited without a try/catch and must never fail the analysis run.
+      const indexing = await indexSitePages(site.id, { source: 'crawl' })
+      if (indexing.errors.length > 0) {
+        console.warn(`[analysis-runs] indexation partielle site=${site.id}:`, indexing.errors.join(' | '))
+      }
     }
 
     const analysisData = await analyzeCompetitors({
@@ -53,6 +82,10 @@ export async function POST(req: NextRequest) {
       businessType,
       businessName,
       targetCities: Array.isArray(targetCities) ? targetCities : splitList(targetCities),
+      // Lets the competitive analysis drop "missing" keywords the site already
+      // ranks for — those seed campaigns, so a false gap opens a page against
+      // the site's own best asset.
+      siteId: site?.id || siteId || undefined,
     })
 
     const analysisRun = await createAnalysisRun({
@@ -92,25 +125,4 @@ function normalizeCompetitorUrls(value: unknown) {
   return splitList(value).slice(0, 5).map(normalizeUrl)
 }
 
-function toSitePagePayload(siteId: string, crawlResult: CrawlResult) {
-  return crawlResult.pages.map((page: CrawledPage) => ({
-    site_id: siteId,
-    url: page.url,
-    path: page.path,
-    title: page.title || null,
-    meta_description: page.metaDescription || null,
-    h1: page.h1 || null,
-    h2s: page.h2s,
-    word_count: page.wordCount,
-    focus_keyword: page.keywords[0] || null,
-    keywords: page.keywords,
-    internal_links: page.internalLinks.slice(0, 20),
-    external_links: page.externalLinks.slice(0, 10),
-    has_schema: page.hasSchema,
-    schema_types: page.schemaTypes,
-    has_faq: page.hasFaq,
-    has_local_business: page.hasLocalBusiness,
-    geo_signals: page.geoSignals,
-    crawled_at: crawlResult.crawledAt,
-  }))
-}
+

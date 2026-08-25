@@ -4,21 +4,59 @@
 // Validates content quality metrics
 // ─────────────────────────────────────────────────────────────────────────────
 
+import {
+  computeFrenchReadability,
+  countSyllables,
+  type FrenchReadabilityLabel,
+} from './french-readability'
+import {
+  countImages,
+  extractHeadingOutline,
+  extractLinks,
+  splitSentences,
+  stripHtmlToText,
+  tokenizeWords,
+  type HeadingNode,
+} from '@/src/core/domain/text/text-utils'
+
+/**
+ * SEVERITY POLICY — this validator gates publication, so severity is a product
+ * decision, not a detail:
+ *
+ *   ERROR (blocks)   an article shipped with this defect cannot rank at all:
+ *                    no title, no H1, thin content.
+ *   WARNING (logs)   the article ranks worse than it could, but shipping it is
+ *                    still better than shipping nothing: readability, images,
+ *                    internal links, slightly-off lengths.
+ *
+ * Anything ambiguous is a warning. A gate that publishes nothing is a dead
+ * engine.
+ */
+
 /**
  * Configuration de validation qualité
  */
 export interface ContentQualityConfig {
+  /** Hard floor below which the page is thin content. Blocking. */
   minWordCount?: number
+  /** Editorial target; falling short only warns. */
+  targetWordCount?: number
+  /** Upper bound; exceeding it only warns (long-form is not a defect). */
   maxWordCount?: number
   minParagraphCount?: number
   minHeadingCount?: number
   requiredHeadings?: string[]
+  /** Blocking: a body with no H1 has no declared subject. */
+  requireH1?: boolean
   minImageCount?: number
   imageAltRequired?: boolean
   minInternalLinks?: number
   minExternalLinks?: number
   checkReadability?: boolean
+  /** French Kandel & Moles score below which we warn. Default 50. */
   minReadabilityScore?: number
+  /** French score below which the text is flagged as hard to read. Default 30. */
+  readabilityFloor?: number
   checkSpelling?: boolean
   checkGrammar?: boolean
 }
@@ -91,6 +129,13 @@ export interface ContentMetrics {
   averageSentencePerParagraph: number
   fleschReadingEase?: number
   fleschKincaidGrade?: number
+  // ─── Added in wave 2 (all optional: purely additive for consumers) ───
+  syllableCount?: number
+  averageSyllablePerWord?: number
+  readabilityLabel?: FrenchReadabilityLabel
+  headingOutline?: HeadingNode[]
+  /** Headings whose level jumps more than one step below its parent. */
+  headingLevelSkips?: number
 }
 
 /**
@@ -113,16 +158,19 @@ export class ContentQualityValidator {
   constructor(config: ContentQualityConfig = {}) {
     this.config = {
       minWordCount: 300,
+      targetWordCount: 600,
       maxWordCount: 5000,
       minParagraphCount: 3,
       minHeadingCount: 2,
       requiredHeadings: ['h2'],
+      requireH1: true,
       minImageCount: 1,
       imageAltRequired: true,
       minInternalLinks: 1,
       minExternalLinks: 0,
       checkReadability: true,
-      minReadabilityScore: 60,
+      minReadabilityScore: 50,
+      readabilityFloor: 30,
       checkSpelling: false,
       checkGrammar: false,
       ...config,
@@ -173,63 +221,46 @@ export class ContentQualityValidator {
   // ─── Private Methods ────────────────────────────────────────────────
 
   private parseContent(html: string): ContentMetrics {
-    // Compter les mots
-    const text = html.replace(/<[^>]*>/g, ' ')
-    const words = text.split(/\s+/).filter(w => w.length > 0)
-    const wordCount = words.length
+    const text = stripHtmlToText(html)
 
-    // Compter les caractères
+    const words = tokenizeWords(text)
+    const wordCount = words.length
     const characterCount = text.length
 
-    // Compter les paragraphes
-    const paragraphs = html.split(/<\/p>|<\/div>/gi).filter(p => p.trim().length > 0)
-    const paragraphCount = paragraphs.length
+    // Paragraphs: count the opening tags rather than splitting on the closing
+    // ones, which used to count trailing whitespace as a paragraph.
+    const paragraphMatches = html.match(/<p\b[^>]*>/gi) || []
+    const paragraphCount = paragraphMatches.length > 0
+      ? paragraphMatches.length
+      : text.split(/\n{2,}/).filter(block => block.trim().length > 0).length
 
-    // Compter les phrases (approximatif)
-    const sentences = text.split(/[.!?]+/).filter(s => s.trim().length > 10)
-    const sentenceCount = sentences.length
+    // Sentences: every non-empty fragment counts. Dropping fragments shorter
+    // than 10 characters (the previous rule) silently inflated the average
+    // sentence length of any text with short sentences.
+    const sentenceCount = splitSentences(text).length
 
-    // Compter les headings
-    const h1Matches = html.match(/<h1[^>]*>/gi) || []
-    const h2Matches = html.match(/<h2[^>]*>/gi) || []
-    const h3Matches = html.match(/<h3[^>]*>/gi) || []
-    const headingCount = h1Matches.length + h2Matches.length + h3Matches.length
+    const headingOutline = extractHeadingOutline(html)
+    const h1Count = headingOutline.filter(h => h.level === 1).length
+    const h2Count = headingOutline.filter(h => h.level === 2).length
+    const h3Count = headingOutline.filter(h => h.level === 3).length
+    const headingCount = headingOutline.length
+    const headingLevelSkips = countHeadingLevelSkips(headingOutline)
 
-    // Compter les images
-    const imgMatches = html.match(/<img[^>]*>/gi) || []
-    const imageCount = imgMatches.length
+    const images = countImages(html)
+    const links = extractLinks(html)
 
-    // Images avec alt
-    const imagesWithAlt = imgMatches.filter(img => img.includes('alt=')).length
+    const listCount = (html.match(/<(?:ul|ol)\b[^>]*>/gi) || []).length
+    const quoteCount = (html.match(/<blockquote\b[^>]*>/gi) || []).length
+    const codeBlockCount = (html.match(/<pre\b[^>]*>/gi) || []).length
 
-    // Compter les liens
-    const internalLinks = html.match(/href="\/[^"]+"/gi) || []
-    const externalLinks = html.match(/href="https?:\/\/[^"]+"/gi) || []
-    const internalLinkCount = internalLinks.length
-    const externalLinkCount = externalLinks.length
-
-    // Compter les listes
-    const listMatches = html.match(/<ul[^>]*>|<\/ul>|<ol[^>]*>|<\/ol>/gi) || []
-    const listCount = Math.floor(listMatches.length / 2)
-
-    // Compter les citations
-    const quoteMatches = html.match(/<blockquote[^>]*>/gi) || []
-    const quoteCount = quoteMatches.length
-
-    // Compter les blocs de code
-    const codeMatches = html.match(/<pre[^>]*>|<\/pre>|<code[^>]*>/gi) || []
-    const codeBlockCount = Math.floor(codeMatches.length / 2)
-
-    // Calculer les moyennes
     const averageWordPerSentence = sentenceCount > 0 ? wordCount / sentenceCount : 0
     const averageSentencePerParagraph = paragraphCount > 0 ? sentenceCount / paragraphCount : 0
 
-    // Flesch Reading Ease (approximatif pour français)
-    const { fleschReadingEase, fleschKincaidGrade } = this.calculateReadabilityMetrics(
-      text,
-      sentenceCount,
-      wordCount
-    )
+    const readability = computeFrenchReadability({
+      words: wordCount,
+      sentences: sentenceCount,
+      syllables: countSyllables(words),
+    })
 
     return {
       wordCount,
@@ -237,53 +268,25 @@ export class ContentQualityValidator {
       paragraphCount,
       sentenceCount,
       headingCount,
-      h1Count: h1Matches.length,
-      h2Count: h2Matches.length,
-      h3Count: h3Matches.length,
-      imageCount,
-      imagesWithAlt,
-      internalLinkCount,
-      externalLinkCount,
+      h1Count,
+      h2Count,
+      h3Count,
+      imageCount: images.total,
+      imagesWithAlt: images.withAlt,
+      internalLinkCount: links.internal.length,
+      externalLinkCount: links.external.length,
       listCount,
       quoteCount,
       codeBlockCount,
       averageWordPerSentence,
       averageSentencePerParagraph,
-      fleschReadingEase,
-      fleschKincaidGrade,
-    }
-  }
-
-  private calculateReadabilityMetrics(
-    text: string,
-    sentences: number,
-    words: number
-  ): { fleschReadingEase?: number; fleschKincaidGrade?: number } {
-    if (sentences === 0 || words === 0) {
-      return {}
-    }
-
-    // Approximation Flesch pour français (simplifié)
-    // Formule: 206.835 - 1.015 × (words/sentences) - 84.6 × (syllables/words)
-    const avgWordsPerSentence = words / sentences
-
-    // Syllables approximation: count vowel groups
-    const syllableCount = (text.match(/[aeiouyàâäéèêëïîôùûüÿœæ]/gi) || []).length
-    const avgSyllablesPerWord = words > 0 ? syllableCount / words : 0
-
-    // Flesch Reading Ease (adapté pour français)
-    const fleschReadingEase = Math.round(
-      206.835 - (1.015 * avgWordsPerSentence) - (84.6 * avgSyllablesPerWord)
-    )
-
-    // Flesch-Kincaid Grade Level
-    const fleschKincaidGrade = Math.round(
-      (0.39 * avgWordsPerSentence) + (11.8 * avgSyllablesPerWord) - 15.59
-    )
-
-    return {
-      fleschReadingEase: Math.max(0, Math.min(100, fleschReadingEase)),
-      fleschKincaidGrade: Math.max(0, fleschKincaidGrade),
+      fleschReadingEase: readability?.score,
+      fleschKincaidGrade: readability?.gradeLevel,
+      syllableCount: readability?.syllables,
+      averageSyllablePerWord: readability?.averageSyllablesPerWord,
+      readabilityLabel: readability?.label,
+      headingOutline,
+      headingLevelSkips,
     }
   }
 
@@ -293,51 +296,62 @@ export class ContentQualityValidator {
     warnings: ContentQualityWarning[],
     suggestions: QualitySuggestion[]
   ): void {
-    // Word count
-    if (metrics.wordCount < (this.config.minWordCount || 300)) {
+    const minWordCount = this.config.minWordCount ?? 300
+    const targetWordCount = this.config.targetWordCount ?? 600
+    const maxWordCount = this.config.maxWordCount ?? 5000
+
+    // ─── Blocking: thin content ───────────────────────────────────────
+    if (metrics.wordCount < minWordCount) {
       errors.push({
         category: 'structure',
         code: 'WORD_COUNT_TOO_LOW',
-        message: `Word count (${metrics.wordCount}) is below minimum (${this.config.minWordCount})`,
+        message: `Word count (${metrics.wordCount}) is below minimum (${minWordCount})`,
         value: metrics.wordCount,
-        threshold: this.config.minWordCount,
+        threshold: minWordCount,
+      })
+    } else if (metrics.wordCount < targetWordCount) {
+      warnings.push({
+        category: 'structure',
+        code: 'WORD_COUNT_BELOW_TARGET',
+        message: `Word count (${metrics.wordCount}) is below the editorial target (${targetWordCount})`,
+        suggestion: 'Develop the sections the brief asked for',
       })
     }
 
-    if (metrics.wordCount > (this.config.maxWordCount || 5000)) {
-      errors.push({
+    // Long-form content is not a defect: warn, never block.
+    if (metrics.wordCount > maxWordCount) {
+      warnings.push({
         category: 'structure',
         code: 'WORD_COUNT_TOO_HIGH',
-        message: `Word count (${metrics.wordCount}) exceeds maximum (${this.config.maxWordCount})`,
-        value: metrics.wordCount,
-        threshold: this.config.maxWordCount,
+        message: `Word count (${metrics.wordCount}) exceeds maximum (${maxWordCount})`,
+        suggestion: 'Consider splitting the page into a pillar and child pages',
       })
     }
 
-    // Paragraph count
-    if (metrics.paragraphCount < (this.config.minParagraphCount || 3)) {
+    // ─── Blocking: no H1 ──────────────────────────────────────────────
+    if (this.config.requireH1 && metrics.h1Count === 0) {
       errors.push({
         category: 'structure',
-        code: 'PARAGRAPH_COUNT_TOO_LOW',
-        message: `Paragraph count (${metrics.paragraphCount}) is below minimum (${this.config.minParagraphCount})`,
-        value: metrics.paragraphCount,
-        threshold: this.config.minParagraphCount,
+        code: 'MISSING_H1',
+        message: 'No H1 heading found in the content',
+        value: 0,
+        threshold: 1,
       })
     }
 
-    // Heading count
-    if (metrics.headingCount < (this.config.minHeadingCount || 2)) {
-      errors.push({
+    // Several H1 is a structural smell, not a ranking blocker: Google picks one.
+    if (metrics.h1Count > 1) {
+      warnings.push({
         category: 'structure',
-        code: 'HEADING_COUNT_TOO_LOW',
-        message: `Heading count (${metrics.headingCount}) is below minimum (${this.config.minHeadingCount})`,
-        value: metrics.headingCount,
-        threshold: this.config.minHeadingCount,
+        code: 'MULTIPLE_H1',
+        message: `Content has ${metrics.h1Count} H1 headings, expected exactly one`,
+        suggestion: 'Demote the extra H1 headings to H2',
       })
     }
 
-    // Required headings
-    if (this.config.requiredHeadings?.includes('h2') && metrics.h2Count === 0) {
+    // ─── Blocking: no section structure on a real article ─────────────
+    const requiresH2 = this.config.requiredHeadings?.includes('h2') ?? false
+    if (requiresH2 && metrics.h2Count === 0 && metrics.wordCount >= minWordCount) {
       errors.push({
         category: 'structure',
         code: 'MISSING_H2',
@@ -345,75 +359,115 @@ export class ContentQualityValidator {
         value: metrics.h2Count,
         threshold: 1,
       })
+    } else if (requiresH2 && metrics.h2Count === 0) {
+      warnings.push({
+        category: 'structure',
+        code: 'MISSING_H2',
+        message: 'No H2 heading found',
+        suggestion: 'Structure the content with H2 sections',
+      })
     }
 
-    // Image count
-    if (metrics.imageCount < (this.config.minImageCount || 1)) {
+    if (metrics.headingCount < (this.config.minHeadingCount ?? 2)) {
+      warnings.push({
+        category: 'structure',
+        code: 'HEADING_COUNT_TOO_LOW',
+        message: `Heading count (${metrics.headingCount}) is below recommended (${this.config.minHeadingCount})`,
+        suggestion: 'Break the content into more sections',
+      })
+    }
+
+    if ((metrics.headingLevelSkips ?? 0) > 0) {
+      warnings.push({
+        category: 'structure',
+        code: 'HEADING_LEVEL_SKIP',
+        message: `Heading hierarchy skips a level ${metrics.headingLevelSkips} time(s) (e.g. H2 followed by H4)`,
+        suggestion: 'Keep the outline contiguous: H1 → H2 → H3',
+      })
+    }
+
+    if (metrics.paragraphCount < (this.config.minParagraphCount ?? 3)) {
+      warnings.push({
+        category: 'structure',
+        code: 'PARAGRAPH_COUNT_TOO_LOW',
+        message: `Paragraph count (${metrics.paragraphCount}) is below recommended (${this.config.minParagraphCount})`,
+        suggestion: 'Split the text into readable paragraphs',
+      })
+    }
+
+    // ─── Images: warnings only ────────────────────────────────────────
+    //
+    // The generator returns image ALT SUGGESTIONS (`imageAlts`), it does not
+    // put <img> tags in `htmlContent`, and campaigns can disable images
+    // entirely. Blocking on a missing image would reject 100% of the pages the
+    // engine produces.
+    if (metrics.imageCount < (this.config.minImageCount ?? 1)) {
       warnings.push({
         category: 'structure',
         code: 'IMAGE_COUNT_LOW',
-        message: `Image count (${metrics.imageCount}) is below recommended (${this.config.minImageCount || 1})`,
+        message: `Image count (${metrics.imageCount}) is below recommended (${this.config.minImageCount ?? 1})`,
         suggestion: 'Add relevant images to improve engagement',
       })
-
-      if (metrics.imageCount === 0) {
-        errors.push({
-          category: 'structure',
-          code: 'NO_IMAGES',
-          message: 'No images found in content',
-          value: 0,
-        })
-      }
     }
 
-    // Images sans alt
     if (this.config.imageAltRequired && metrics.imageCount > 0) {
       const missingAlt = metrics.imageCount - metrics.imagesWithAlt
       if (missingAlt > 0) {
-        errors.push({
+        warnings.push({
           category: 'seo',
           code: 'IMAGES_MISSING_ALT',
           message: `${missingAlt} image(s) are missing alt text`,
-          value: missingAlt,
+          suggestion: 'Describe every image for accessibility and image search',
         })
       }
     }
 
-    // Liens internes
-    if (metrics.internalLinkCount < (this.config.minInternalLinks || 1)) {
+    // ─── Links: warnings only ─────────────────────────────────────────
+    if (metrics.internalLinkCount < (this.config.minInternalLinks ?? 1)) {
       warnings.push({
         category: 'structure',
         code: 'INTERNAL_LINKS_LOW',
-        message: `Internal link count (${metrics.internalLinkCount}) is below recommended (${this.config.minInternalLinks || 1})`,
+        message: `Internal link count (${metrics.internalLinkCount}) is below recommended (${this.config.minInternalLinks ?? 1})`,
         suggestion: 'Add internal links to related content',
+      })
+
+      suggestions.push({
+        category: 'seo',
+        priority: 'high',
+        title: 'Add internal links',
+        description: 'Link the page to its pillar and to sibling pages',
+        impact: 'Crawl depth and topical authority',
       })
     }
 
-    // Liens externes
-    if (metrics.externalLinkCount < (this.config.minExternalLinks || 0)) {
+    if (metrics.externalLinkCount < (this.config.minExternalLinks ?? 0)) {
       warnings.push({
         category: 'structure',
         code: 'EXTERNAL_LINKS_LOW',
-        message: `External link count (${metrics.externalLinkCount}) is below minimum (${this.config.minExternalLinks || 0})`,
+        message: `External link count (${metrics.externalLinkCount}) is below minimum (${this.config.minExternalLinks ?? 0})`,
       })
     }
   }
 
   private validateReadability(
     metrics: ContentMetrics,
-    errors: ContentQualityError[],
+    _errors: ContentQualityError[],
     warnings: ContentQualityWarning[],
     suggestions: QualitySuggestion[]
   ): void {
-    // Flesch Reading Ease
+    // Readability NEVER blocks. It is an estimate built on a formula whose
+    // French calibration is approximate; refusing to publish on it would be
+    // trading a certain loss (no page) for an uncertain gain.
     if (this.config.checkReadability && metrics.fleschReadingEase !== undefined) {
-      if (metrics.fleschReadingEase < 50) {
-        errors.push({
+      const floor = this.config.readabilityFloor ?? 30
+      const target = this.config.minReadabilityScore ?? 50
+
+      if (metrics.fleschReadingEase < floor) {
+        warnings.push({
           category: 'readability',
           code: 'READABILITY_DIFFICULT',
-          message: `Readability score (${metrics.fleschReadingEase}) indicates difficult content`,
-          value: metrics.fleschReadingEase,
-          threshold: 50,
+          message: `Readability score (${metrics.fleschReadingEase}/100, "${metrics.readabilityLabel}") indicates difficult content`,
+          suggestion: 'Use shorter sentences and simpler words',
         })
 
         suggestions.push({
@@ -423,17 +477,16 @@ export class ContentQualityValidator {
           description: 'Use shorter sentences and simpler words',
           impact: 'Better user experience and SEO',
         })
-      } else if (metrics.fleschReadingEase < (this.config.minReadabilityScore || 60)) {
+      } else if (metrics.fleschReadingEase < target) {
         warnings.push({
           category: 'readability',
           code: 'READABILITY_BELOW_RECOMMENDED',
-          message: `Readability score (${metrics.fleschReadingEase}) is below recommended (${this.config.minReadabilityScore || 60})`,
+          message: `Readability score (${metrics.fleschReadingEase}/100) is below recommended (${target})`,
           suggestion: 'Consider simplifying sentence structure',
         })
       }
     }
 
-    // Average words per sentence (trop long = difficile)
     if (metrics.averageWordPerSentence > 25) {
       warnings.push({
         category: 'readability',
@@ -443,7 +496,6 @@ export class ContentQualityValidator {
       })
     }
 
-    // Average sentences per paragraph (trop long = lourd)
     if (metrics.averageSentencePerParagraph > 8) {
       warnings.push({
         category: 'readability',
@@ -461,7 +513,7 @@ export class ContentQualityValidator {
     warnings: ContentQualityWarning[],
     suggestions: QualitySuggestion[]
   ): void {
-    // Titre
+    // ─── Blocking: no title ───────────────────────────────────────────
     if (!content.title || content.title.trim().length === 0) {
       errors.push({
         category: 'completeness',
@@ -473,11 +525,10 @@ export class ContentQualityValidator {
         category: 'completeness',
         code: 'TITLE_TOO_LONG',
         message: `Title (${content.title.length} chars) exceeds 70 characters`,
-        suggestion: 'Keep title under 60 characters for SEO',
+        suggestion: 'Keep the title around 60 characters so Google does not truncate it',
       })
     }
 
-    // Contenu trop court
     if (metrics.wordCount < 100) {
       warnings.push({
         category: 'completeness',
@@ -487,51 +538,74 @@ export class ContentQualityValidator {
       })
     }
 
-    // FAQ manquante (suggestion)
-    const hasFaq = content.content.toLowerCase().includes('faq')
+    const hasFaq = /faq|question/i.test(content.content)
     if (!hasFaq && metrics.wordCount > 500) {
       suggestions.push({
         category: 'seo',
         priority: 'medium',
         title: 'Consider adding FAQ section',
-        description: 'FAQ sections can improve SEO and answer user questions',
-        impact: 'Better search visibility',
+        description: 'A question/answer block answers long-tail queries directly',
+        impact: 'Better coverage of People Also Ask intents',
       })
     }
   }
 
+  /**
+   * Rubric-based scoring.
+   *
+   * The previous formula subtracted `(20 - imageCount) * 3` and
+   * `(10 - internalLinks) * 5`, so a perfectly normal page carrying one image
+   * and two internal links scored 3/100 on structure. Every penalty here is
+   * bounded and tied to a defect that was actually raised.
+   */
   private calculateScore(
     metrics: ContentMetrics,
     errors: ContentQualityError[],
     warnings: ContentQualityWarning[]
   ): ContentQualityScore {
-    // Score de structure (0-100)
-    let structureScore = 100
-    structureScore -= Math.max(0, (this.config.minWordCount || 300) - metrics.wordCount) / 10
-    structureScore -= metrics.headingCount === 0 ? 30 : 0
-    structureScore -= Math.max(0, 20 - metrics.imageCount) * 3
-    structureScore -= Math.max(0, 10 - metrics.internalLinkCount) * 5
+    const minWordCount = this.config.minWordCount ?? 300
+    const targetWordCount = this.config.targetWordCount ?? 600
 
-    // Score de lisibilité (0-100)
-    let readabilityScore = 100
-    if (metrics.fleschReadingEase !== undefined) {
-      readabilityScore = metrics.fleschReadingEase
+    let structureScore = 100
+    if (metrics.wordCount < minWordCount) structureScore -= 35
+    else if (metrics.wordCount < targetWordCount) structureScore -= 12
+    if (metrics.h1Count === 0) structureScore -= 15
+    if (metrics.h1Count > 1) structureScore -= 5
+    if (metrics.h2Count === 0) structureScore -= 15
+    if (metrics.headingCount < (this.config.minHeadingCount ?? 2)) structureScore -= 8
+    if ((metrics.headingLevelSkips ?? 0) > 0) structureScore -= 5
+    if (metrics.paragraphCount < (this.config.minParagraphCount ?? 3)) structureScore -= 8
+    if (metrics.internalLinkCount === 0) structureScore -= 10
+    if (metrics.imageCount === 0) structureScore -= 5
+
+    // Readability is expressed on the French Kandel & Moles scale, where
+    // ordinary press prose sits around 50-65. Rescale so that "standard French"
+    // does not look like a failing grade. Below 100 words the measurement is
+    // noise, so it contributes a neutral value rather than a flattering one.
+    let readabilityScore = 70
+    if (metrics.fleschReadingEase !== undefined && metrics.wordCount >= 100) {
+      readabilityScore = Math.round(Math.min(100, 40 + metrics.fleschReadingEase))
     }
 
-    // Score de complétude (0-100)
     let completenessScore = 100
-    completenessScore -= errors.filter(e => e.category === 'completeness').length * 20
-    completenessScore -= warnings.filter(w => w.category === 'completeness').length * 10
+    completenessScore -= errors.filter(e => e.category === 'completeness').length * 30
+    completenessScore -= warnings.filter(w => w.category === 'completeness').length * 8
 
-    // Score SEO (0-100)
     let seoScore = 100
     seoScore -= errors.filter(e => e.category === 'seo').length * 25
-    seoScore -= warnings.filter(w => w.category === 'seo').length * 10
+    seoScore -= warnings.filter(w => w.category === 'seo').length * 8
 
-    // Score global
-    const overall = Math.round((structureScore + readabilityScore + completenessScore + seoScore) / 4)
+    const clamp = (value: number) => Math.max(0, Math.min(100, Math.round(value)))
 
-    // Déterminer la note
+    const structure = clamp(structureScore)
+    const readability = clamp(readabilityScore)
+    const completeness = clamp(completenessScore)
+    const seo = clamp(seoScore)
+
+    // Weighted, not averaged: a page with no title and forty words must not be
+    // rescued by a flattering readability figure.
+    const overall = clamp(structure * 0.35 + completeness * 0.3 + seo * 0.2 + readability * 0.15)
+
     let grade: ContentQualityScore['grade']
     if (overall >= 90) grade = 'A'
     else if (overall >= 80) grade = 'B'
@@ -539,15 +613,23 @@ export class ContentQualityValidator {
     else if (overall >= 60) grade = 'D'
     else grade = 'F'
 
-    return {
-      overall: Math.max(0, Math.min(100, overall)),
-      structure: Math.max(0, Math.min(100, Math.round(structureScore))),
-      readability: Math.max(0, Math.min(100, Math.round(readabilityScore))),
-      completeness: Math.max(0, Math.min(100, Math.round(completenessScore))),
-      seo: Math.max(0, Math.min(100, Math.round(seoScore))),
-      grade,
-    }
+    return { overall, structure, readability, completeness, seo, grade }
   }
+}
+
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
+/** Counts every jump larger than one level in a heading outline. */
+function countHeadingLevelSkips(outline: HeadingNode[]): number {
+  let skips = 0
+  let previous = 0
+
+  for (const heading of outline) {
+    if (previous !== 0 && heading.level > previous + 1) skips++
+    previous = heading.level
+  }
+
+  return skips
 }
 
 // ─── Factory ─────────────────────────────────────────────────────────────────

@@ -3,8 +3,8 @@
 // SEO Engine - RAG Infrastructure
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { SupabaseClient } from '@supabase/supabase-js'
-import { createHash } from 'crypto'
+import { SupabaseClient, createClient } from '@supabase/supabase-js'
+import { createHash } from 'node:crypto'
 import type {
   IVectorStore,
   IndexedDocument,
@@ -13,10 +13,11 @@ import type {
   IndexConfig,
   SearchResult,
   SearchConfig,
+  EmbeddingSearchConfig,
   SimilarityQuery,
   VectorStoreStats,
   EmbeddingConfig,
-  IndexingStatus,
+  IndexingOutcome,
   VectorSearchFilters,
   RagContext,
   RagContextParams,
@@ -28,6 +29,51 @@ import type {
   TermIndexInput,
   SeoContext,
 } from '../VectorStore'
+
+// ─── Embedding constants ──────────────────────────────────────────────────────
+
+/**
+ * Dimension of the `embedding VECTOR(1536)` column created by migration 005.
+ *
+ * This is a hard contract with the database, not a preference: pgvector rejects
+ * any vector of another length, so a model switched to `text-embedding-3-large`
+ * (3072) would make every insert fail at runtime. `dimensions` is therefore sent
+ * on every request and every returned vector is measured before it is written.
+ */
+export const EMBEDDING_DIMENSION = 1536
+
+/** Model whose native output already matches EMBEDDING_DIMENSION. */
+export const DEFAULT_EMBEDDING_MODEL = 'text-embedding-3-small'
+
+/**
+ * Texts sent per embeddings request.
+ *
+ * OpenAI's endpoint accepts an array of inputs, so a 50-page crawl costs two
+ * HTTP round-trips instead of fifty. 32 × ~2 000 tokens stays an order of
+ * magnitude below the 300 000-token request budget while keeping one failed
+ * request cheap to retry.
+ */
+export const EMBEDDING_BATCH_SIZE = 32
+
+/**
+ * Hard cap on the characters embedded for one document.
+ *
+ * `text-embedding-3-small` accepts 8 191 tokens; ~24 000 characters of French
+ * prose sit just under that. Anything longer is truncated rather than rejected —
+ * the opening of a page carries its topic well enough for retrieval.
+ */
+export const MAX_EMBEDDING_CHARS = 24000
+
+/**
+ * Default cosine-similarity floor for a query-to-document search.
+ *
+ * Calibration, not taste: with `text-embedding-3-small` a short French query and
+ * a genuinely relevant page land around 0.30–0.55 — cosine similarity between a
+ * few words and a full page is structurally low. The 0.7 default this code
+ * shipped with is a NEAR-DUPLICATE threshold; it discarded every real match and
+ * made a correctly filled index look empty.
+ */
+export const DEFAULT_MIN_SCORE = 0.35
 
 /**
  * Configuration pour SupabaseVectorStore
@@ -48,25 +94,41 @@ export class SupabaseVectorStore implements IVectorStore {
   private embeddingConfig: EmbeddingConfig
   private initialized = false
 
+  /** Billed embedding requests since construction, for cost observability. */
+  private embeddingRequests = 0
+
   constructor(client: SupabaseClient, embeddingConfig?: EmbeddingConfig)
   constructor(config: SupabaseVectorStoreConfig)
   constructor(
     clientOrConfig: SupabaseClient | SupabaseVectorStoreConfig,
     embeddingConfig?: EmbeddingConfig
   ) {
-    // Check if it's a config object by looking for supabaseUrl
-    if (clientOrConfig && typeof clientOrConfig === 'object' && 'supabaseUrl' in clientOrConfig) {
+    // Discriminate on a method only a client has, never on `supabaseUrl`.
+    //
+    // `SupabaseClient` exposes its own `supabaseUrl` property at runtime (the
+    // `protected` keyword is erased by TypeScript), so `'supabaseUrl' in x` is
+    // TRUE for a client as well as for a config object. Every caller passing a
+    // real client therefore took the config branch, read `config.embeddingConfig`
+    // — which a client does not have — and threw
+    // "Cannot read properties of undefined (reading 'dimension')".
+    //
+    // The whole RAG context was lost to this: the builder caught the throw and
+    // carried on, so pages were generated with competitor context only and no
+    // semantic retrieval at all, silently.
+    const looksLikeClient = typeof (clientOrConfig as SupabaseClient)?.from === 'function'
+
+    if (!looksLikeClient && clientOrConfig && typeof clientOrConfig === 'object' && 'supabaseUrl' in clientOrConfig) {
       const config = clientOrConfig as SupabaseVectorStoreConfig
-      // Config object
-      this.client = new (require('@supabase/supabase-js').createClient)(
-        config.supabaseUrl,
-        config.supabaseKey
-      )
+      // Config object.
+      //
+      // Statically imported, not `require()`d. This module is ESM: `require` is
+      // not defined at runtime, so this branch could only throw the moment
+      // anyone constructed the store from a config object rather than from a
+      // client. It was also calling `createClient` with `new` — it is a factory
+      // function, not a constructor.
+      this.client = createClient(config.supabaseUrl, config.supabaseKey)
       if (config.serviceRoleKey) {
-        this.serviceClient = new (require('@supabase/supabase-js').createClient)(
-          config.supabaseUrl,
-          config.serviceRoleKey
-        )
+        this.serviceClient = createClient(config.supabaseUrl, config.serviceRoleKey)
       }
       this.embeddingConfig = config.embeddingConfig
     } else {
@@ -74,10 +136,24 @@ export class SupabaseVectorStore implements IVectorStore {
       this.client = clientOrConfig as SupabaseClient
       this.embeddingConfig = embeddingConfig || {
         provider: 'openai',
-        model: 'text-embedding-3-small',
-        dimension: 1536,
+        model: DEFAULT_EMBEDDING_MODEL,
+        dimension: EMBEDDING_DIMENSION,
       }
     }
+
+    // The column is VECTOR(1536). Accepting another dimension here would only
+    // move the failure to insert time, one paid embedding batch later.
+    if (this.embeddingConfig.dimension !== EMBEDDING_DIMENSION) {
+      console.warn(
+        `[vector-store] embedding dimension ${this.embeddingConfig.dimension} does not match the vector_embeddings column (${EMBEDDING_DIMENSION}); forcing ${EMBEDDING_DIMENSION}`
+      )
+      this.embeddingConfig = { ...this.embeddingConfig, dimension: EMBEDDING_DIMENSION }
+    }
+  }
+
+  /** Billed embedding requests made by this instance. */
+  getEmbeddingRequestCount(): number {
+    return this.embeddingRequests
   }
 
   /**
@@ -146,39 +222,62 @@ export class SupabaseVectorStore implements IVectorStore {
    * Génère un embedding via OpenAI
    */
   async generateEmbedding(text: string): Promise<number[]> {
-    if (this.embeddingConfig.provider === 'openai') {
-      return this.generateOpenAIEmbedding(text)
-    } else if (this.embeddingConfig.provider === 'anthropic') {
-      return this.generateAnthropicEmbedding(text)
-    } else {
-      throw new Error(`Unsupported embedding provider: ${this.embeddingConfig.provider}`)
-    }
+    const [embedding] = await this.generateEmbeddings([text])
+    return embedding
   }
 
   /**
-   * Génère des embeddings en batch
+   * Génère des embeddings en batch.
+   *
+   * One request per EMBEDDING_BATCH_SIZE texts, not one per text: the previous
+   * implementation fanned out `Promise.all` over 100 individual HTTP calls,
+   * which is how a 50-page crawl used to look like a rate-limit attack.
    */
   async generateEmbeddings(texts: string[]): Promise<number[][]> {
-    const batchSize = this.embeddingConfig.batchSize || 100
+    if (texts.length === 0) return []
+
+    if (this.embeddingConfig.provider === 'anthropic') {
+      // Anthropic ships no embeddings API; OpenAI is the only backend here.
+      console.warn('[vector-store] Anthropic embeddings not available, using OpenAI')
+    } else if (this.embeddingConfig.provider !== 'openai') {
+      throw new Error(`Unsupported embedding provider: ${this.embeddingConfig.provider}`)
+    }
+
+    const batchSize = this.embeddingConfig.batchSize || EMBEDDING_BATCH_SIZE
     const results: number[][] = []
 
     for (let i = 0; i < texts.length; i += batchSize) {
       const batch = texts.slice(i, i + batchSize)
-      const batchResults = await Promise.all(
-        batch.map(text => this.generateEmbedding(text))
-      )
-      results.push(...batchResults)
+      results.push(...(await this.embedOpenAIBatch(batch)))
     }
 
     return results
   }
 
-  private async generateOpenAIEmbedding(text: string): Promise<number[]> {
-    // Use OpenAI API directly instead of LangChain
+  private async embedOpenAIBatch(texts: string[]): Promise<number[][]> {
     const apiKey = process.env.OPENAI_API_KEY
     if (!apiKey) {
       throw new Error('OPENAI_API_KEY not configured')
     }
+
+    const model = this.embeddingConfig.model || DEFAULT_EMBEDDING_MODEL
+
+    const body: Record<string, unknown> = {
+      model,
+      // The API rejects an empty input. Substituting a placeholder keeps the
+      // response aligned with the batch instead of failing all 32 documents
+      // because one of them happened to be blank.
+      input: texts.map(text => truncateForEmbedding(text).trim() || '(vide)'),
+    }
+
+    // Only the text-embedding-3 family accepts `dimensions`; ada-002 rejects the
+    // parameter outright. Sending it is what pins any 3-* model to the column
+    // width instead of letting 3-large return 3072 floats the table cannot store.
+    if (model.startsWith('text-embedding-3')) {
+      body.dimensions = this.embeddingConfig.dimension
+    }
+
+    this.embeddingRequests++
 
     const response = await fetch('https://api.openai.com/v1/embeddings', {
       method: 'POST',
@@ -186,137 +285,238 @@ export class SupabaseVectorStore implements IVectorStore {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${apiKey}`,
       },
-      body: JSON.stringify({
-        model: this.embeddingConfig.model || 'text-embedding-3-small',
-        input: text,
-      }),
+      body: JSON.stringify(body),
     })
 
     if (!response.ok) {
-      throw new Error(`OpenAI API error: ${response.statusText}`)
+      const detail = await response.text().catch(() => '')
+      throw new Error(`OpenAI embeddings error ${response.status}: ${detail.slice(0, 300) || response.statusText}`)
     }
 
-    const data = await response.json()
-    return data.data[0].embedding
-  }
+    const data = (await response.json()) as {
+      data?: Array<{ index: number; embedding: number[] }>
+    }
 
-  private async generateAnthropicEmbedding(text: string): Promise<number[]> {
-    // Anthropic n'a pas encore d'API d'embeddings
-    // On utilise OpenAI comme fallback
-    console.warn('Anthropic embeddings not available, using OpenAI fallback')
-    return this.generateOpenAIEmbedding(text)
+    if (!data.data || data.data.length !== texts.length) {
+      throw new Error(
+        `OpenAI embeddings returned ${data.data?.length ?? 0} vectors for ${texts.length} inputs`
+      )
+    }
+
+    // The API documents that results may come back out of order.
+    const ordered = [...data.data].sort((a, b) => a.index - b.index).map(d => d.embedding)
+
+    for (const vector of ordered) {
+      if (vector.length !== this.embeddingConfig.dimension) {
+        throw new Error(
+          `Embedding model "${model}" returned ${vector.length} dimensions, but vector_embeddings.embedding is VECTOR(${this.embeddingConfig.dimension})`
+        )
+      }
+    }
+
+    return ordered
   }
 
   // ─── Indexing ──────────────────────────────────────────────────────────────
 
   async indexDocument(document: IndexedDocument): Promise<string> {
-    const embedding = document.embedding || await this.generateEmbedding(document.content)
-    const contentHash = this.hashContent(document.content)
+    const outcome = await this.indexDocuments([document])
 
-    const { data, error } = await this.getClient(true)
-      .from('vector_embeddings')
-      .insert({
-        embedding,
-        content: document.content,
-        content_hash: contentHash,
-        metadata: document.metadata,
-        site_id: document.metadata.siteId,
-        document_type: document.metadata.documentType,
-        content_type_key: document.metadata.contentTypeKey,
-        focus_keyword: document.metadata.focusKeyword,
-        word_count: document.metadata.wordCount,
-      })
-      .select('id')
-      .single()
-
-    if (error) {
-      if (error.code === '23505') {
-        // Duplicate - on met à jour
-        const { data: existing } = await this.client
-          .from('vector_embeddings')
-          .select('id')
-          .eq('content_hash', contentHash)
-          .single()
-
-        if (existing) {
-          await this.updateDocument(existing.id, document)
-          return existing.id
-        }
-      }
-      throw new Error(`Failed to index document: ${error.message}`)
+    if (outcome.documentsFailed > 0) {
+      throw new Error(`Failed to index document: ${outcome.errors[0]?.error ?? 'unknown error'}`)
     }
 
-    return data.id
+    return documentKeyOf(document)
   }
 
-  async indexDocuments(documents: IndexedDocument[]): Promise<IndexingStatus> {
+  /**
+   * Indexes a batch of documents, paying only for what actually changed.
+   *
+   * Order matters and is the whole point:
+   *   1. de-duplicate on the document key — two identical keys in one payload
+   *      make PostgreSQL reject the entire statement ("ON CONFLICT DO UPDATE
+   *      cannot affect row a second time"), and a crawl produces duplicates
+   *      routinely (pagination stubs, empty archives);
+   *   2. read the hashes already stored for those keys and drop the unchanged
+   *      ones BEFORE embedding — embeddings are billed, and re-embedding a site
+   *      that has not moved is pure loss;
+   *   3. embed and upsert what is left, per batch, so one failing batch does not
+   *      discard the ones that succeeded.
+   */
+  async indexDocuments(documents: IndexedDocument[]): Promise<IndexingOutcome> {
     const operationId = crypto.randomUUID()
+    const startedAt = new Date().toISOString()
     const errors: { documentId: string; error: string; timestamp: string }[] = []
+    const embeddingRequestsBefore = this.embeddingRequests
+
     let documentsProcessed = 0
     let documentsFailed = 0
+    let documentsSkipped = 0
 
-    const startTime = new Date().toISOString()
+    // ─── 1. De-duplicate on the document key (last occurrence wins) ───────────
+    const byKey = new Map<string, IndexedDocument>()
+    for (const doc of documents) {
+      const key = documentKeyOf(doc)
+      if (byKey.has(key)) documentsSkipped++
+      byKey.set(key, doc)
+    }
 
-    // Générer les embeddings en batch
-    const texts = documents.map(d => d.content)
-    const embeddings = await this.generateEmbeddings(texts)
+    // ─── 2. Drop documents whose content has not moved ────────────────────────
+    const candidates = [...byKey.entries()].map(([key, doc]) => ({
+      key,
+      doc,
+      hash: this.hashContent(doc.content),
+    }))
 
-    // Préparer les données pour insertion
-    const records = documents.map((doc, index) => {
-      const embedding = doc.embedding || embeddings[index]
-      const contentHash = this.hashContent(doc.content)
+    const knownHashes = await this.getStoredHashes(candidates.map(c => ({
+      siteId: c.doc.metadata.siteId,
+      key: c.key,
+    })))
 
-      return {
-        embedding,
-        content: doc.content,
-        content_hash: contentHash,
-        metadata: doc.metadata,
-        site_id: doc.metadata.siteId,
-        document_type: doc.metadata.documentType,
-        content_type_key: doc.metadata.contentTypeKey,
-        focus_keyword: doc.metadata.focusKeyword,
-        word_count: doc.metadata.wordCount,
+    const changed = candidates.filter(candidate => {
+      const known = knownHashes.get(hashLookupKey(candidate.doc.metadata.siteId, candidate.key))
+      if (known === candidate.hash) {
+        documentsSkipped++
+        return false
       }
+      return true
     })
 
-    // Insertion par batch de 100
-    const batchSize = 100
-    for (let i = 0; i < records.length; i += batchSize) {
-      const batch = records.slice(i, i + batchSize)
-
-      const { error } = await this.getClient(true)
-        .from('vector_embeddings')
-        .upsert(batch, {
-          onConflict: 'content_hash',
-          ignoreDuplicates: false,
-        })
-
-      if (error) {
-        documentsFailed += batch.length
-        errors.push({
-          documentId: 'batch',
-          error: error.message,
-          timestamp: new Date().toISOString(),
-        })
-      } else {
-        documentsProcessed += batch.length
+    if (changed.length === 0) {
+      return {
+        operationId,
+        status: 'completed',
+        documentsProcessed: 0,
+        documentsFailed: 0,
+        documentsSkipped,
+        embeddingRequests: 0,
+        errors,
+        startedAt,
+        completedAt: new Date().toISOString(),
       }
     }
 
-    const completedAt = new Date().toISOString()
+    // ─── 3. Embed and write, batch by batch ───────────────────────────────────
+    const batchSize = this.embeddingConfig.batchSize || EMBEDDING_BATCH_SIZE
+
+    for (let i = 0; i < changed.length; i += batchSize) {
+      const batch = changed.slice(i, i + batchSize)
+
+      try {
+        const missing = batch.filter(c => !c.doc.embedding)
+        const generated = missing.length > 0
+          ? await this.generateEmbeddings(missing.map(c => c.doc.content))
+          : []
+
+        let generatedIndex = 0
+        const now = new Date().toISOString()
+
+        // Every optional column is written as an explicit null, never left out:
+        // supabase-js serialises `undefined` away, and PostgREST rejects a bulk
+        // upsert whose rows do not all carry the same keys ("All object keys
+        // must match") — one page without a focus keyword would fail its batch.
+        const records = batch.map(candidate => {
+          const embedding = candidate.doc.embedding ?? generated[generatedIndex++]
+          if (!embedding) {
+            throw new Error(`missing embedding for document ${candidate.key}`)
+          }
+
+          return {
+            embedding,
+            content: candidate.doc.content,
+            content_hash: candidate.hash,
+            document_key: candidate.key,
+            metadata: { ...candidate.doc.metadata, indexedAt: now },
+            site_id: candidate.doc.metadata.siteId,
+            document_type: candidate.doc.metadata.documentType,
+            content_type_key: candidate.doc.metadata.contentTypeKey ?? null,
+            focus_keyword: truncate(candidate.doc.metadata.focusKeyword, 500) ?? null,
+            word_count: candidate.doc.metadata.wordCount ?? null,
+            updated_at: now,
+          }
+        })
+
+        const { error } = await this.getClient(true)
+          .from('vector_embeddings')
+          .upsert(records, {
+            onConflict: 'site_id,document_key',
+            ignoreDuplicates: false,
+          })
+
+        if (error) throw new Error(error.message)
+
+        documentsProcessed += batch.length
+      } catch (error) {
+        documentsFailed += batch.length
+        errors.push({
+          documentId: batch.map(c => c.key).join(', ').slice(0, 300),
+          error: error instanceof Error ? error.message : String(error),
+          timestamp: new Date().toISOString(),
+        })
+      }
+    }
 
     return {
       operationId,
-      status: documentsFailed > 0 ? 'completed' : 'completed',
+      status: documentsFailed > 0 && documentsProcessed === 0 ? 'failed' : 'completed',
       documentsProcessed,
       documentsFailed,
+      documentsSkipped,
+      embeddingRequests: this.embeddingRequests - embeddingRequestsBefore,
       errors,
-      startedAt: startTime,
-      completedAt,
+      startedAt,
+      completedAt: new Date().toISOString(),
     }
   }
 
-  async indexSchema(siteId: string, schema: SchemaIndexInput): Promise<IndexingStatus> {
+  /**
+   * Content hashes already stored for the given (site, document key) pairs.
+   *
+   * A failure here is deliberately non-fatal: not knowing what is stored costs
+   * embeddings, whereas refusing to index costs the whole feature.
+   */
+  private async getStoredHashes(
+    refs: Array<{ siteId: string; key: string }>
+  ): Promise<Map<string, string>> {
+    const stored = new Map<string, string>()
+    const siteIds = [...new Set(refs.map(r => r.siteId).filter(Boolean))]
+    if (siteIds.length === 0) return stored
+
+    const wanted = new Set(refs.map(r => hashLookupKey(r.siteId, r.key)))
+
+    // PostgREST caps a response at its `max-rows` setting (1 000 by default), so
+    // a site with more documents than that would look partly un-indexed and be
+    // re-embedded — at full price — on every run. Hence the paging.
+    const pageSize = 1000
+
+    for (const siteId of siteIds) {
+      for (let offset = 0; ; offset += pageSize) {
+        const { data, error } = await this.client
+          .from('vector_embeddings')
+          .select('site_id, document_key, content_hash')
+          .eq('site_id', siteId)
+          .range(offset, offset + pageSize - 1)
+
+        if (error) {
+          console.warn(`[vector-store] could not read existing hashes for site ${siteId}: ${error.message}`)
+          break
+        }
+
+        for (const row of data || []) {
+          const lookup = hashLookupKey(row.site_id as string, row.document_key as string)
+          if (wanted.has(lookup)) {
+            stored.set(lookup, row.content_hash as string)
+          }
+        }
+
+        if (!data || data.length < pageSize) break
+      }
+    }
+
+    return stored
+  }
+
+  async indexSchema(siteId: string, schema: SchemaIndexInput): Promise<IndexingOutcome> {
     const documents: IndexedDocument[] = []
     const now = new Date().toISOString()
 
@@ -379,16 +579,21 @@ export class SupabaseVectorStore implements IVectorStore {
     return this.indexDocuments(documents)
   }
 
-  async indexContent(siteId: string, content: ContentIndexInput): Promise<IndexingStatus> {
+  async indexContent(siteId: string, content: ContentIndexInput): Promise<IndexingOutcome> {
     const documents: IndexedDocument[] = []
     const now = new Date().toISOString()
 
     for (const doc of content.documents) {
+      // Keyed on the URL when there is one: a title is not unique and, worse, it
+      // changes when the page is edited — which would index the edited page as a
+      // second document instead of replacing the first.
+      const key = `content:${doc.url || `${doc.contentTypeKey}/${doc.title.slice(0, 120)}`}`
+
       documents.push({
-        id: `${siteId}-${doc.contentTypeKey}-${doc.title.slice(0, 50)}`,
+        id: key,
         content: `${doc.title}\n\n${doc.content}`,
         metadata: {
-          documentId: `${siteId}-${doc.contentTypeKey}-${doc.title.slice(0, 50)}`,
+          documentId: key,
           documentType: 'content',
           siteId,
           contentTypeKey: doc.contentTypeKey,
@@ -451,10 +656,12 @@ export class SupabaseVectorStore implements IVectorStore {
     }
   }
 
+  // supabase-js only populates `count` when the request asks for it; without
+  // `{ count: 'exact' }` these both reported 0 deletions whatever they deleted.
   async deleteBySite(siteId: string): Promise<number> {
     const { count, error } = await this.getClient(true)
       .from('vector_embeddings')
-      .delete()
+      .delete({ count: 'exact' })
       .eq('site_id', siteId)
 
     if (error) {
@@ -467,7 +674,7 @@ export class SupabaseVectorStore implements IVectorStore {
   async deleteByContentType(siteId: string, contentTypeKey: string): Promise<number> {
     const { count, error } = await this.getClient(true)
       .from('vector_embeddings')
-      .delete()
+      .delete({ count: 'exact' })
       .eq('site_id', siteId)
       .eq('content_type_key', contentTypeKey)
 
@@ -481,19 +688,30 @@ export class SupabaseVectorStore implements IVectorStore {
   // ─── Search ─────────────────────────────────────────────────────────────────
 
   async search(config: SearchConfig): Promise<SearchResult[]> {
+    if (!config.query.trim()) return []
+
     const queryEmbedding = await this.generateEmbedding(config.query)
+    return this.searchByEmbedding(queryEmbedding, config)
+  }
 
-    let query = this.client
-      .rpc('vector_search', {
-        p_embedding: queryEmbedding,
-        p_limit: config.limit || 10,
-        p_threshold: config.minScore || 0.7,
-        p_site_id: config.siteId || null,
-        p_document_type: config.documentTypes?.[0] || null,
-        p_content_type_key: config.contentTypeKey || null,
-      })
-
-    const { data, error } = await query
+  /**
+   * Same search, on an embedding the caller already paid for.
+   *
+   * Exists so a caller can probe several filters (this content type, then any)
+   * without buying the same vector twice.
+   */
+  async searchByEmbedding(
+    embedding: number[],
+    config: EmbeddingSearchConfig = {}
+  ): Promise<SearchResult[]> {
+    const { data, error } = await this.client.rpc('vector_search', {
+      p_embedding: embedding,
+      p_limit: config.limit || 10,
+      p_threshold: config.minScore ?? DEFAULT_MIN_SCORE,
+      p_site_id: config.siteId || null,
+      p_document_type: config.documentTypes?.[0] || null,
+      p_content_type_key: config.contentTypeKey || null,
+    })
 
     if (error) {
       throw new Error(`Search failed: ${error.message}`)
@@ -502,61 +720,38 @@ export class SupabaseVectorStore implements IVectorStore {
     return (data || []).map((row: Record<string, unknown>) => ({
       id: row.id as string,
       content: row.content as string,
-      score: row.score as number,
+      score: Number(row.score),
       metadata: row.metadata as DocumentMetadata,
     }))
   }
 
+  /**
+   * Nearest documents to a piece of text.
+   *
+   * This used to fetch every row of the site and score each one against an EMPTY
+   * vector — `cosineSimilarity(query, [])` returns 0 on a length mismatch, so
+   * every result scored exactly 0 and every threshold above 0 discarded all of
+   * them. The search has never returned a single row in its life; it now runs in
+   * PostgreSQL, on the HNSW index, like the rest of the search surface.
+   */
   async findSimilar(query: SimilarityQuery): Promise<SearchResult[]> {
+    if (!query.content.trim()) return []
+
+    const limit = query.limit || 10
     const queryEmbedding = await this.generateEmbedding(query.content)
 
-    let dbQuery = this.client
-      .from('vector_embeddings')
-      .select('id, content, metadata')
-      .eq('document_type', 'content')
+    const results = await this.searchByEmbedding(queryEmbedding, {
+      siteId: query.siteId,
+      contentTypeKey: query.contentTypeKey,
+      documentTypes: ['content'],
+      minScore: query.threshold ?? DEFAULT_MIN_SCORE,
+      // Over-fetch so the post-filter below cannot empty an otherwise full page.
+      limit: query.excludeDocumentId ? limit + 1 : limit,
+    })
 
-    if (query.siteId) {
-      dbQuery = dbQuery.eq('site_id', query.siteId)
-    }
-
-    if (query.contentTypeKey) {
-      dbQuery = dbQuery.eq('content_type_key', query.contentTypeKey)
-    }
-
-    if (query.excludeDocumentId) {
-      dbQuery = dbQuery.neq('id', query.excludeDocumentId)
-    }
-
-    const { data, error } = await dbQuery
-
-    if (error) {
-      throw new Error(`Similarity search failed: ${error.message}`)
-    }
-
-    // Calculer la similarité manuellement
-    const results = (data || [])
-      .map((row: Record<string, unknown>) => {
-        const metadata = row.metadata as DocumentMetadata
-        return {
-          id: row.id as string,
-          content: row.content as string,
-          metadata,
-          similarity: this.cosineSimilarity(
-            queryEmbedding,
-            [] // On n'a pas l'embedding stocké directement
-          ),
-        }
-      })
-      .filter(r => !query.threshold || r.similarity >= query.threshold)
-      .sort((a, b) => b.similarity - a.similarity)
-      .slice(0, query.limit || 10)
-
-    return results.map(r => ({
-      id: r.id,
-      content: r.content,
-      score: r.similarity,
-      metadata: r.metadata,
-    }))
+    return results
+      .filter(r => r.id !== query.excludeDocumentId)
+      .slice(0, limit)
   }
 
   async searchByMetadata(
@@ -576,7 +771,9 @@ export class SupabaseVectorStore implements IVectorStore {
     }
 
     if (filters.fieldKey) {
-      query = query.eq('metadata->>\'fieldKey\'', filters.fieldKey)
+      // PostgREST JSON path syntax: `metadata->>fieldKey`, unquoted. The quoted
+      // form this used to send was parsed as a column name and errored out.
+      query = query.eq('metadata->>fieldKey', filters.fieldKey)
     }
 
     if (filters.documentTypes?.length) {
@@ -584,7 +781,9 @@ export class SupabaseVectorStore implements IVectorStore {
     }
 
     if (filters.taxonomyTerms?.length) {
-      query = query.overlaps('metadata->\'taxonomyTerms\'', filters.taxonomyTerms)
+      // `contains` maps to jsonb `@>`; `overlaps` has no jsonb operator and
+      // returned a PostgREST error rather than a filtered set.
+      query = query.contains('metadata->taxonomyTerms', filters.taxonomyTerms)
     }
 
     if (filters.dateRange) {
@@ -695,20 +894,28 @@ export class SupabaseVectorStore implements IVectorStore {
 
   // ─── Maintenance ───────────────────────────────────────────────────────────
 
-  async reindexSite(siteId: string): Promise<IndexingStatus> {
-    // Supprimer tous les documents du site
-    await this.deleteBySite(siteId)
+  /**
+   * Drops a site's documents. Re-filling them is the indexing service's job —
+   * the store knows about vectors, not about where a site's pages live.
+   *
+   * Prefer `reindexSite()` from VectorIndexingService, which does both.
+   */
+  async reindexSite(siteId: string): Promise<IndexingOutcome> {
+    const deleted = await this.deleteBySite(siteId)
+    const now = new Date().toISOString()
 
-    // TODO: Re-extract et re-index depuis les sources
-    // Pour l'instant, on retourne un statut vide
+    console.info(`[vector-store] cleared ${deleted} document(s) for site ${siteId}`)
+
     return {
       operationId: crypto.randomUUID(),
       status: 'completed',
       documentsProcessed: 0,
       documentsFailed: 0,
+      documentsSkipped: 0,
+      embeddingRequests: 0,
       errors: [],
-      startedAt: new Date().toISOString(),
-      completedAt: new Date().toISOString(),
+      startedAt: now,
+      completedAt: now,
     }
   }
 
@@ -725,24 +932,14 @@ export class SupabaseVectorStore implements IVectorStore {
 
   // ─── Private Helpers ───────────────────────────────────────────────────────
 
+  /**
+   * Change detector, not a key: the hash decides whether a document must be
+   * re-embedded. It covers the text actually sent to the provider, truncation
+   * included, so a change past the truncation point does not buy a new vector
+   * identical to the old one.
+   */
   private hashContent(content: string): string {
-    return createHash('sha256').update(content).digest('hex')
-  }
-
-  private cosineSimilarity(a: number[], b: number[]): number {
-    if (a.length !== b.length) return 0
-
-    let dotProduct = 0
-    let normA = 0
-    let normB = 0
-
-    for (let i = 0; i < a.length; i++) {
-      dotProduct += a[i] * b[i]
-      normA += a[i] * a[i]
-      normB += b[i] * b[i]
-    }
-
-    return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB))
+    return createHash('sha256').update(truncateForEmbedding(content)).digest('hex')
   }
 
   private buildSchemaTypeContent(contentType: ContentTypeIndexInput): string {
@@ -790,8 +987,11 @@ ${terms}
   }
 
   private async getSiteContext(siteId: string): Promise<RagContext['siteContext']> {
+    // `sites` is the product's table. This read used to target `federated_sites`,
+    // a migration-001 table that no site row has ever been written to, so the
+    // context was always null.
     const { data, error } = await this.client
-      .from('federated_sites')
+      .from('sites')
       .select('name, type')
       .eq('id', siteId)
       .single()
@@ -800,16 +1000,17 @@ ${terms}
       return null
     }
 
-    // Compter les types de contenu
-    const { count: contentTypesCount } = await this.client
-      .from('content_types')
+    const { count } = await this.client
+      .from('vector_embeddings')
       .select('id', { count: 'exact', head: true })
+      .eq('site_id', siteId)
+      .eq('document_type', 'content')
 
     return {
       siteId,
       siteName: data.name,
       siteType: data.type as 'wordpress' | 'sanity',
-      existingContentCount: 0,
+      existingContentCount: count || 0,
       contentTypes: [],
     }
   }
@@ -837,4 +1038,37 @@ ${terms}
       suggestedTerms: [],
     }
   }
+}
+
+// ─── Module Helpers ──────────────────────────────────────────────────────────
+
+/**
+ * Stable identity of a document inside its site.
+ *
+ * `IndexedDocument.id` is a caller-chosen string, never the database uuid — the
+ * row id is generated by PostgreSQL. Using it as the upsert key is what lets a
+ * second crawl replace a page instead of duplicating it.
+ */
+export function documentKeyOf(document: IndexedDocument): string {
+  const key = document.id || document.metadata.documentId
+  if (key) return key.slice(0, 500)
+
+  // No key at all would mean an unbounded pile of near-identical rows; fall back
+  // to the content itself so the document is at least idempotent.
+  return `anon:${createHash('sha256').update(document.content).digest('hex').slice(0, 32)}`
+}
+
+function hashLookupKey(siteId: string, documentKey: string): string {
+  return `${siteId}::${documentKey}`
+}
+
+/** Keeps one document under the provider's per-input token limit. */
+export function truncateForEmbedding(text: string): string {
+  return text.length > MAX_EMBEDDING_CHARS ? text.slice(0, MAX_EMBEDDING_CHARS) : text
+}
+
+/** Fits a value into a VARCHAR(n) column instead of letting the insert fail. */
+function truncate(value: string | undefined, max: number): string | undefined {
+  if (!value) return undefined
+  return value.length > max ? value.slice(0, max) : value
 }

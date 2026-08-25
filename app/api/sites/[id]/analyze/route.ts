@@ -19,7 +19,8 @@ export async function POST(_req: NextRequest, context: { params: Promise<{ id: s
       return NextResponse.json({ error: 'GitHub repo et token requis' }, { status: 400 })
     }
 
-    const profile = await analyzeNextJsRepo(site.github_repo, site.github_token)
+    // Analyse the branch we publish to, not the default one.
+    const profile = await analyzeNextJsRepo(site.github_repo, site.github_token, site.github_branch || undefined)
     await updateSite(id, { repo_profile: profile } as Partial<typeof site>)
 
     return NextResponse.json({ success: true, profile })

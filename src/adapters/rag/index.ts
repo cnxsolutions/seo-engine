@@ -3,23 +3,13 @@
 // Exports RAG content generation adapters
 // ─────────────────────────────────────────────────────────────────────────────
 
-// RAG Generator with Templates
-export {
-  RagGeneratorWithTemplates,
-  createRagGeneratorWithTemplates,
-  type TemplateGenerationOptions,
-  type GenerationContext,
-  type TemplateGenerationResult,
-  type GeneratedContent,
-  type WordPressFields,
-  type SanityFields,
-  type FaqItem,
-  type RagSource,
-  type GenerationStats,
-  type ContentValidation,
-  type ValidationError,
-  type ValidationWarning,
-} from './RagGeneratorWithTemplates'
+// `RagGeneratorWithTemplates` was exported here, and the barrel was its only
+// consumer: no production code ever called it. It built its own vector store in
+// a field initialiser with `process.env...!`, so merely constructing it threw
+// without the environment variables — a competing, partial implementation of the
+// generation path, kept alive by this export alone.
+//
+// A barrel must only export what lives.
 
 // Template Engine
 export {
@@ -82,20 +72,50 @@ export type {
   TermIndexInput,
 } from './VectorStore'
 
+export {
+  EMBEDDING_DIMENSION,
+  EMBEDDING_BATCH_SIZE,
+  DEFAULT_EMBEDDING_MODEL,
+  DEFAULT_MIN_SCORE,
+  MAX_EMBEDDING_CHARS,
+} from './providers/SupabaseVectorStore'
+
 export type {
   SupabaseVectorStoreConfig,
 } from './providers/SupabaseVectorStore'
 
-// Vector Indexing Service
+export type {
+  IndexingOutcome,
+  EmbeddingSearchConfig,
+} from './VectorStore'
+
+// ─── Vector Indexing — the public entry points ────────────────────────────────
+//
+// These four functions are how the rest of the application fills the index.
+// None of them throws: indexing is an enrichment, never a reason to fail the
+// crawl or the publication that triggered it.
 export {
+  indexSitePages,
+  indexGeneratedPage,
+  reindexSite,
+  getSiteIndexStatus,
   VectorIndexingService,
   getIndexingService,
+  INDEXING_BATCH_SIZE,
+  MIN_INDEXABLE_CHARS,
+  CONTENT_TYPE_CRAWLED_PAGE,
+  CONTENT_TYPE_GENERATED_POST,
+  type IndexingOptions,
+  type IndexingReport,
+  type IndexingSource,
+  type SiteIndexStatus,
 } from './VectorIndexingService'
 
 // Semantic Search Service
 export {
   SemanticSearchService,
   getSearchService,
+  GAP_COVERAGE_SCORE,
   type SemanticSearchOptions,
   type EnrichedSearchResult,
   type InternalLinkTarget,

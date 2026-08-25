@@ -117,7 +117,14 @@ export class WordPressRestExtractor {
       .map(([slug, type]) => ({
         slug,
         name: type.name,
-        label: type.label,
+        // WordPress has no `label` on this endpoint. Verified against a live
+        // installation: `GET /wp/v2/types` returns
+        // `description, hierarchical, has_archive, name, slug, icon, taxonomies,
+        // rest_base, rest_namespace, template, template_lock` — and `name` IS
+        // the human label ("Articles", "Pages"). Reading `label` gave undefined
+        // on every content type, which the schema screen then called
+        // `.toLowerCase()` on.
+        label: type.name,
         description: type.description,
         rest_base: type.rest_base || slug,
         supports: this.parseSupports(type as unknown as Record<string, unknown>),
@@ -138,7 +145,9 @@ export class WordPressRestExtractor {
     return Object.entries(taxonomies).map(([slug, taxonomy]) => ({
       slug,
       name: taxonomy.name,
-      label: taxonomy.label,
+      // Same shape as `/types`: `name` is the label ("Catégories"), and there
+      // is no `label` key at all.
+      label: taxonomy.name,
       description: taxonomy.description,
       hierarchical: taxonomy.hierarchical,
       types: taxonomy.types || [],
