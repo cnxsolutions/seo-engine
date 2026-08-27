@@ -9,12 +9,24 @@
 # ⚠ INSTANCE UNIQUE — NE PAS METTRE A L'ECHELLE
 # `initScheduler()` demarre un cron par process, et son garde-fou d'idempotence
 # (`runningJobs`, lib/scheduler/cron.ts) est une Map en memoire, locale au
-# process. Deux instances sur la meme base = deux crons = chaque creneau
-# editorial genere deux fois et PUBLIE EN DOUBLE sur le site client.
+# process. Deux instances sur la meme base = deux crons qui ne se voient pas.
+#
+# LE MOTIF N'EST PLUS LA PUBLICATION EN DOUBLE, et le preciser evite de relacher
+# la mauvaise contrainte : les creneaux editoriaux et les publications sont
+# proteges en base par reclamation atomique (`claimEditorialSlot` et
+# `claimGenerationForPublishing`, lib/scheduler/editorial.ts, en
+# compare-and-swap), donc une meme page ne sort pas deux fois.
+# Ce qu'un second process duplique reellement, ce sont les deux jobs SANS
+# reclamation : le job de campagne (SELECT nu de lib/db.ts:243-254, protege par
+# la seule Map de process, cron.ts:1198-1203) et le renouvellement de cycle
+# (SELECT nu de lib/db.ts:514-524, sans reclamation ni plafond). Soit deux
+# crawls de 300 pages simultanes contre le serveur du client et deux plans
+# concurrents sur la meme campagne.
+#
 # Interdits : `docker compose up --scale seo-engine=N`, `replicas > 1`, le mode
 # Swarm et tout deploiement « rolling » faisant cohabiter deux conteneurs.
 # `container_name` ci-dessous rend d'ailleurs toute mise a l'echelle impossible :
-# c'est volontaire, c'est le garde-fou.
+# c'est volontaire, c'est le garde-fou, et il RESTE.
 #
 # Demarrer :  docker compose up -d --build
 # Journaux :  docker compose logs -f seo-engine
@@ -49,6 +61,14 @@ services:
 
     # Toutes les cles vivent dans .env, jamais dans ce fichier ni dans l'image.
     # Creer le fichier avant le premier demarrage :  cp .env.example .env
+    #
+    # ENABLE_SCHEDULER y est a `false`, et c'est l'etat sur : ce conteneur sert
+    # alors le tableau de bord sans qu'aucune generation, aucune publication ni
+    # aucun crawl ne parte. Ne la passer a `true` qu'apres la procedure de
+    # premier demarrage du README (section 7) — le premier tick agit dans les
+    # 15 minutes, et rien de ce qu'il fait chez le client ne se defait.
+    # Elle est lue au DEMARRAGE du process : la changer dans .env n'a aucun
+    # effet tant que le conteneur n'est pas recree (`docker compose up -d`).
     env_file:
       - .env
 
@@ -80,8 +100,11 @@ services:
     # Verifie que le serveur Node repond encore. La racine `/` redirige (307)
     # vers /dashboard sans toucher a Supabase : le test valide le process web
     # sans dependre de la disponibilite de la base.
-    # Attention : un conteneur « healthy » ne prouve PAS que le cron tourne.
-    # Voir la section « Verifier que le planificateur tourne » du README.
+    # Attention : un conteneur « healthy » ne prouve PAS que le cron tourne. Il
+    # passe au vert avec ENABLE_SCHEDULER eteinte, avec un pre-vol refuse et
+    # avec un cron mort — il n'interroge que `/`. Ce qui repond AVANT est
+    # GET /api/preflight, ce qui repond APRES sont les journaux. Voir la section
+    # « Verifier que le planificateur tourne » du README.
     healthcheck:
       test:
         - CMD

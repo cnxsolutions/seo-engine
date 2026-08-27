@@ -6,14 +6,30 @@
 # CONTRAINTE STRUCTURANTE — PROCESS UNIQUE ET PERSISTANT
 #
 # Le planificateur node-cron tourne DANS le process Next.js : `instrumentation.ts`
-# appelle `initScheduler()` au demarrage du serveur (lib/scheduler/cron.ts). Le
-# garde-fou d'idempotence de ce planificateur, `runningJobs`, est une Map EN
-# MEMOIRE : il empeche deux executions simultanees du meme job dans un process,
-# et rien d'autre.
+# demarre `initScheduler()` (lib/scheduler/cron.ts) quand ENABLE_SCHEDULER vaut
+# 'true'. Le garde-fou d'idempotence de ce planificateur, `runningJobs`, est une
+# Map EN MEMOIRE : il empeche deux executions simultanees du meme job dans un
+# process, et rien d'autre.
 #
-# Consequence directe : deux conteneurs issus de cette image, tournant en meme
-# temps sur la meme base, executeraient chacun leur propre cron. Chaque creneau
-# editorial serait genere deux fois et PUBLIE EN DOUBLE sur le site client.
+# CE QUE DEUX CONTENEURS NE DUPLIQUERAIENT PAS — la raison de cette contrainte a
+# change, et s'en tenir a l'ancienne ferait relacher la mauvaise chose. Les
+# creneaux editoriaux et les publications sont desormais proteges EN BASE, par
+# reclamation atomique : `claimEditorialSlot` et `claimGenerationForPublishing`
+# (lib/scheduler/editorial.ts) sont des compare-and-swap, exactement un runner
+# obtient le creneau et le perdant passe au suivant. Une meme page ne sort donc
+# PAS deux fois, meme a deux process.
+#
+# CE QU'ILS DUPLIQUERAIENT REELLEMENT, ce sont les deux jobs restes sans
+# reclamation :
+#   - le job de campagne : `runDueCampaigns` lit un SELECT nu
+#     (listDueCampaigns, lib/db.ts:243-254) et ne se protege que par la Map
+#     locale au process (cron.ts:1198-1203). Deux process = deux analyses et
+#     deux plans concurrents sur la MEME campagne ;
+#   - le renouvellement de cycle : `checkCycleCompletion`
+#     (lib/scheduler/cycle-manager.ts:25-50) lit lui aussi un SELECT nu
+#     (lib/db.ts:514-524), sans reclamation ET SANS PLAFOND. Deux process =
+#     DEUX CRAWLS DE 300 PAGES SIMULTANES contre le serveur de production du
+#     client, deux factures d'embeddings, deux reecritures du meme calendrier.
 #
 # Cette image doit donc tourner en INSTANCE UNIQUE :
 #   - pas de `--scale`, pas de `replicas > 1`, pas de mode Swarm/Kubernetes ;

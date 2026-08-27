@@ -21,6 +21,7 @@ import { probeSlugFree } from '@/lib/existing/probe'
 import { MAX_PROMPT_NEIGHBOURS } from '@/lib/existing/prompt-block'
 import { reserveSlug } from '@/lib/existing/reservation'
 import { blindInventory, type SiteInventory } from '@/src/core/domain/existing/inventory'
+import { pickLeastCoveredKeyword } from '@/src/core/domain/existing/keyword-choice'
 import { getGoogleContext } from '@/lib/google/context'
 import { syncAllGbp, syncAllGsc } from '@/lib/google/sync'
 import {
@@ -227,8 +228,8 @@ export function initScheduler(): void {
   })
 
   // Cleanup old logs - daily
-  cron.schedule('0 0 * * *', () => {
-    cleanupOldLogs()
+  cron.schedule('0 0 * * *', async () => {
+    await cleanupOldLogs()
   })
 
   log('INFO', 'scheduler', 'All cron jobs scheduled successfully')
@@ -1325,6 +1326,30 @@ async function refuseBeforeGenerating(
   return { generationId, city, rejected: { reasons: [message], status: 'failed' } }
 }
 
+
+/**
+ * Le sujet retenu en tete, sans doublon.
+ *
+ * Comparaison sur la forme normalisee : « Taxi Troyes » et « taxi troyes »
+ * sont le meme sujet, et les envoyer deux fois au modele lui apprend surtout
+ * que la liste est bruyante.
+ */
+function dedupeKeywords(keywords: string[]): string[] {
+  const seen = new Set<string>()
+  const kept: string[] = []
+
+  for (const keyword of keywords) {
+    const value = (keyword ?? '').trim()
+    if (!value) continue
+    const key = value.toLowerCase()
+    if (seen.has(key)) continue
+    seen.add(key)
+    kept.push(value)
+  }
+
+  return kept
+}
+
 export async function runCampaignNow(
   campaign: Campaign,
   override?: RunOverride
@@ -1354,9 +1379,41 @@ export async function runCampaignNow(
   })).id
 
   try {
+    // ─── Le sujet, choisi contre ce qui est deja en ligne ─────────────────
+    //
+    // Le brief tranche quand il existe. Sinon — `runDueCampaigns` et le
+    // lancement manuel n'en ont pas — la chaine retombait sur
+    // `${business_type} ${city}` : le terme le plus generique du site, celui
+    // que vise sa page d'accueil.
+    //
+    // Ce n'etait pas visible avant la reservation de slug : le modele ecrivait
+    // la page PUIS la nommait, et compensait un mot-cle vague par un titre
+    // precis. Maintenant que l'adresse est posee AVANT le premier token, un
+    // mot-cle vague donne une adresse vague. Constate en production : le slug
+    // « taxi-troyes », immediatement signale en cannibalisation par le gate
+    // contre une page deja publiee.
+    //
+    // On ne fabrique aucun sujet : on choisit, parmi ceux que le proprietaire a
+    // declares sur sa campagne, celui que l'inventaire couvre le moins.
+    const chosen = override?.planBrief?.target_keyword || override?.targetKeyword
+      ? null
+      : pickLeastCoveredKeyword(campaign.keywords ?? [], inventory, `${campaign.business_type} ${city}`)
+
     const mainKeyword = override?.planBrief?.target_keyword
       || override?.targetKeyword
+      || chosen?.keyword
       || `${campaign.business_type} ${city}`
+
+    if (chosen && chosen.origin !== 'libre') {
+      // Un repli ou un « moins couvert » n'est pas une erreur, mais l'operateur
+      // doit pouvoir relier une page terne a la raison qui l'a rendue terne.
+      log('WARN', 'campaign', 'Sujet choisi sans mot-cle libre', {
+        generationId,
+        keyword: mainKeyword,
+        origin: chosen.origin,
+        coveredBy: chosen.coveredBy.slice(0, 3),
+      })
+    }
 
     // ─── The address, decided BEFORE the first token ──────────────────────
     //
@@ -1446,9 +1503,20 @@ export async function runCampaignNow(
       department: campaign.department || 'Aube',
       businessType: campaign.business_type,
       businessName: campaign.business_name,
-      keywords: override?.targetKeyword
-        ? [override.targetKeyword, ...campaign.keywords]
-        : campaign.keywords,
+      // LE SUJET CHOISI MENE LA LISTE, sinon il ne sert qu'a nommer l'adresse.
+      //
+      // Cette liste n'etait pas ordonnee : le modele y prenait le terme le plus
+      // evident — le premier, c'est-a-dire le plus generique. Constate en
+      // production : une page reservee sous « taxi-cpam-troyes » redigee sur
+      // « Taxi Troyes », donc une URL qui promet un sujet et un texte qui en
+      // traite un autre. Le gate l'a d'ailleurs refusee en META_NEAR_DUPLICATE
+      // a 0,857 contre une page soeur, ce qui etait le bon verdict : deux pages
+      // sur le meme sujet.
+      //
+      // `mainKeyword` porte deja l'arbitrage — brief, surcharge, ou le mot-cle
+      // que l'inventaire couvre le moins. Le mettre en tete est ce qui fait que
+      // l'adresse et le texte parlent de la meme chose.
+      keywords: dedupeKeywords([mainKeyword, ...campaign.keywords]),
       siteUrl: campaign.site?.url || '',
       targetLength: campaign.target_length,
       model: campaign.ai_model,
@@ -1791,17 +1859,38 @@ async function logJobExecution(entry: JobExecutionLog): Promise<void> {
 
 // ─── Log Management ────────────────────────────────────────────────────────────
 
-function cleanupOldLogs(): void {
+// EXPORTEE POUR ETRE TESTEE, et pour rien d'autre — aucun autre module de
+// l'application ne l'appelle, le cron de minuit est son seul declencheur.
+// Le mot `export` est ici le prix d'un filet : tant que cette fonction restait
+// privee, la branche d'erreur ci-dessous pouvait etre supprimee sans qu'un seul
+// des 1013 tests de la suite ne rougisse — verifie, pas suppose. Un garde-fou
+// que rien ne retient n'est pas un garde-fou, c'est un commentaire.
+// Le filet est en lib/scheduler/cleanup.test.ts.
+export async function cleanupOldLogs(): Promise<void> {
   const cutoff = new Date()
   cutoff.setDate(cutoff.getDate() - 7) // Keep 7 days of logs
 
   const supabase = createServiceClient()
-  supabase.from('job_executions')
+  const { error } = await supabase.from('job_executions')
     .delete()
     .lt('executed_at', cutoff.toISOString())
-    .then(() => {
-      log('INFO', 'cleanup', `Cleaned up job executions older than ${cutoff.toISOString()}`)
+
+  // Meme motif que logJobExecution ci-dessus : jamais fatal, mais jamais
+  // silencieux non plus. La suppression partait auparavant dans un `.then()`
+  // sans branche d'erreur, si bien que « Cleaned up job executions older
+  // than ... » etait journalise MEME quand supabase avait rendu une erreur —
+  // supabase-js RETOURNE l'erreur au lieu de la lever, donc `.then()` s'execute
+  // aussi sur un echec. Le bug empeche ici est un journal qui ment : la table
+  // grossit sans limite (un droit refuse, une derive de schema) pendant que le
+  // seul temoin disponible annonce une purge reussie chaque nuit.
+  if (error) {
+    log('WARN', 'cleanup', 'Could not purge old job executions', {
+      cutoff: cutoff.toISOString(),
+      reason: error.message,
     })
+  } else {
+    log('INFO', 'cleanup', `Cleaned up job executions older than ${cutoff.toISOString()}`)
+  }
 
   // Clear in-memory logs older than 1 hour
   const oneHourAgo = Date.now() - 3600000
