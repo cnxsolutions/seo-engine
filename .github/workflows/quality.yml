@@ -23,13 +23,13 @@ jobs:
     timeout-minutes: 15
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # `node-version-file` plutot qu'une version en dur : .nvmrc est la seule
       # source de verite du couple Node utilise ici, dans le Dockerfile et sur
       # le poste de developpement. Une seule ligne a changer le jour de la
       # montee de version.
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version-file: .nvmrc
           cache: npm
