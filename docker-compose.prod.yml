@@ -1,0 +1,99 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# SEO Engine — production (VPS)
+#
+# Ce fichier est le SEUL qui tourne sur le serveur. Il est televerse dans
+# /opt/seo-engine/ a chaque deploiement par .github/workflows/deploy.yml : le
+# VPS n'heberge aucun clone du depot, donc rien ne peut y deriver en silence.
+#
+# Difference avec docker-compose.yml (developpement) : aucune section `build`.
+# L'image est CONSTRUITE PAR LA CI et seulement tiree ici. Le VPS n'a ni les
+# sources, ni les devDependencies, ni les 2 Go de RAM qu'un `next build`
+# reclame. Voir l'en-tete de .github/workflows/deploy.yml.
+#
+#   Deployer      : la CI s'en charge (push sur main)
+#   A la main     : IMAGE=ghcr.io/cnxsolutions/seo-engine IMAGE_TAG=sha-xxxxxxx \
+#                     docker compose -f docker-compose.prod.yml up -d
+#   Journaux      : docker compose -f docker-compose.prod.yml logs -f
+#   Arreter       : docker compose -f docker-compose.prod.yml down
+#
+# ⚠ INSTANCE UNIQUE — NE PAS METTRE A L'ECHELLE
+# `initScheduler()` demarre un cron par process et son garde-fou d'idempotence
+# (`runningJobs`, lib/scheduler/cron.ts) est une Map en memoire, locale au
+# process. Deux instances sur la meme base = deux crons = chaque creneau
+# editorial genere deux fois et PUBLIE EN DOUBLE sur le site client.
+# `container_name` ci-dessous rend `--scale` mecaniquement impossible.
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+  seo-engine:
+    # Les deux variables sont obligatoires et sans valeur par defaut : compose
+    # refuse de demarrer si elles manquent. Un defaut du type `:-latest`
+    # deploierait silencieusement autre chose que ce qui vient d'etre verifie,
+    # et rendrait tout retour arriere ininterpretable.
+    image: "${IMAGE:?IMAGE manquant - ex. ghcr.io/cnxsolutions/seo-engine}:${IMAGE_TAG:?IMAGE_TAG manquant - ex. sha-a1b2c3d}"
+
+    # Fixe le nom du conteneur ET interdit mecaniquement `--scale` : Docker
+    # refuse de creer deux conteneurs portant le meme nom.
+    container_name: seo-engine
+
+    # Redemarre apres un plantage ou un reboot du VPS, mais respecte un
+    # `docker compose stop` explicite.
+    restart: unless-stopped
+
+    # Redondant avec `container_name`, mais ecrit noir sur blanc.
+    deploy:
+      replicas: 1
+
+    # tini comme PID 1 : transmet SIGTERM au serveur Node et recolte les process
+    # zombies. Sans lui, l'arret attend le timeout puis tue le process,
+    # potentiellement au milieu d'une publication.
+    init: true
+
+    # Toutes les cles vivent dans /opt/seo-engine/.env, jamais dans ce fichier,
+    # jamais dans l'image, jamais dans les secrets GitHub. Ce fichier n'est pas
+    # televerse par la CI : il est cree une fois a la main sur le serveur et n'est
+    # plus jamais touche par un deploiement.
+    env_file:
+      - .env
+
+    environment:
+      # node-cron planifie sur l'heure LOCALE du process : un conteneur laisse
+      # en UTC decale toutes les expressions cron (la synchro Search Console de
+      # 4h00 partirait a 5h00 heure de Paris en ete) et fait basculer le
+      # « jour J » du calendrier editorial au mauvais moment.
+      TZ: Europe/Paris
+      NODE_ENV: production
+      PORT: "3000"
+      HOSTNAME: "0.0.0.0"
+
+    # Ecoute uniquement sur la boucle locale : nginx termine le TLS devant.
+    # L'application EST authentifiee (APP_ACCESS_SECRET, verifie par proxy.ts
+    # devant toutes les pages et routes /api), mais le challenge est du HTTP
+    # Basic : le secret circule en base64, reversible. Exposer ce port
+    # directement reviendrait a diffuser le secret en clair sur Internet.
+    ports:
+      - "127.0.0.1:3000:3000"
+
+    # Le script de deploiement ATTEND cet etat avant de declarer le deploiement
+    # reussi, et restaure la version precedente s'il ne vient jamais. La racine
+    # `/` redirige (307) vers /dashboard sans toucher a Supabase : le test valide
+    # le process web sans dependre de la disponibilite de la base.
+    # Attention : « healthy » ne prouve PAS que le cron tourne (section 8 du README).
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - "-e"
+        - 'fetch("http://127.0.0.1:3000/", { redirect: "manual" }).then(r => process.exit(r.status < 500 ? 0 : 1)).catch(() => process.exit(1))'
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 40s
+
+    # Les journaux du planificateur sont le seul moyen de savoir ce qu'il a fait :
+    # ils doivent survivre plusieurs jours sans saturer le disque du VPS.
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"

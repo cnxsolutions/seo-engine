@@ -122,40 +122,52 @@ l'execution.
 
 ## 5. Migrations SQL
 
-Les migrations vivent dans `src/adapters/infrastructure/database/migrations/`.
-La procedure complete, l'ordre d'application et la maniere de sauvegarder le
-schema sont dans **[`db/README.md`](db/README.md)**.
+Les migrations vivent dans `src/adapters/infrastructure/database/migrations/`
+(`001` a `019` a ce jour). La procedure complete, l'ordre d'application et la
+maniere de sauvegarder le schema sont dans **[`db/README.md`](db/README.md)**.
 
-En resume :
+En resume, sur une base **existante**, une migration a la fois :
 
 ```bash
-MIG=src/adapters/infrastructure/database/migrations
-psql "<CONNECTION_STRING>" -f $MIG/001_schema_federation.sql
-psql "<CONNECTION_STRING>" -f $MIG/005_add_vector_store.sql
-psql "<CONNECTION_STRING>" -f $MIG/006_generation_page_payload.sql
-psql "<CONNECTION_STRING>" -f $MIG/007_scheduler_reliability.sql
+node scripts/db-migrate.mjs --list      # ce qui existe
+node scripts/db-migrate.mjs 019 --dry   # lire avant d appliquer
+node scripts/db-migrate.mjs 019
 ```
 
-Ou, plus simplement, en collant chaque fichier dans le *SQL Editor* du tableau
-de bord Supabase.
+Les migrations sont ecrites idempotentes (`IF NOT EXISTS`, `CREATE OR REPLACE`) :
+les rejouer ne coute rien, et la base elle-meme fait office de journal de ce qui
+a ete applique.
 
-> **A lire avant de croire que cela suffit.** Le depot contient `001`, `005`,
-> `006` et `007`. Les migrations `002`, `003` et `004` sont absentes, et **12
-> des 19 tables interrogees par le code ne sont creees par aucun fichier du
-> depot** — dont `sites`, `campaigns`, `generations` et `editorial_calendar`,
-> c'est-a-dire le coeur du produit. Elles ont ete creees a la main dans
-> Supabase, a une epoque ou `.gitignore` ignorait `supabase/`. Le fichier
-> `lib/types.ts` s'ouvre encore sur un commentaire renvoyant a
-> `supabase/schema.sql`, un fichier qui n'a jamais existe dans le depot.
+Sur une base **vierge**, appliquer d'abord la baseline, puis les migrations
+numerotees dans l'ordre :
+
+```bash
+psql "<CONNECTION_STRING>" -f db/000_baseline.sql
+```
+
+> **La baseline est la definition de reference du schema.**
+> [`db/000_baseline.sql`](db/000_baseline.sql) est un export de la base de
+> production (28 tables, extensions, fonctions et index compris). Beaucoup de
+> ces tables — dont `sites`, `campaigns`, `generations` et `editorial_calendar` —
+> ont ete creees a la main dans le tableau de bord Supabase et n'apparaissent
+> dans aucune migration : sans ce fichier, perdre le projet Supabase revient a
+> perdre le schema. C'est aussi pour cette raison que les migrations `002` a
+> `004` sont absentes du depot, et que `006` et `007` sont des `ALTER TABLE` sur
+> des tables qu'aucun fichier numerote ne cree.
 >
-> Consequence pratique : `006` et `007` sont des `ALTER TABLE` sur des tables
-> que le depot ne cree pas. Sur une base reellement vierge, ils echouent.
+> **A regenerer apres toute modification faite a la main dans le tableau de
+> bord**, sans quoi il derive en silence :
 >
-> **Consequence : on ne peut pas encore reconstruire la base a partir du code.**
-> La premiere chose a faire, avant toute autre, est de produire la baseline
-> decrite en [section 4 de `db/README.md`](db/README.md#4-exporter-le-schema-de-production-en-baseline-versionnee).
-> Tant qu'elle n'existe pas, perdre l'instance Supabase revient a perdre le
-> produit.
+> ```bash
+> node scripts/db-baseline.mjs
+> ```
+>
+> Elle ne contient que la structure, jamais les donnees. Les sauvegardes de
+> donnees restent du ressort de Supabase.
+
+Le deploiement n'applique **aucune** migration : elles se lancent a la main,
+depuis ton poste, **avant** de merger la PR qui en depend. La raison est
+expliquee en [section 4 de `docs/deploiement.md`](docs/deploiement.md#4-migrations-sql).
 
 ---
 
@@ -199,22 +211,33 @@ impose deux choses :
 > `docker-compose.yml` fixe `container_name`, ce qui rend la mise a l'echelle
 > mecaniquement impossible : c'est voulu.
 
-### Deployer
+### Deployer et mettre a jour
+
+**Le VPS ne construit plus rien.** Tout passe par GitHub Actions : chaque merge
+sur `main` declenche lint + types + tests, publie une image sur GHCR, puis le
+serveur la tire et recree le conteneur. Environ dix secondes de coupure, avec
+retour arriere automatique si le healthcheck ne passe pas.
+
+La procedure complete — provisionnement du VPS, secrets a renseigner, flux de
+travail quotidien, retour arriere, diagnostic — est dans
+**[`docs/deploiement.md`](docs/deploiement.md)**.
+
+En resume, une fois pour toutes, sur le serveur neuf :
 
 ```bash
-git clone <url-du-depot> seo-engine
-cd seo-engine
-cp .env.example .env      # puis remplir les vraies valeurs
-docker compose up -d --build
-docker compose logs -f seo-engine
+bash deploy/bootstrap.sh seo.mondomaine.fr   # Docker, vhost nginx + certbot, utilisateur deploy
+# puis remplir /opt/seo-engine/.env et copier les 4 secrets dans GitHub
 ```
 
-### Mettre a jour
+Ensuite, deployer = merger sur `main`. Rien a faire sur le serveur.
 
-```bash
-git pull
-docker compose up -d --build   # recree le conteneur, ne le double pas
-```
+> **`docker compose up -d --build` sur le VPS est desormais deconseille.**
+> `next build` (React Compiler + Tailwind 4) demande plusieurs minutes et ~2 Go
+> de RAM : sur un petit VPS il finit en OOM-kill, la coupure dure le temps du
+> build, et l'image obtenue n'est pas celle que la CI a verifiee. Le fichier
+> `docker-compose.yml` de la racine reste utile en local ; c'est
+> `docker-compose.prod.yml` qui tourne sur le serveur, et il n'a pas de section
+> `build`.
 
 ### Ce que le Dockerfile fait
 

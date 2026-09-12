@@ -1,0 +1,55 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Controle qualite — workflow REUTILISABLE
+#
+# Appele par ci.yml (sur chaque pull request) et par deploy.yml (avant toute
+# publication d'image). Ecrit une seule fois ici pour que les deux chemins
+# verifient EXACTEMENT la meme chose : si la porte de la PR et celle du
+# deploiement divergeaient, la seconde finirait par ne plus rien garder.
+#
+# Aucun secret n'est necessaire. Le depot se construit et se teste sans le
+# moindre .env — c'est une propriete du code, pas un hasard : tout `process.env`
+# est lu a l'execution (voir l'en-tete de .env.example).
+# ─────────────────────────────────────────────────────────────────────────────
+
+name: Qualite
+
+on:
+  workflow_call:
+
+jobs:
+  quality:
+    name: Lint, types, tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v7
+
+      # `node-version-file` plutot qu'une version en dur : .nvmrc est la seule
+      # source de verite du couple Node utilise ici, dans le Dockerfile et sur
+      # le poste de developpement. Une seule ligne a changer le jour de la
+      # montee de version.
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      # `npm ci` et non `npm install` : installation stricte depuis le lockfile,
+      # meme arbre de dependances qu'en local et que dans l'image Docker.
+      - run: npm ci
+
+      - name: ESLint
+        run: npm run lint
+
+      # tsconfig.json inclut `.next/types/**` et `.next/dev/types/**`, que Next
+      # genere pendant un build. Sur un checkout neuf ces dossiers n'existent
+      # pas : le motif ne correspond a rien et tsc ne voit que le code du depot.
+      # C'est voulu. Sur un poste de developpement, en revanche, un `.next`
+      # laisse par une branche precedente fait remonter des erreurs sur des
+      # routes supprimees depuis — des fichiers GENERES, jamais du vrai code.
+      # Si `npm run typecheck` echoue en local mais passe ici : supprimer .next.
+      - name: TypeScript
+        run: npm run typecheck
+
+      - name: Vitest
+        run: npm test
