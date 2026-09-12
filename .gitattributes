@@ -1,0 +1,18 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Fins de ligne
+#
+# Ces fichiers sont executes sur Linux — par le VPS ou par les runners GitHub.
+# Un fichier en CRLF y est casse de facon deroutante : `APP_DIR=/opt/seo-engine`
+# devient `/opt/seo-engine\r`, et le `cd` echoue sur un chemin « introuvable »
+# qui s'affiche pourtant correctement. Le `core.autocrlf` d'un poste Windows ne
+# suffit pas : il depend d'une config locale, pas du depot.
+# ─────────────────────────────────────────────────────────────────────────────
+
+*.sh        text eol=lf
+*.mjs       text eol=lf
+*.yml       text eol=lf
+*.yaml      text eol=lf
+*.sql       text eol=lf
+Dockerfile  text eol=lf
+.nvmrc      text eol=lf
+.env.example text eol=lf

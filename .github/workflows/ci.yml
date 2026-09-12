@@ -1,0 +1,54 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# CI — porte d'entree des pull requests
+#
+# Ne publie rien et ne touche a aucun serveur. Son seul role : dire si la
+# branche peut etre fusionnee. Deux verifications independantes, en parallele :
+#
+#   1. qualite  — lint, types, tests (workflow reutilisable quality.yml) ;
+#   2. image    — le build Docker complet, SANS publication.
+#
+# Pourquoi construire l'image ici alors qu'elle sera reconstruite au
+# deploiement : l'etape `builder` du Dockerfile est le SEUL endroit ou
+# `output: 'standalone'` est reellement produit (next.config.ts ne l'active que
+# si BUILD_STANDALONE=1, parce que le tracage ne peut pas s'achever sur
+# Windows). Une PR qui casse la sortie standalone passerait donc lint, types et
+# tests sans broncher, et n'echouerait qu'une fois sur main, au deploiement.
+# Le cache buildx rend ce second build quasi gratuit une fois le premier passe.
+# ─────────────────────────────────────────────────────────────────────────────
+
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+
+# Un nouveau push sur une PR annule la verification precedente : elle porte sur
+# du code deja perime. Sans cela, dix commits d'affilee lancent dix builds.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    uses: ./.github/workflows/quality.yml
+
+  image:
+    name: Build de l'image (sans publication)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          # Cache partage avec deploy.yml : les couches `deps` (npm ci) et
+          # `builder` sont reutilisees d'un workflow a l'autre tant que
+          # package-lock.json ne bouge pas.
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

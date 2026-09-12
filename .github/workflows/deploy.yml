@@ -1,0 +1,189 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Deploiement production — un seul VPS, un seul conteneur
+#
+# Chaine : qualite -> build + publication sur GHCR -> le VPS tire l'image.
+#
+# LE VPS NE CONSTRUIT PLUS RIEN. C'est le changement central par rapport au
+# `docker compose up -d --build` documente historiquement dans le README :
+#
+#   - `next build` (React Compiler + Tailwind 4) demande plusieurs minutes et
+#     ~2 Go de RAM. Sur un petit VPS il finit en OOM-kill, au pire moment ;
+#   - l'image qui tournait en production n'etait alors pas celle que la CI avait
+#     verifiee, mais une reconstruction locale, avec un autre cache ;
+#   - la coupure durait le temps du build. Ici le VPS ne fait que `pull` puis
+#     recreer le conteneur : une dizaine de secondes.
+#
+# ⚠ INSTANCE UNIQUE — le deploiement est volontairement un arret-puis-demarrage.
+# Le planificateur node-cron vit dans le process Next.js et son garde-fou
+# d'idempotence est une Map en memoire (lib/scheduler/cron.ts) : faire cohabiter
+# l'ancien et le nouveau conteneur, ne serait-ce que quelques secondes, ferait
+# tourner deux crons sur la meme base et PUBLIERAIT EN DOUBLE chez le client.
+# Il n'y aura donc jamais de deploiement « rolling » ici, et la micro-coupure
+# n'est pas un defaut a corriger : c'est la contrepartie assumee.
+#
+# SECRETS DE DEPOT A CREER (Settings > Secrets and variables > Actions) :
+#   VPS_HOST         adresse IP ou nom DNS du VPS
+#   VPS_USER         utilisateur de deploiement (cree par deploy/bootstrap.sh)
+#   VPS_SSH_KEY      cle PRIVEE ed25519 de cet utilisateur, en entier
+#   VPS_KNOWN_HOSTS  sortie de `ssh-keyscan -t ed25519 <VPS_HOST>`
+#
+# Aucune cle applicative (OpenAI, Supabase, Google...) ne transite par GitHub :
+# elles vivent uniquement dans /opt/seo-engine/.env, sur le VPS.
+# ─────────────────────────────────────────────────────────────────────────────
+
+name: Deploiement production
+
+on:
+  push:
+    branches: [main]
+  # Permet de relancer un deploiement a l'identique sans commit vide, par
+  # exemple apres avoir corrige une valeur dans le .env du VPS.
+  workflow_dispatch:
+
+# `cancel-in-progress: false` : on n'interrompt JAMAIS un deploiement en vol.
+# Un `docker compose up` coupe en plein milieu laisserait le VPS sans conteneur.
+# Les deploiements s'executent donc l'un apres l'autre.
+concurrency:
+  group: production
+  cancel-in-progress: false
+
+jobs:
+  quality:
+    uses: ./.github/workflows/quality.yml
+
+  build:
+    name: Publier l'image sur GHCR
+    needs: quality
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      tag: ${{ steps.meta.outputs.tag }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Le tag porte le SHA court : chaque image reste attribuable a un commit
+      # precis, et c'est ce qui rend le retour arriere trivial (voir le runbook).
+      # `latest` suit main pour le confort, mais n'est JAMAIS ce que le VPS
+      # deploie — un tag mouvant rend un retour arriere ininterpretable.
+      - id: meta
+        run: echo "tag=sha-$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build et push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository }}:${{ steps.meta.outputs.tag }}
+            ghcr.io/${{ github.repository }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy:
+    name: Deployer sur le VPS
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      packages: read
+    # Environnement GitHub « production » : permet d'exiger une approbation
+    # manuelle avant deploiement (Settings > Environments) si tu le souhaites
+    # un jour. Sans regle configuree, il ne bloque rien.
+    environment:
+      name: production
+      url: ${{ vars.PRODUCTION_URL }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Preparer l'acces SSH
+        env:
+          SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+          KNOWN_HOSTS: ${{ secrets.VPS_KNOWN_HOSTS }}
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          # known_hosts renseigne et StrictHostKeyChecking laisse a « yes » : un
+          # deploiement qui accepte n'importe quelle empreinte accepte aussi un
+          # serveur qui n'est pas le tien.
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+          # L'alias « vps » evite de repeter hote, utilisateur et cle a chaque
+          # appel, et garde les secrets hors des lignes de commande.
+          printf '%s\n' \
+            "Host vps" \
+            "  HostName $VPS_HOST" \
+            "  User $VPS_USER" \
+            "  IdentityFile ~/.ssh/id_ed25519" \
+            "  StrictHostKeyChecking yes" \
+            "  BatchMode yes" \
+            > ~/.ssh/config
+          chmod 600 ~/.ssh/config
+
+      # Le VPS ne contient AUCUN clone du depot : il n'heberge que son .env et
+      # les deux fichiers televerses ici. Rien a maintenir a jour a la main,
+      # rien qui puisse deriver silencieusement d'une version a l'autre.
+      - name: Televerser le compose et le script de deploiement
+        run: scp docker-compose.prod.yml deploy/deploy.sh vps:/opt/seo-engine/
+
+      # Le jeton part par STDIN, jamais en argument : un argument serait visible
+      # dans la table des process du VPS. Il est de toute facon ephemere — il
+      # expire a la fin de ce job — ce qui evite de stocker une cle GHCR
+      # permanente sur le serveur.
+      - name: Authentifier le VPS aupres de GHCR
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GHCR_USER: ${{ github.actor }}
+        run: printf '%s' "$GHCR_TOKEN" | ssh vps "docker login ghcr.io -u '$GHCR_USER' --password-stdin"
+
+      # Le vrai travail est dans deploy/deploy.sh, qui vient d'etre televerse :
+      # pull, bascule, attente du healthcheck, et retour arriere automatique si
+      # le conteneur ne repond jamais. Le garder cote serveur plutot qu'inline
+      # ici le rend lisible, testable et rejouable a la main.
+      - name: Deployer
+        env:
+          IMAGE: ghcr.io/${{ github.repository }}
+          IMAGE_TAG: ${{ needs.build.outputs.tag }}
+        run: ssh vps "IMAGE='$IMAGE' IMAGE_TAG='$IMAGE_TAG' bash /opt/seo-engine/deploy.sh"
+
+      # `always()` : le jeton doit etre retire meme quand le deploiement a
+      # echoue et declenche un retour arriere.
+      - name: Retirer le jeton GHCR du serveur
+        if: always()
+        continue-on-error: true
+        run: ssh vps "docker logout ghcr.io"
+
+      - name: Resume
+        if: always()
+        run: |
+          {
+            echo "### Deploiement"
+            echo ""
+            echo "| | |"
+            echo "|---|---|"
+            echo "| Image | \`ghcr.io/${{ github.repository }}:${{ needs.build.outputs.tag }}\` |"
+            echo "| Commit | ${{ github.sha }} |"
+            echo "| Resultat | ${{ job.status }} |"
+            echo ""
+            echo "Retour arriere depuis le VPS :"
+            echo '```bash'
+            echo "cd /opt/seo-engine && IMAGE=ghcr.io/${{ github.repository }} IMAGE_TAG=sha-<precedent> docker compose -f docker-compose.prod.yml up -d"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

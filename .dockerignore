@@ -52,3 +52,10 @@ vitest.config.ts
 npm-debug.log*
 *.swp
 *.swo
+
+
+# Fichiers d infrastructure : ni consommes ni copies par l image. Les exclure
+# evite qu un changement de compose ou de script de deploiement invalide la
+# couche `COPY . .` du builder et force un rebuild complet.
+deploy
+docker-compose*.yml
