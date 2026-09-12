@@ -66,7 +66,7 @@ services:
       PORT: "3000"
       HOSTNAME: "0.0.0.0"
 
-    # Ecoute uniquement sur la boucle locale : Caddy termine le TLS devant.
+    # Ecoute uniquement sur la boucle locale : nginx termine le TLS devant.
     # L'application EST authentifiee (APP_ACCESS_SECRET, verifie par proxy.ts
     # devant toutes les pages et routes /api), mais le challenge est du HTTP
     # Basic : le secret circule en base64, reversible. Exposer ce port

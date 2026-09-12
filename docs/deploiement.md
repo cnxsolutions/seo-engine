@@ -39,25 +39,39 @@ Duree typique : **2 min de CI sur la PR, 3 a 4 min du merge a la production.**
 
 ### 2.1 Le serveur
 
-Sur le VPS Contabo neuf, en root :
+Le script est ecrit pour **cohabiter avec ce qui tourne deja** : il suppose un
+VPS qui heberge d'autres sites derriere nginx, et ne reconfigure rien de ce
+qu'il trouve en place.
+
+En root, sur le serveur :
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/cnxsolutions/seo-engine/main/deploy/bootstrap.sh -o bootstrap.sh
 bash bootstrap.sh seo.mondomaine.fr
 ```
 
-> Le domaine doit **deja** pointer sur l'IP du serveur. Caddy demande son
-> certificat des le demarrage ; si le DNS n'est pas propage, la demande echoue
-> et Let's Encrypt limite fortement les reessais.
+Il installe Docker et nginx **s'ils manquent**, cree l'utilisateur non-root
+`deploy` avec sa cle SSH, ajoute un vhost vers `127.0.0.1:3000`, obtient le
+certificat avec certbot, puis affiche les quatre valeurs a copier dans GitHub.
+Il est rejouable : chaque etape verifie avant d'agir.
 
-Le script installe Docker, Caddy (TLS automatique), un utilisateur `deploy`
-non-root, un pare-feu qui ne laisse passer que 22/80/443, et les mises a jour
-de securite automatiques. Il termine en affichant les quatre valeurs a copier
-dans GitHub.
+> **Il s'arrete plutot que de casser l'existant.** Trois garde-fous :
+> il refuse de demarrer si le domaine ne resout pas **vers cette machine**
+> (sans quoi certbot echoue et Let's Encrypt plafonne les reessais) ; il refuse
+> d'ecraser un vhost deja present ; et il ne recharge nginx qu'apres un
+> `nginx -t` reussi — une conf invalide rechargee ferait tomber **tous** les
+> sites du serveur, pas seulement celui-ci.
+>
+> **Il ne touche pas au pare-feu**, volontairement : activer `ufw` sur un
+> serveur en production n'ouvrirait que 22/80/443 et couperait tout le reste
+> (base distante, monitoring, mail, sauvegardes). Il affiche l'etat constate,
+> a toi de verifier que 80 et 443 sont joignables.
 
 **Dimensionnement.** Le VPS ne construit plus l'image : il ne fait que la tirer
 et l'executer. Le conteneur tourne confortablement avec **2 Go de RAM**. C'est
-le `next build`, desormais fait par GitHub, qui en reclamait 2 a lui seul.
+le `next build`, desormais fait par GitHub, qui en reclamait 2 a lui seul. En
+cohabitation, compte cette enveloppe **en plus** de ce que consomment les sites
+deja presents.
 
 ### 2.2 Le fichier de configuration
 
@@ -183,7 +197,7 @@ la version fautive.
 | `typecheck` echoue en local mais passe sur GitHub | Un `.next` perime. `rm -rf .next` puis relancer. Les erreurs pointent des fichiers **generes**, pas ton code. |
 | Le deploiement echoue au healthcheck | Le workflow affiche les 60 dernieres lignes du conteneur. Neuf fois sur dix : une variable manquante dans `/opt/seo-engine/.env`. |
 | Tout repond `503` | `APP_ACCESS_SECRET` absent ou de moins de 16 caracteres. La barriere refuse de tourner plutot que de s'ouvrir. |
-| Le site est injoignable, le conteneur est `healthy` | Cote Caddy : `systemctl status caddy` et `journalctl -u caddy -n 50`. |
+| Le site est injoignable, le conteneur est `healthy` | Cote nginx : `nginx -t`, `systemctl status nginx`, `tail -50 /var/log/nginx/error.log`. |
 | Rien n'est genere ni publie | Le conteneur peut etre `healthy` sans que le cron tourne. Section 8 du [README](../README.md). |
 | `docker compose pull` echoue a la main sur le VPS | Normal : le jeton GHCR utilise par la CI est ephemere et a expire. Relancer le workflow *Deploiement production* (`Actions` > `Run workflow`). |
 

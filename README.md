@@ -225,7 +225,7 @@ travail quotidien, retour arriere, diagnostic — est dans
 En resume, une fois pour toutes, sur le serveur neuf :
 
 ```bash
-bash deploy/bootstrap.sh seo.mondomaine.fr   # Docker, Caddy + TLS, pare-feu, utilisateur deploy
+bash deploy/bootstrap.sh seo.mondomaine.fr   # Docker, vhost nginx + certbot, utilisateur deploy
 # puis remplir /opt/seo-engine/.env et copier les 4 secrets dans GitHub
 ```
 
