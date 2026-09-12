@@ -1,0 +1,207 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Supervision — le filet qui manquait
+#
+# `restart: unless-stopped` relance le conteneur apres un plantage ou un reboot,
+# ce qui couvre le cas courant. Il ne couvre PAS le cas ou le process tourne
+# mais ne repond plus, ni celui ou le conteneur ne redemarre jamais. Sans ce
+# workflow, personne n'apprend la panne avant d'ouvrir le site.
+#
+# POURQUOI ICI PLUTOT QU'UN SERVICE EXTERNE
+# Le depot est public : les minutes Actions y sont gratuites et illimitees.
+# Un UptimeRobot ferait la meme chose, au prix d'un compte de plus, d'une cle
+# d'API a stocker et d'un endroit de plus ou regarder. Ici tout vit dans le
+# depot, et l'alerte arrive par le canal que tu lis deja : une issue GitHub.
+#
+# CE QU'IL VERIFIE VRAIMENT
+# Une reponse < 500 signifie que le conteneur Node repond — l'application
+# renvoie normalement 401, parce que proxy.ts exige APP_ACCESS_SECRET. Un 502
+# veut dire que nginx est debout mais que le conteneur est mort ; un 000, que
+# le serveur entier ne repond plus.
+#
+# CE QU'IL NE VERIFIE PAS
+# Que le planificateur tourne. Un conteneur peut repondre en HTTP sans generer
+# ni publier quoi que ce soit — c'est un angle mort assume, verifiable
+# manuellement (section 8 du README).
+#
+# ⚠ GitHub desactive les workflows programmes apres 60 jours sans activite sur
+# le depot. Un commit suffit a les reactiver, mais un depot dormant n'est plus
+# supervise : le mail d'avertissement de GitHub n'est pas a ignorer.
+# ─────────────────────────────────────────────────────────────────────────────
+
+name: Supervision
+
+on:
+  schedule:
+    # Toutes les 15 minutes. GitHub ne garantit pas la ponctualite des crons
+    # (retards de 5 a 15 minutes courants aux heures chargees) : c'est une
+    # surveillance, pas une horloge.
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+
+# Jamais deux verifications en parallele : elles se marcheraient dessus sur la
+# gestion de l'issue, ouvrant un doublon a chaque fois.
+concurrency:
+  group: supervision
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  check:
+    name: La production repond-elle
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    env:
+      GH_TOKEN: ${{ github.token }}
+      LABEL: supervision
+
+    steps:
+      - name: Interroger la production
+        id: probe
+        env:
+          # Definie dans Settings > Secrets and variables > Actions > Variables.
+          # Pas ecrite en dur : ce fichier est public, et l'URL doit pouvoir
+          # changer sans toucher au workflow.
+          URL: ${{ vars.PRODUCTION_URL }}
+        run: |
+          set -uo pipefail
+
+          if [ -z "${URL:-}" ]; then
+            echo "ERREUR — la variable de depot PRODUCTION_URL n'est pas definie."
+            echo "La creer : gh variable set PRODUCTION_URL --body https://<domaine>"
+            exit 1
+          fi
+
+          # `-w '%{http_code}'` ecrit TOUJOURS un code, y compris `000` quand la
+          # connexion n'aboutit pas — et curl sort alors en erreur. Un
+          # `|| echo 000` de repli concatenerait donc deux codes (`000000`),
+          # valeur qui n'est egale a rien et vaut 0 en arithmetique : le
+          # moniteur annoncerait « debout » un serveur totalement mort. D'ou le
+          # `|| true` et une seule ecriture.
+          probe() {
+            local c
+            c=$(curl -sS -o /dev/null -m 20 -w '%{http_code}' "$URL" 2>/dev/null) || true
+            printf '%s' "${c:-000}"
+          }
+
+          # Un code est sain s'il est numerique ET dans [100, 500[. La garde sur
+          # le format n'est pas theorique : une comparaison arithmetique sur une
+          # chaine vide ou parasitee ferait passer la panne pour un succes.
+          healthy() {
+            case "$1" in
+              ''|*[!0-9]*) return 1 ;;
+            esac
+            [ "$1" -ge 100 ] && [ "$1" -lt 500 ]
+          }
+
+          # Deux tentatives espacees de 30 s. Une seule suffirait a declencher
+          # une fausse alerte a chaque micro-coupure — et un deploiement en
+          # produit une d'une dizaine de secondes, par construction.
+          code=$(probe)
+          echo "1re tentative : $code"
+          if healthy "$code"; then
+            echo "status=up"     >> "$GITHUB_OUTPUT"
+            echo "code=$code"    >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "Reponse anormale, seconde tentative dans 30 s..."
+          sleep 30
+          code=$(probe)
+          echo "2e tentative : $code"
+          if healthy "$code"; then
+            echo "status=up"  >> "$GITHUB_OUTPUT"
+            echo "code=$code" >> "$GITHUB_OUTPUT"
+          else
+            echo "status=down" >> "$GITHUB_OUTPUT"
+            echo "code=$code"  >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Signaler la panne
+        if: steps.probe.outputs.status == 'down'
+        env:
+          CODE: ${{ steps.probe.outputs.code }}
+          URL: ${{ vars.PRODUCTION_URL }}
+        run: |
+          set -euo pipefail
+
+          # Le label doit exister avant d'etre pose. `|| true` : il existe deja
+          # a partir de la deuxieme panne.
+          gh label create "$LABEL" --color B60205 \
+            --description "Production injoignable" 2>/dev/null || true
+
+          case "$CODE" in
+            000) DIAG="Aucune reponse — le serveur entier est injoignable (reseau, nginx arrete, VPS eteint)." ;;
+            502) DIAG="nginx repond mais le conteneur est mort ou ne repond plus sur 127.0.0.1:3000." ;;
+            504) DIAG="nginx a attendu le conteneur sans reponse — process bloque." ;;
+            *)   DIAG="Code $CODE." ;;
+          esac
+
+          BODY=$(cat <<EOF
+          **$URL ne repond pas.** Deux tentatives espacees de 30 s ont echoue.
+
+          Dernier code observe : \`$CODE\`
+          $DIAG
+
+          ### Quoi regarder, dans cet ordre
+
+          \`\`\`bash
+          ssh deploy@<VPS>
+          cd /opt/seo-engine
+          docker compose -f docker-compose.prod.yml ps
+          docker compose -f docker-compose.prod.yml logs --tail 100
+          \`\`\`
+
+          Si le conteneur est absent ou en boucle de redemarrage, revenir a la
+          version precedente sans attendre le diagnostic :
+
+          \`\`\`bash
+          docker image ls ghcr.io/${{ github.repository }}
+          IMAGE=ghcr.io/${{ github.repository }} IMAGE_TAG=sha-<precedent> \\
+            docker compose -f docker-compose.prod.yml up -d
+          \`\`\`
+
+          Cette issue se fermera **toute seule** des que le site repondra a
+          nouveau. Chaque verification en echec ajoute un commentaire plutot
+          qu'une nouvelle issue.
+
+          Detail : \`docs/deploiement.md\`, section 6.
+          EOF
+          )
+
+          EXISTING=$(gh issue list --label "$LABEL" --state open --limit 1 \
+                       --json number --jq '.[0].number // empty')
+
+          if [ -n "$EXISTING" ]; then
+            gh issue comment "$EXISTING" \
+              --body "Toujours en panne — code \`$CODE\` a $(date -u '+%H:%M UTC')."
+            echo "Commentaire ajoute a l'issue #$EXISTING"
+          else
+            gh issue create \
+              --title "Production injoignable ($CODE)" \
+              --label "$LABEL" \
+              --body "$BODY"
+          fi
+
+      - name: Cloturer l'incident si tout est revenu
+        if: steps.probe.outputs.status == 'up'
+        env:
+          CODE: ${{ steps.probe.outputs.code }}
+        run: |
+          set -euo pipefail
+          for n in $(gh issue list --label "$LABEL" --state open --json number --jq '.[].number'); do
+            gh issue comment "$n" --body "Retabli — le site repond de nouveau (code \`$CODE\`)."
+            gh issue close "$n"
+            echo "Issue #$n fermee"
+          done
+
+      - name: Resume
+        if: always()
+        run: |
+          echo "| | |"                                              >> "$GITHUB_STEP_SUMMARY"
+          echo "|---|---|"                                          >> "$GITHUB_STEP_SUMMARY"
+          echo "| Etat | ${{ steps.probe.outputs.status }} |"        >> "$GITHUB_STEP_SUMMARY"
+          echo "| Code HTTP | \`${{ steps.probe.outputs.code }}\` |" >> "$GITHUB_STEP_SUMMARY"
