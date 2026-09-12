@@ -196,6 +196,7 @@ la version fautive.
 |---|---|
 | `typecheck` echoue en local mais passe sur GitHub | Un `.next` perime. `rm -rf .next` puis relancer. Les erreurs pointent des fichiers **generes**, pas ton code. |
 | Le deploiement echoue au healthcheck | Le workflow affiche les 60 dernieres lignes du conteneur. Neuf fois sur dix : une variable manquante dans `/opt/seo-engine/.env`. |
+| Le deploiement echoue en SSH (`error in libcrypto`, puis `Permission denied (publickey)`) | Le secret `VPS_SSH_KEY` porte des fins de ligne CRLF. Classique quand il a ete pose depuis PowerShell, qui reecrit en CRLF tout ce qui traverse un pipe. Le workflow les retire desormais et valide la cle avant de s'en servir ; si le message persiste, reposer le secret depuis Git Bash ou WSL. |
 | Tout repond `503` | `APP_ACCESS_SECRET` absent ou de moins de 16 caracteres. La barriere refuse de tourner plutot que de s'ouvrir. |
 | Le site est injoignable, le conteneur est `healthy` | Cote nginx : `nginx -t`, `systemctl status nginx`, `tail -50 /var/log/nginx/error.log`. |
 | Rien n'est genere ni publie | Le conteneur peut etre `healthy` sans que le cron tourne. Section 8 du [README](../README.md). |

@@ -118,12 +118,37 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p ~/.ssh && chmod 700 ~/.ssh
-          printf '%s\n' "$SSH_KEY" > ~/.ssh/id_ed25519
+
+          # `tr -d '\r'` n'est pas de la precaution gratuite : le secret est
+          # souvent pose depuis un poste Windows, et PowerShell reecrit en CRLF
+          # tout ce qui traverse un pipe (`ssh ... | gh secret set`). OpenSSH
+          # refuse alors la cle avec « error in libcrypto », puis « Permission
+          # denied (publickey) » — un message qui accuse les droits d'acces
+          # alors que le probleme est une fin de ligne.
+          printf '%s\n' "$SSH_KEY" | tr -d '\r' > ~/.ssh/id_ed25519
           chmod 600 ~/.ssh/id_ed25519
+
+          # Echouer ICI, avec le motif, plutot que trois etapes plus loin sur un
+          # « Permission denied » qui envoie chercher au mauvais endroit.
+          if ! ssh-keygen -y -f ~/.ssh/id_ed25519 >/dev/null 2>&1; then
+            echo "ERREUR — le secret VPS_SSH_KEY n'est pas une cle privee valide."
+            echo ""
+            echo "Le contenu a ete lu, mais OpenSSH ne parvient pas a l'ouvrir."
+            echo "Causes habituelles :"
+            echo "  - le bloc a ete tronque (les lignes BEGIN/END doivent y etre) ;"
+            echo "  - c'est la cle PUBLIQUE (.pub) qui a ete collee ;"
+            echo "  - un retour a la ligne final manque."
+            echo ""
+            echo "Reposer le secret, depuis un shell qui ne reecrit pas les fins"
+            echo "de ligne (Git Bash, WSL, ou le serveur lui-meme) :"
+            echo "  ssh root@<vps> 'cat /home/deploy/.ssh/id_ed25519' | gh secret set VPS_SSH_KEY"
+            exit 1
+          fi
+
           # known_hosts renseigne et StrictHostKeyChecking laisse a « yes » : un
           # deploiement qui accepte n'importe quelle empreinte accepte aussi un
           # serveur qui n'est pas le tien.
-          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+          printf '%s\n' "$KNOWN_HOSTS" | tr -d '\r' > ~/.ssh/known_hosts
           chmod 600 ~/.ssh/known_hosts
           # L'alias « vps » evite de repeter hote, utilisateur et cle a chaque
           # appel, et garde les secrets hors des lignes de commande.
