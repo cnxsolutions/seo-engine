@@ -49,6 +49,18 @@ services:
     # potentiellement au milieu d'une publication.
     init: true
 
+    # Durcissement aligne sur les autres applications du VPS : aucune capacite
+    # Linux (le port 3000 > 1024 n'en demande aucune), pas d'escalade via setuid.
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+
+    # Plafonds : le VPS est partage avec une autre application de production et
+    # n'a pas de swap. Un emballement de Node ne doit pas faire tomber la voisine.
+    mem_limit: 2g
+    memswap_limit: 2g
+    cpus: 2.0
+    pids_limit: 256
+
     # Toutes les cles vivent dans /opt/seo-engine/.env, jamais dans ce fichier,
     # jamais dans l'image, jamais dans les secrets GitHub. Ce fichier n'est pas
     # televerse par la CI : il est cree une fois a la main sur le serveur et n'est
