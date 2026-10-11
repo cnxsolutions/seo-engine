@@ -244,13 +244,28 @@ export async function listDueCampaigns(now = new Date().toISOString()) {
   const supabase = requireSupabase()
   const { data, error } = await supabase
     .from('campaigns')
-    .select('*, site:sites(*)')
+    .select('*, site:sites(*), cycle_plans(id)')
     .eq('is_active', true)
     .not('next_run_at', 'is', null)
     .lte('next_run_at', now)
 
   if (error) throw new Error(error.message)
-  return (data ?? []) as Campaign[]
+
+  // Campaigns WITHOUT any cycle plan only. This job predates the editorial
+  // calendar: it runs with no brief and always targets `business_type` + the
+  // first commune. A campaign created from an analysis gets a plan AND a
+  // `frequency_hours`, so the job ran next to its calendar — before the plan was
+  // even confirmed — and from its second run on, every run hit the address the
+  // first one took: "L'adresse /taxi-troyes est deja occupee", one untitled
+  // failed row every two days. A planned campaign produces what its plan says.
+  type DueRow = Campaign & { cycle_plans?: Array<{ id: string }> | null }
+  return ((data ?? []) as DueRow[])
+    .filter((row) => !row.cycle_plans?.length)
+    .map((row) => {
+      const campaign: DueRow = { ...row }
+      delete campaign.cycle_plans
+      return campaign as Campaign
+    })
 }
 
 export async function createGeneration(payload: CreateGenerationPayload) {
