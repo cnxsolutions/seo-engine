@@ -73,6 +73,22 @@ function withRef(url: string, branch?: string): string {
  * prefix match, no "starts with", no route-group awareness — a looser rule here
  * turns a named target back into a blanket permission.
  */
+/**
+ * The file a page lives in, in the client's repository.
+ *
+ * The folder is trimmed because stored profiles carry `src/app/` — trailing
+ * slash — when the site has no route group. Joined as-is that gave
+ * `src/app//slug/page.tsx`: GitHub refuses the commit with a 422 ("path
+ * contains a malformed path component"), the generation goes back to the queue,
+ * and the same push failed every fifteen minutes. The existence check read the
+ * same broken path, so it also answered "free" without ever seeing the file.
+ * Trimmed here rather than in the database: every stored profile is fixed at
+ * once, with no re-analysis.
+ */
+export function pageFilePath(pageFolder: string, slug: string): string {
+  return `${pageFolder.replace(/\/+$/, '')}/${slug}/page.tsx`
+}
+
 function samePagePath(a: string, b: string): boolean {
   const normalise = (value: string) =>
     value.split(/[?#]/)[0].replace(/^\/+/, '').replace(/\/+$/, '').toLowerCase()
@@ -164,7 +180,7 @@ export async function publishToNextJs(opts: NextJsPublishOptions): Promise<NextJ
     }
 
     // 3. Commit the page file
-    const pagePath = `${profile.pageFolder}/${page.slug}/page.tsx`
+    const pagePath = pageFilePath(profile.pageFolder, page.slug)
     const existing = await readExistingPage(repoApi, headers, pagePath, branch)
 
     // Never overwrite a page a human wrote — unless a human named that page.
@@ -323,7 +339,7 @@ export async function probeNextJsPath(opts: NextJsProbeOptions): Promise<NextJsP
     return { redirected: true, occupied: false, ours: false }
   }
 
-  const existing = await readExistingPage(repoApi, headers, `${profile.pageFolder}/${slug}/page.tsx`, branch)
+  const existing = await readExistingPage(repoApi, headers, pageFilePath(profile.pageFolder, slug), branch)
   if (!existing) return { redirected: false, occupied: false, ours: false }
 
   return {

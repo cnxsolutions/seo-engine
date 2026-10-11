@@ -180,7 +180,8 @@ export async function analyzeNextJsRepo(
     pageFolders.filter(f => f.startsWith('(')).map(f => f.split('/')[0])
   )]
   const seoGroup = routeGroups.find(g => g.includes('seo') || g.includes('page')) || routeGroups[0]
-  const pageFolder = seoGroup ? `${appPath}${seoGroup}` : appPath
+  // No trailing slash: every consumer appends `/<something>` (see pageFilePath).
+  const pageFolder = seoGroup ? `${appPath}${seoGroup}` : appPath.replace(/\/$/, '')
 
   // 5. Find a sample SEO page to use as template
   const seoPages = files.filter(f =>
