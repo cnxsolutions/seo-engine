@@ -25,6 +25,32 @@ export type AiModel =
 const OPENAI_SAMPLING_REJECTED = /^(gpt-5|o[1-9])/
 
 /**
+ * OpenAI reasoning models: the same family, for a different reason.
+ *
+ * They spend hidden reasoning tokens out of the SAME `max_completion_tokens`
+ * budget as the visible answer. The callers size `maxTokens` for the page alone
+ * (`estimateMaxOutputTokens`), so `gpt-5.5` used up the 6000 tokens reasoning and
+ * every page came back cut: "Reponse OpenAI tronquee (gpt-5.5) : la limite de
+ * 6000 tokens", three attempts per slot, no page produced for days.
+ *
+ * Two levers, both needed. `low` effort keeps the reasoning short (the page is
+ * writing, not problem solving) and is accepted by every reasoning model; the
+ * headroom absorbs what reasoning remains. Unused tokens are not billed, so the
+ * headroom costs nothing when it is not needed.
+ */
+const OPENAI_REASONING_MODEL = /^(gpt-5|o[1-9])/
+const REASONING_HEADROOM_TOKENS = 8000
+
+/** The token settings for one OpenAI call, `outputTokens` being the visible answer's budget. */
+export function openAiTokenSettings(model: string, outputTokens: number): {
+  max_completion_tokens: number
+  reasoning_effort?: 'low'
+} {
+  if (!OPENAI_REASONING_MODEL.test(model)) return { max_completion_tokens: outputTokens }
+  return { max_completion_tokens: outputTokens + REASONING_HEADROOM_TOKENS, reasoning_effort: 'low' }
+}
+
+/**
  * Models offered for page generation, in the order the UI shows them.
  *
  * Declared once and imported by every selector: the three dropdowns that used to
@@ -135,6 +161,7 @@ export async function generateJson(opts: {
   // accept BOTH — verified by probing each of them. Sending the new name
   // unconditionally therefore removes a branch instead of adding one, and a
   // model swap in the campaign settings can no longer 400 on its first call.
+  const tokens = openAiTokenSettings(model, maxTokens)
   const response = await getOpenAiClient().chat.completions.create({
     model,
     messages: [
@@ -143,7 +170,7 @@ export async function generateJson(opts: {
     ],
     ...(OPENAI_SAMPLING_REJECTED.test(model) ? {} : { temperature }),
     response_format: { type: 'json_object' },
-    max_completion_tokens: maxTokens,
+    ...tokens,
   })
 
   const choice = response.choices[0]
@@ -151,9 +178,13 @@ export async function generateJson(opts: {
   // Same reasoning as the Anthropic path: a cut response must not travel as if
   // it were a complete one.
   if (choice?.finish_reason === 'length') {
+    // The reasoning share is reported because it is the half nobody sees: a
+    // limit that looks generous for an 800-word page can still be eaten by it.
+    const reasoning = response.usage?.completion_tokens_details?.reasoning_tokens
     throw new Error(
-      `Reponse OpenAI tronquee (${model}) : la limite de ${maxTokens} tokens de sortie a ete atteinte. ` +
-        `Reduire la longueur cible ou augmenter maxTokens.`
+      `Reponse OpenAI tronquee (${model}) : la limite de ${tokens.max_completion_tokens} tokens de sortie a ete atteinte` +
+        (reasoning ? ` (dont ${reasoning} de raisonnement)` : '') +
+        `. Reduire la longueur cible ou augmenter maxTokens.`
     )
   }
 

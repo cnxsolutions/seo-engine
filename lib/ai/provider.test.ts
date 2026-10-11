@@ -3,8 +3,9 @@
 // SEO Engine - Model mapping and per-model capabilities
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { describe, it, expect } from 'vitest'
-import { isAnthropicModel, resolveAnthropicModel, supportsTemperature } from './provider'
+import { afterEach, describe, it, expect, vi } from 'vitest'
+import { generateJson, isAnthropicModel, openAiTokenSettings, resolveAnthropicModel, supportsTemperature } from './provider'
+import * as openai from './openai'
 import { DEFAULT_ANTHROPIC_MODEL } from './anthropic'
 
 describe('isAnthropicModel()', () => {
@@ -55,5 +56,59 @@ describe('supportsTemperature()', () => {
   it('keeps sampling parameters for models that still accept them', () => {
     expect(supportsTemperature('claude-haiku-4-5')).toBe(true)
     expect(supportsTemperature('claude-haiku-4-5-20251001')).toBe(true)
+  })
+})
+
+// ─── Reasoning models and the output budget ──────────────────────────────────
+//
+// The GPT-5 family takes its hidden reasoning out of `max_completion_tokens`.
+// Sized for the page alone, the budget was eaten before the page was written:
+// "Reponse OpenAI tronquee (gpt-5.5) : la limite de 6000 tokens", on every slot.
+
+describe('openAiTokenSettings()', () => {
+  it('adds reasoning headroom and lowers the effort for the GPT-5 family', () => {
+    const settings = openAiTokenSettings('gpt-5.5', 6000)
+    expect(settings.max_completion_tokens).toBeGreaterThan(6000)
+    expect(settings.reasoning_effort).toBe('low')
+    expect(openAiTokenSettings('gpt-5.4-mini', 7000).reasoning_effort).toBe('low')
+  })
+
+  it('leaves non-reasoning models exactly as asked', () => {
+    // gpt-4o-mini rejects `reasoning_effort`: sending it would 400 the gap analysis.
+    expect(openAiTokenSettings('gpt-4o-mini', 2000)).toEqual({ max_completion_tokens: 2000 })
+  })
+})
+
+describe('generateJson() — OpenAI request', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  function stubCompletion(response: unknown) {
+    const create = vi.fn(async () => response)
+    vi.spyOn(openai, 'getOpenAiClient').mockReturnValue({ chat: { completions: { create } } } as never)
+    return create
+  }
+
+  it('sends the reasoning settings with the call', async () => {
+    const create = stubCompletion({ choices: [{ finish_reason: 'stop', message: { content: '{"ok":true}' } }] })
+
+    await generateJson({ systemPrompt: 's', userPrompt: 'u', model: 'gpt-5.5', maxTokens: 6000 })
+
+    expect(create).toHaveBeenCalledWith(expect.objectContaining({
+      model: 'gpt-5.5',
+      reasoning_effort: 'low',
+      max_completion_tokens: openAiTokenSettings('gpt-5.5', 6000).max_completion_tokens,
+    }))
+  })
+
+  it('names the reasoning share when the answer is still cut', async () => {
+    stubCompletion({
+      choices: [{ finish_reason: 'length', message: { content: '{"tit' } }],
+      usage: { completion_tokens_details: { reasoning_tokens: 9000 } },
+    })
+
+    await expect(generateJson({ systemPrompt: 's', userPrompt: 'u', model: 'gpt-5.5', maxTokens: 6000 }))
+      .rejects.toThrow(/tronquee.*dont 9000 de raisonnement/)
   })
 })
