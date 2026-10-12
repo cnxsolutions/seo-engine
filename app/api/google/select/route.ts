@@ -8,6 +8,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { NextRequest, NextResponse, after } from 'next/server'
+import { publicUrl } from '@/lib/public-origin'
 import { updateGoogleConnection } from '@/lib/google/client'
 import { markGscSyncStarted, triggerGscSyncOnConnect } from '@/lib/google/sync'
 
@@ -16,7 +17,7 @@ export async function POST(req: NextRequest) {
 
   const siteId = readField(form, 'site_id')
   if (!siteId) {
-    return NextResponse.redirect(new URL('/sites?error=site_id_manquant', req.url), 303)
+    return NextResponse.redirect(publicUrl('/sites?error=site_id_manquant', req), 303)
   }
 
   const gscSiteUrl = readField(form, 'gsc_site')
@@ -32,7 +33,7 @@ export async function POST(req: NextRequest) {
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Enregistrement de la sélection impossible'
     return NextResponse.redirect(
-      new URL(`/sites/${siteId}/google?error=${encodeURIComponent(message)}`, req.url),
+      publicUrl(`/sites/${siteId}/google?error=${encodeURIComponent(message)}`, req),
       303
     )
   }
@@ -53,7 +54,7 @@ export async function POST(req: NextRequest) {
 
   // 303, not the default 307: a 307 preserves the method and would make the
   // browser POST the form again to the destination page.
-  return NextResponse.redirect(new URL(`/sites/${siteId}/google?selected=1`, req.url), 303)
+  return NextResponse.redirect(publicUrl(`/sites/${siteId}/google?selected=1`, req), 303)
 }
 
 function readField(form: FormData, name: string): string | null {

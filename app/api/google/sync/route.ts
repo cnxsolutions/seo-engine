@@ -9,6 +9,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { NextRequest, NextResponse } from 'next/server'
+import { publicUrl } from '@/lib/public-origin'
 import { INITIAL_SYNC_DAYS, syncGscPerformance, syncGbpProfile } from '@/lib/google/sync'
 
 export async function POST(req: NextRequest) {
@@ -23,7 +24,7 @@ export async function POST(req: NextRequest) {
   if (scope === 'gbp') {
     const result = await syncGbpProfile(siteId)
     return NextResponse.redirect(
-      new URL(`/sites/${siteId}/google?gbp=${result.status}`, req.url),
+      publicUrl(`/sites/${siteId}/google?gbp=${result.status}`, req),
       303
     )
   }
@@ -33,5 +34,5 @@ export async function POST(req: NextRequest) {
   const params = new URLSearchParams({ gsc: result.status, rows: String(result.rows) })
   if (result.error) params.set('error', result.error)
 
-  return NextResponse.redirect(new URL(`/sites/${siteId}/google?${params.toString()}`, req.url), 303)
+  return NextResponse.redirect(publicUrl(`/sites/${siteId}/google?${params.toString()}`, req), 303)
 }

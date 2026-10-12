@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse, after } from 'next/server'
+import { publicUrl } from '@/lib/public-origin'
 import { exchangeCode, getGoogleUserEmail } from '@/lib/google/auth'
 import { upsertGoogleConnection } from '@/lib/google/client'
 import { triggerGscSyncOnConnect } from '@/lib/google/sync'
@@ -9,11 +10,11 @@ export async function GET(req: NextRequest) {
   const error = req.nextUrl.searchParams.get('error')
 
   if (error) {
-    return NextResponse.redirect(new URL(`/sites?error=${encodeURIComponent(error)}`, req.url))
+    return NextResponse.redirect(publicUrl(`/sites?error=${encodeURIComponent(error)}`, req))
   }
 
   if (!code || !siteId) {
-    return NextResponse.redirect(new URL('/sites?error=missing_params', req.url))
+    return NextResponse.redirect(publicUrl('/sites?error=missing_params', req))
   }
 
   try {
@@ -41,9 +42,9 @@ export async function GET(req: NextRequest) {
       await triggerGscSyncOnConnect(siteId, 'oauth_callback')
     })
 
-    return NextResponse.redirect(new URL(`/sites/${siteId}/google/select`, req.url))
+    return NextResponse.redirect(publicUrl(`/sites/${siteId}/google/select`, req))
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Erreur OAuth'
-    return NextResponse.redirect(new URL(`/sites?error=${encodeURIComponent(message)}`, req.url))
+    return NextResponse.redirect(publicUrl(`/sites?error=${encodeURIComponent(message)}`, req))
   }
 }
