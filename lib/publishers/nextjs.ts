@@ -4,6 +4,7 @@ import { buildScaffold, EMPTY_CHROME, extractChrome, GENERATED_MARKER } from './
 import { buildContractPayload, emitContractPage, variantForPageType } from './contract'
 import { parseGeneratedRoutes, renderGeneratedRoutes, routeForPublication, upsertRoute } from './routes-file'
 import { promoteToProduction, type PromotionOutcome } from './promote'
+import { syncBranchWithProduction } from './sync-branch'
 import type { PageType } from '@/lib/types'
 import { isRedirectSource } from './redirects'
 
@@ -157,6 +158,16 @@ export async function publishToNextJs(opts: NextJsPublishOptions): Promise<NextJ
   }
 
   try {
+    // 0. Bring the branch level with production BEFORE reading or writing it,
+    // so the existence check sees the real site and the host builds the real
+    // site. A conflict is only logged: the promotion will report it properly.
+    if (branch) {
+      const sync = await syncBranchWithProduction({ repoApi, headers, head: branch })
+      if (sync.how === 'conflit' || sync.how === 'inconnu') {
+        console.warn(`[publish] branche « ${branch} » non synchronisee avec la production : ${sync.reason}`)
+      }
+    }
+
     const profile = repoProfile || await detectProfileLite(repoApi, headers, branch)
 
     // 1. Generate the page.tsx content
