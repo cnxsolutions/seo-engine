@@ -13,6 +13,15 @@
 // is the audit trail and the revert point — but its content is carried over to
 // the branch the host actually deploys.
 //
+// AND IT WAITS FOR THE BUILD. The first version read the commit status once,
+// four seconds after the commit, when the host had not even started building,
+// and merged on "pending". Six pages whose TSX did not compile reached `main`
+// that way: Vercel kept serving the previous deployment, the pages answered
+// 404, and every later deployment of the client's site was going to fail until
+// someone reverted by hand — while the engine reported "en ligne". The build
+// verdict is the only compile check the engine can get on a repository it does
+// not own, so it is worth a few minutes of waiting.
+//
 // Deliberately NOT fatal. The page is already committed when this runs, so a
 // promotion failure is a page that exists and is not yet live, which is exactly
 // where the site was before. Reporting it is the whole job; throwing would turn
@@ -28,12 +37,37 @@ export interface PromotionOutcome {
   /**
    * Whether a build result was consulted before merging.
    *
-   * False means "merged without ever seeing a green build" — which is the normal
-   * case here, because the repository token cannot read commit statuses. Saying
-   * so is the point: an unverified promotion should never read as a verified one.
+   * False means "merged without ever seeing a green build" — only possible when
+   * the repository reports no build status at all (no host integration, or a
+   * token that cannot read statuses). Saying so is the point: an unverified
+   * promotion should never read as a verified one.
    */
   verified: boolean
+  /** True when the merge was withheld because the build has not finished yet. */
+  pending?: boolean
 }
+
+export interface PromotionWait {
+  /** How long to wait for a verdict once the host has reported a status. */
+  maxMs: number
+  /**
+   * How long to wait for the host to report ANYTHING. A repository without a
+   * build integration never reports, and must not be held hostage.
+   */
+  graceMs: number
+  pollMs: number
+}
+
+/**
+ * The defaults are sized on the connected host: Vercel reports its status
+ * within seconds of the commit and a build of these sites takes 40–90 s.
+ * The publication job has no in-tick timeout, so the wait only delays the
+ * tick, never aborts it.
+ */
+export const DEFAULT_PROMOTION_WAIT: PromotionWait = { maxMs: 180_000, graceMs: 45_000, pollMs: 10_000 }
+
+/** Reads the status once and decides on what it sees: for the deferred retry. */
+export const NO_WAIT: PromotionWait = { maxMs: 0, graceMs: 0, pollMs: 0 }
 
 export interface PromotionOptions {
   repoApi: string
@@ -42,17 +76,19 @@ export interface PromotionOptions {
   head: string
   /** Only for the merge message. */
   slug: string
+  wait?: PromotionWait
 }
 
 /**
- * Merge the publication branch into the repository's default branch.
+ * Merge the publication branch into the repository's default branch, once its
+ * build is green.
  *
  * The default branch is read from GitHub rather than assumed to be `main`: it is
  * `master` on older repositories, and merging into a branch that does not exist
  * fails in a way that is tedious to read.
  */
 export async function promoteToProduction(opts: PromotionOptions): Promise<PromotionOutcome> {
-  const { repoApi, headers, head, slug } = opts
+  const { repoApi, headers, head, slug, wait = DEFAULT_PROMOTION_WAIT } = opts
 
   try {
     const repoRes = await fetch(repoApi, { headers, cache: 'no-store' })
@@ -67,13 +103,22 @@ export async function promoteToProduction(opts: PromotionOptions): Promise<Promo
       return { promoted: false, base, verified: false, reason: 'la publication vise deja la branche de production' }
     }
 
-    const build = await readBuildOutcome(repoApi, headers, head)
+    const build = await awaitBuildOutcome(repoApi, headers, head, wait)
     if (build === 'failure') {
       return {
         promoted: false,
         base,
         verified: true,
-        reason: `le build de « ${head} » est en echec — rien n'a ete fusionne`,
+        reason: `le build de « ${head} » est en echec — rien n'a ete fusionne, la page n'est pas en ligne`,
+      }
+    }
+    if (build === 'pending') {
+      return {
+        promoted: false,
+        base,
+        verified: false,
+        pending: true,
+        reason: `le build de « ${head} » n'a pas rendu son verdict — fusion reportee au prochain passage`,
       }
     }
 
@@ -121,36 +166,66 @@ export async function promoteToProduction(opts: PromotionOptions): Promise<Promo
   }
 }
 
+type BuildOutcome = 'success' | 'failure' | 'pending' | 'unavailable'
+
+/**
+ * Poll the branch tip until the host has spoken, within the allowed wait.
+ *
+ * - `unavailable` (the token cannot read statuses, or nobody reported one within
+ *   the grace period) merges unverified, as before: refusing to promote because
+ *   we cannot see would reproduce the very problem this module exists to fix.
+ * - `pending` past the wait is reported as such and NOT merged: a build that is
+ *   still running may still fail, and the deferred retry will read the verdict.
+ */
+async function awaitBuildOutcome(
+  repoApi: string,
+  headers: Record<string, string>,
+  branch: string,
+  wait: PromotionWait
+): Promise<BuildOutcome> {
+  const started = Date.now()
+  let reported = false
+
+  for (;;) {
+    const read = await readBuildOutcome(repoApi, headers, branch)
+    if (read.outcome === 'success' || read.outcome === 'failure' || read.outcome === 'unavailable') {
+      return read.outcome
+    }
+    reported ||= read.reported
+
+    const elapsed = Date.now() - started
+    if (!reported && elapsed >= wait.graceMs) return 'unavailable'
+    if (reported && elapsed >= wait.maxMs) return 'pending'
+
+    await new Promise((resolve) => setTimeout(resolve, wait.pollMs))
+  }
+}
+
 /**
  * The build result for the branch tip, when the token is allowed to see it.
  *
- * A fine-grained token without `Commit statuses: read` answers 403 here, which
- * is the current situation on the connected repository. That is treated as
- * `unknown`, not as failure: refusing to promote because we cannot see would
- * reproduce the very problem this module exists to fix.
- *
- * `pending` is also `unknown` on purpose. A build started seconds ago is always
- * pending, and waiting for it would mean either blocking the tick or dropping
- * the promotion — the merge happens, and the host's own build is what gates
- * deployment anyway.
+ * `reported` says whether any status exists at all: a combined state of
+ * `pending` with an empty list means nobody has reported yet (or ever will),
+ * which the caller tells apart from a build in progress by waiting a little.
  */
 async function readBuildOutcome(
   repoApi: string,
   headers: Record<string, string>,
   branch: string
-): Promise<'success' | 'failure' | 'unknown'> {
+): Promise<{ outcome: BuildOutcome; reported: boolean }> {
   try {
     const res = await fetch(`${repoApi}/commits/${encodeURIComponent(branch)}/status`, {
       headers,
       cache: 'no-store',
     })
-    if (!res.ok) return 'unknown'
+    if (!res.ok) return { outcome: 'unavailable', reported: false }
 
     const status = await res.json()
-    if (status.state === 'success' && (status.statuses?.length ?? 0) > 0) return 'success'
-    if (status.state === 'failure' || status.state === 'error') return 'failure'
-    return 'unknown'
+    const reported = (status.statuses?.length ?? 0) > 0
+    if (status.state === 'success' && reported) return { outcome: 'success', reported }
+    if (status.state === 'failure' || status.state === 'error') return { outcome: 'failure', reported }
+    return { outcome: 'pending', reported }
   } catch {
-    return 'unknown'
+    return { outcome: 'unavailable', reported: false }
   }
 }

@@ -502,9 +502,39 @@ const TEMPLATE_MISUSES: Array<{ pattern: RegExp; why: string }> = [
   },
 ]
 
+/**
+ * The FAQ items in the shape the template declares.
+ *
+ * The engine stores a question as `{ q, a }`. The template, written from one of
+ * the site's own pages, declares whatever the site uses — and on the connected
+ * site that is `{ question, answer }`. Emitting `q`/`a` against that annotation
+ * is a type error ("Object literal may only specify known properties"), one of
+ * the three that broke the client's build.
+ */
+export function faqItemsForTemplate(template: string, faqItems: GeneratedPage['faqItems']): string {
+  const items = faqItems || []
+  const shaped = /\bquestion\b/.test(template)
+    ? items.map((item) => ({ question: item.q, answer: item.a }))
+    : items
+  return JSON.stringify(shaped, null, 2)
+}
+
+/**
+ * The page body as a JSX child that compiles whatever the HTML contains.
+ *
+ * Pasted raw into JSX, the generated HTML is read as JSX: `class` is not
+ * `className`, `datetime` is not `dateTime`, a brace in a sentence opens an
+ * expression. `dangerouslySetInnerHTML` takes the string as a string, which is
+ * what it is. A template that already wraps the placeholder in a template
+ * literal keeps the string form (see fillTemplate).
+ */
+function htmlContentElement(html: string): string {
+  return `<div dangerouslySetInnerHTML={{ __html: ${JSON.stringify(html)} }} />`
+}
+
 export function fillTemplate(template: string, page: GeneratedPage, siteUrl: string): string {
   const pageUrl = `${siteUrl.replace(/\/$/, '')}/${page.slug}`
-  const faqJson = JSON.stringify(page.faqItems || [], null, 2)
+  const faqJson = faqItemsForTemplate(template, page.faqItems)
   const schemaJson = buildSchemaJson(page, pageUrl)
 
   const misuse = TEMPLATE_MISUSES.find((m) => m.pattern.test(template))
@@ -517,7 +547,10 @@ export function fillTemplate(template: string, page: GeneratedPage, siteUrl: str
     .replace(/\{\{COMPONENT_NAME\}\}/g, componentNameFromSlug(page.slug))
     .replace(/\{\{OG_TITLE\}\}/g, escapeJs(page.ogTitle || page.title))
     .replace(/\{\{OG_DESCRIPTION\}\}/g, escapeJs(page.ogDescription || page.metaDescription))
-    .replace(/\{\{HTML_CONTENT\}\}/g, escapeTemplate(page.htmlContent))
+    // Inside backticks the template asked for a string: give it one. Anywhere
+    // else it asked for a JSX child, and raw HTML is not one.
+    .replace(/`\{\{HTML_CONTENT\}\}`/g, `\`${escapeTemplate(page.htmlContent)}\``)
+    .replace(/\{\{HTML_CONTENT\}\}/g, htmlContentElement(page.htmlContent))
     .replace(/\{\{FAQ_ITEMS_JSON\}\}/g, faqJson)
     .replace(/\{\{SCHEMA_JSON\}\}/g, schemaJson)
     .replace(/\{\{PAGE_URL\}\}/g, pageUrl)
@@ -535,7 +568,9 @@ export function fillTemplate(template: string, page: GeneratedPage, siteUrl: str
   //
   // Failing here costs one slot. Committing costs a broken repository, and the
   // engine has no way to know it happened.
-  const leftovers = [...new Set(filled.match(/\{\{[^}]{0,80}\}\}/g) ?? [])]
+  // A placeholder starts with a capital letter. `{{ __html: … }}` is a JSX
+  // object literal — the engine's own HTML element emits one — and must pass.
+  const leftovers = [...new Set(filled.match(/\{\{(?=[A-Z])[^}]{0,80}\}\}/g) ?? [])]
   if (leftovers.length > 0) throw new TemplateSubstitutionError(leftovers)
 
   // Last line of defence, on the OUTPUT this time: whatever the template did,
