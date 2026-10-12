@@ -110,6 +110,47 @@ describe('fillTemplate', () => {
     }
   })
 
+  // ── Le HTML genere n'est pas du JSX ────────────────────────────────────────
+  //
+  // Colle tel quel dans le gabarit, le corps de page est lu comme du JSX :
+  // `class` n'est pas `className`, `datetime` n'est pas `dateTime`. Six pages
+  // ont casse le build du site client ainsi, pendant que le moteur affichait
+  // « en ligne ».
+
+  it('emet le corps de page via dangerouslySetInnerHTML quand il est un enfant JSX', () => {
+    const html = '<p class="intro">Réservation "immédiate" {à Troyes}</p><time datetime="2026-01-01">x</time>'
+    const out = fillTemplate('<div className="prose">{{HTML_CONTENT}}</div>', { ...page, htmlContent: html }, 'https://t.fr')
+
+    expect(out).toBe(`<div className="prose"><div dangerouslySetInnerHTML={{ __html: ${JSON.stringify(html)} }} /></div>`)
+  })
+
+  it('garde la forme chaine quand le gabarit entoure le placeholder de backticks', () => {
+    const out = fillTemplate(
+      'const content = `{{HTML_CONTENT}}`',
+      { ...page, htmlContent: '<p class="a">`x` ${y}</p>' },
+      'https://t.fr'
+    )
+    expect(out).toBe('const content = `<p class="a">\\`x\\` \\${y}</p>`')
+  })
+
+  it('emet la FAQ dans la forme que le gabarit declare', () => {
+    const faq = { ...page, faqItems: [{ q: 'Q ?', a: 'R.' }] }
+    const declared = fillTemplate('const faqItems: Array<{ question: string; answer: string }> = {{FAQ_ITEMS_JSON}};', faq, 'https://t.fr')
+    expect(JSON.parse(declared.slice(declared.indexOf('['), -1))).toEqual([{ question: 'Q ?', answer: 'R.' }])
+
+    const engine = fillTemplate('const faqItems = {{FAQ_ITEMS_JSON}};', faq, 'https://t.fr')
+    expect(JSON.parse(engine.slice(engine.indexOf('['), -1))).toEqual([{ q: 'Q ?', a: 'R.' }])
+  })
+
+  it('laisse passer un objet JSX a double accolade, qui n est pas un placeholder', () => {
+    const out = fillTemplate(
+      'export default function {{COMPONENT_NAME}}() { return <script dangerouslySetInnerHTML={{ __html: JSON.stringify(schema) }} /> }',
+      page,
+      'https://taxidriver10.fr'
+    )
+    expect(out).toContain('{{ __html: JSON.stringify(schema) }}')
+  })
+
   it('leaves ordinary JSX braces alone', () => {
     // Single braces are JSX, not placeholders — the guard must not fire on them.
     const out = fillTemplate(

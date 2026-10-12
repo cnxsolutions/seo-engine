@@ -4,10 +4,12 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { promoteToProduction } from './promote'
+import { promoteToProduction, type PromotionWait } from './promote'
 
 const REPO = 'https://api.github.com/repos/cnxsolutions/taxidriver10'
 const HEADERS = { Authorization: 'token x' }
+/** The real waits are minutes long; the logic is the same at the millisecond scale. */
+const FAST: PromotionWait = { maxMs: 60, graceMs: 20, pollMs: 2 }
 
 /** Answer each GitHub call by URL and method, so a test states only what it changes. */
 function mockGithub(routes: {
@@ -108,9 +110,52 @@ describe('promoteToProduction', () => {
     // GitHub answers `state: 'success'` for a commit nothing ever checked. Read
     // as verified, that would be a green light nobody gave.
     mockGithub({ status: { status: 200, body: { state: 'success', statuses: [] } } })
-    const outcome = await promoteToProduction({ repoApi: REPO, headers: HEADERS, head: 'seo-engine', slug: 's' })
+    const outcome = await promoteToProduction({ repoApi: REPO, headers: HEADERS, head: 'seo-engine', slug: 's', wait: FAST })
     expect(outcome.promoted).toBe(true)
     expect(outcome.verified).toBe(false)
+  })
+
+  // ── Attendre le verdict ────────────────────────────────────────────────────
+  //
+  // Quatre secondes apres le commit, Vercel n'a pas commence a construire : le
+  // statut est « pending ». Fusionner la-dessus a envoye sur main six pages qui
+  // ne compilaient pas, pendant que le moteur affichait « en ligne ».
+
+  it('attend que le build rende son verdict avant de fusionner', async () => {
+    let polls = 0
+    const { merges } = mockGithub({})
+    const base = globalThis.fetch
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (String(url).includes('/status')) {
+        polls += 1
+        const state = polls < 3 ? 'pending' : 'success'
+        return new Response(JSON.stringify({ state, statuses: [{ context: 'Vercel', state }] }), { status: 200 })
+      }
+      return base(url, init)
+    }))
+
+    const outcome = await promoteToProduction({ repoApi: REPO, headers: HEADERS, head: 'seo-engine', slug: 's', wait: FAST })
+
+    expect(polls).toBeGreaterThanOrEqual(3)
+    expect(outcome.promoted).toBe(true)
+    expect(outcome.verified).toBe(true)
+    expect(merges).toHaveLength(1)
+  })
+
+  it('ne fusionne PAS un build encore en cours au bout de l attente', async () => {
+    const { merges } = mockGithub({ status: { status: 200, body: { state: 'pending', statuses: [{ context: 'Vercel', state: 'pending' }] } } })
+    const outcome = await promoteToProduction({ repoApi: REPO, headers: HEADERS, head: 'seo-engine', slug: 's', wait: FAST })
+
+    expect(outcome.promoted).toBe(false)
+    expect(outcome.pending).toBe(true)
+    expect(outcome.reason).toMatch(/reportee/)
+    expect(merges).toHaveLength(0)
+  })
+
+  it('dit qu un build rouge laisse la page hors ligne', async () => {
+    mockGithub({ status: { status: 200, body: { state: 'failure', statuses: [{ context: 'Vercel', state: 'failure' }] } } })
+    const outcome = await promoteToProduction({ repoApi: REPO, headers: HEADERS, head: 'seo-engine', slug: 's', wait: FAST })
+    expect(outcome.reason).toMatch(/pas en ligne/)
   })
 
   it('ne leve jamais : la page est deja commitee quand on arrive ici', async () => {

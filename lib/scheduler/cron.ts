@@ -18,6 +18,7 @@ import {
   type GbpSlotPatch,
 } from '@/lib/gbp/posts/schedule'
 import { probeSlugFree } from '@/lib/existing/probe'
+import { NO_WAIT, promoteToProduction } from '@/lib/publishers/promote'
 import { MAX_PROMPT_NEIGHBOURS } from '@/lib/existing/prompt-block'
 import { reserveSlug } from '@/lib/existing/reservation'
 import { blindInventory, type SiteInventory } from '@/src/core/domain/existing/inventory'
@@ -50,7 +51,7 @@ import {
   todayLocalDate,
   updateEditorialSlot,
 } from './editorial'
-import type { Campaign, EditorialSlot, PageType, PlanItemBrief, Generation } from '@/lib/types'
+import type { Campaign, EditorialSlot, PageType, PlanItemBrief, Generation, Site } from '@/lib/types'
 import type { GeneratedPage } from '@/lib/ai/openai'
 
 // ─── Scheduler State ───────────────────────────────────────────────────────────────
@@ -190,6 +191,13 @@ export function initScheduler(): void {
       // visible to the jobs below in this very tick.
       await reapStaleSlots()
       await reapStalePublications()
+
+      // Before the publish job, never beside it: the merge takes the branch tip
+      // at merge time, and a commit the publish job is making right now would
+      // ride along unverified.
+      await promotePendingPublications().catch((error) =>
+        log('ERROR', 'promote', 'Deferred promotion failed', undefined, error instanceof Error ? error : new Error(String(error)))
+      )
 
       await Promise.allSettled([
         runDueEditorialSlots(),
@@ -939,16 +947,87 @@ async function publishPendingGenerations(): Promise<void> {
     log('WARN', 'publish', `Publication queue returned a full page (${PUBLISH_PAGE_SIZE}) — the rest is deferred to the next tick`)
   }
 
-  const batch: typeof pending = []
+  // One page at a time PER SITE, sites in parallel. Three pages pushed at once
+  // to the same GitHub branch race on its tip: the first commit lands, the two
+  // others are refused with "409 is at <sha> but expected <sha>" and come back
+  // next tick as errors. WordPress has no such race, but nothing is gained by
+  // flooding one site either.
+  const bySite = new Map<string, typeof pending>()
   for (const gen of pending) {
-    batch.push(gen)
-    if (batch.length >= config.concurrency) {
-      await publishBatch(batch, config)
-      batch.length = 0
-    }
+    const key = gen.site_id ?? gen.id
+    bySite.set(key, [...(bySite.get(key) ?? []), gen])
   }
-  if (batch.length > 0) {
-    await publishBatch(batch, config)
+  const sites = [...bySite.values()]
+  for (let i = 0; i < sites.length; i += config.concurrency) {
+    await Promise.allSettled(
+      sites.slice(i, i + config.concurrency).map(async (queue) => {
+        for (const gen of queue) await publishGeneration(gen, config)
+      })
+    )
+  }
+}
+
+/**
+ * Carry to production the pages a previous tick left on the publication branch.
+ *
+ * A Next.js page is committed to the site's branch, and merged into the branch
+ * the host deploys only once the host's build is green. When the verdict was
+ * still pending at the end of the wait, the page stayed on the branch — written,
+ * not live. This reads the verdict again, one call per site since the branch
+ * tip is shared, and finishes the job. A red build leaves the page where it is,
+ * with the reason on the row.
+ */
+async function promotePendingPublications(): Promise<void> {
+  const supabase = createServiceClient()
+  const { data, error } = await supabase
+    .from('generations')
+    .select('id, slug, publish_notes, site:sites!inner(*)')
+    .eq('status', 'published')
+    .eq('publish_live', false)
+    .eq('site.type', 'nextjs')
+    .eq('site.auto_promote', true)
+    .not('site.github_branch', 'is', null)
+  if (error) throw new Error(error.message)
+
+  type Row = { id: string; slug: string | null; publish_notes: string[] | null; site: Site }
+  const rows = (data ?? []) as unknown as Row[]
+  if (rows.length === 0) return
+
+  const bySite = new Map<string, Row[]>()
+  for (const row of rows) bySite.set(row.site.id, [...(bySite.get(row.site.id) ?? []), row])
+
+  for (const queue of bySite.values()) {
+    const site = queue[0].site
+    const branch = site.github_branch as string
+    const promotion = await promoteToProduction({
+      repoApi: `https://api.github.com/repos/${site.github_repo}`,
+      headers: {
+        Authorization: `token ${site.github_token}`,
+        Accept: 'application/vnd.github+json',
+        'Content-Type': 'application/json',
+      },
+      head: branch,
+      slug: queue.map((row) => row.slug ?? row.id).join(' /'),
+      wait: NO_WAIT,
+    })
+
+    if (promotion.pending) continue
+
+    for (const row of queue) {
+      const kept = (row.publish_notes ?? []).filter((note) => !note.startsWith('Commitee sur'))
+      if (promotion.promoted) {
+        await updateGeneration(row.id, {
+          publish_live: true,
+          publish_notes: [...kept, `Mise en ligne au passage du ${new Date().toISOString().slice(0, 16)} apres build vert sur « ${branch} »`],
+        }).catch(() => null)
+      } else {
+        const note = `Commitee sur « ${branch} » mais pas en ligne : ${promotion.reason ?? 'fusion refusee'}`
+        await updateGeneration(row.id, { publish_notes: [...kept, note] }).catch(() => null)
+      }
+    }
+    log(promotion.promoted ? 'INFO' : 'WARN', 'promote',
+      `${site.name} : ${queue.length} page(s) ${promotion.promoted ? 'mise(s) en ligne' : `toujours sur « ${branch} » — ${promotion.reason}`}`,
+      { siteId: site.id })
   }
 }
 
@@ -990,10 +1069,6 @@ function buildLegacyPageFallback(gen: PendingPublishGeneration, content: string)
     estimatedWordCount: wordCount,
     readingTimeMinutes: Math.max(1, Math.ceil(wordCount / 200)),
   }
-}
-
-async function publishBatch(generations: Awaited<ReturnType<typeof listPendingPublishGenerations>>, config: JobConfig): Promise<void> {
-  await Promise.allSettled(generations.map(gen => publishGeneration(gen, config)))
 }
 
 /**
