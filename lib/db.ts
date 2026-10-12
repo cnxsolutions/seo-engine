@@ -55,8 +55,25 @@ export async function listSites() {
   const siteIds = (sites ?? []).map((s) => s.id)
   let connectedSiteIds = new Set<string>()
   let schemaReadableIds = new Set<string>()
+  let credentialedIds = new Set<string>()
 
   if (siteIds.length > 0) {
+    // `has_credentials`: the secret columns are on file. Tested, never selected.
+    //
+    // Separate from `has_schema` on purpose. The sites screen used to read
+    // "no schema" as "no credentials", told the operator to complete them, and
+    // sent them to the creation form — which created a second site for the
+    // same address, credentials and all.
+    const credentialed = await supabase
+      .from('sites')
+      .select('id')
+      .in('id', siteIds)
+      .or(
+        'and(type.eq.wordpress,wp_username.not.is.null,wp_app_password.not.is.null),' +
+          'and(type.eq.nextjs,github_repo.not.is.null,github_token.not.is.null)'
+      )
+    credentialedIds = new Set((credentialed.data ?? []).map((s) => s.id))
+
     // `has_schema` now means what it says: a schema HAS been read and kept.
     //
     // It used to be a lookup in `content_schemas`, a table nothing ever wrote,
@@ -83,6 +100,7 @@ export async function listSites() {
     ...site,
     google_connected: connectedSiteIds.has(site.id),
     has_schema: schemaReadableIds.has(site.id),
+    has_credentials: credentialedIds.has(site.id),
   })) as SafeSite[]
 }
 

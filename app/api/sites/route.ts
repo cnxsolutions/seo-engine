@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createSite, listSites, updateSite } from '@/lib/db'
+import { normalizeSiteUrl } from '@/lib/site-url'
 import { analyzeNextJsRepo } from '@/lib/publishers/nextjs-analyzer'
 
 /**
@@ -41,6 +42,18 @@ export async function POST(req: NextRequest) {
 
     if (payload.type === 'nextjs' && (!payload.github_repo || !payload.github_token)) {
       return NextResponse.json({ error: 'Le repo et le token GitHub sont requis.' }, { status: 400 })
+    }
+
+    // One site per address. Nothing refused a second « AFS » for the same URL:
+    // the operator, told by a display bug that the first lacked credentials,
+    // created it again, and the engine would have published to it twice.
+    const wanted = normalizeSiteUrl(String(payload.url))
+    const existing = (await listSites()).find((site) => normalizeSiteUrl(site.url) === wanted)
+    if (existing) {
+      return NextResponse.json(
+        { error: `Ce site existe déjà : « ${existing.name} » (${existing.url}).` },
+        { status: 409 }
+      )
     }
 
     const site = await createSite({

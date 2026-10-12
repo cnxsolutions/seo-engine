@@ -32,7 +32,7 @@ export const dynamic = 'force-dynamic'
  * `SafeSite`, which does not declare it. Widening here rather than in lib/types
  * keeps the read honest without touching a file five workstreams share.
  */
-type SiteRow = Awaited<ReturnType<typeof listSites>>[number] & { has_schema?: boolean }
+type SiteRow = Awaited<ReturnType<typeof listSites>>[number] & { has_schema?: boolean; has_credentials?: boolean }
 
 /** Identity hues, from the validated palette — never a status colour. */
 const CONNECTOR = {
@@ -203,15 +203,25 @@ function nextStep(site: SiteRow, facts: SiteFacts | null): NextStep | null {
     }
   }
 
-  // `has_schema` says the CMS schema is READABLE (credentials on file), not that
-  // it was read once: the extractor persists nothing, so "already extracted" is
-  // not a fact this product holds. Without credentials nothing can be published
-  // to WordPress either, which is why this outranks the Google rung.
+  // Two different facts, two different steps. `has_credentials` says the
+  // secrets are on file; `has_schema` says the schema has been read and kept
+  // (migration 017). Reading the second as the first sent the operator to the
+  // creation form for a site that was complete — and created it twice.
+  //
+  // No link on the first: a site cannot be edited after creation, and the
+  // creation form is exactly where the duplicate came from.
+  if (site.type === 'wordpress' && !site.has_credentials) {
+    return {
+      label: 'Identifiants WordPress absents',
+      why: 'Sans utilisateur ni mot de passe d’application, ni la lecture du schéma ni la publication ne sont possibles.',
+    }
+  }
+
   if (site.type === 'wordpress' && !site.has_schema) {
     return {
-      label: 'Compléter les identifiants WordPress',
-      href: '/sites/new',
-      why: 'Sans utilisateur ni mot de passe d’application, ni la lecture du schéma ni la publication ne sont possibles.',
+      label: 'Lire le schéma WordPress',
+      href: '/schema',
+      why: 'Types de contenu, champs et extension SEO guident la génération ; ils n’ont pas encore été lus.',
     }
   }
 
@@ -326,7 +336,7 @@ export default async function SitesPage() {
 function SiteCard({ site, facts }: { site: SiteRow; facts: SiteFacts | null }) {
   const connector = connectorOf(site.type)
   const step = nextStep(site, facts)
-  const described = site.type === 'nextjs' ? Boolean(site.repo_profile) : Boolean(site.has_schema)
+  const described = site.type === 'nextjs' ? Boolean(site.repo_profile) : Boolean(site.has_credentials)
 
   return (
     <section className="panel" style={{ display: 'flex', flexDirection: 'column' }}>
@@ -416,12 +426,14 @@ function WordPressFacts({ site }: { site: SiteRow }) {
       <FactRow label="Utilisateur" value={site.wp_username || <span className="meta">non renseigné</span>} />
       <FactRow
         label="Schéma CMS"
-        // Never stored, always re-read live from the WordPress REST API: the
-        // honest statement is whether it CAN be read, not whether it was.
+        // Three states, in the order they are reached: no credentials, nothing
+        // can be read; credentials but no schema kept yet; schema read.
         value={
-          site.has_schema
-            ? <Link href="/schema" className="btn-link">Lisible — ouvrir</Link>
-            : <span className="badge badge-warning">Identifiants manquants</span>
+          !site.has_credentials
+            ? <span className="badge badge-warning">Identifiants manquants</span>
+            : site.has_schema
+              ? <Link href="/schema" className="btn-link">Lu — ouvrir</Link>
+              : <Link href="/schema" className="btn-link">À lire — ouvrir</Link>
         }
       />
     </>
