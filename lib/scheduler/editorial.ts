@@ -1,4 +1,4 @@
-import type { Campaign, PageType, ScheduleFrequency, EditorialSlot } from '@/lib/types'
+import type { Campaign, PageType, PlanItemBrief, ScheduleFrequency, EditorialSlot } from '@/lib/types'
 import { createServiceClient } from '@/lib/supabase'
 import { SITE_SAFE_COLUMNS, type SafeCampaign } from '@/lib/db'
 
@@ -175,6 +175,38 @@ export function minutesSinceLocalMidnight(date: Date): number {
   return date.getHours() * 60 + date.getMinutes()
 }
 
+/**
+ * What a plan item asks for. Plans written before `action` existed are creations.
+ */
+export function planItemActionKind(item: Pick<PlanItemBrief, 'action'>): NonNullable<PlanItemBrief['action']>['kind'] {
+  return item.action?.kind ?? 'create'
+}
+
+/**
+ * The calendar slots of a confirmed plan: its CREATIONS, and nothing else.
+ *
+ * The planner also writes 'refresh' items (an existing page to update) and
+ * 'skip' items (a subject it decided not to cover). The slot runner only knows
+ * how to create a page — `runCampaignNow` passes `action: { kind: 'create' }`
+ * unconditionally — so a slot made from either became a NEW page: refused when
+ * its address was taken (/taxi-troyes, the site's own hand-written page), a
+ * duplicate otherwise. A refresh is started by a human from the publish screen,
+ * and a skip is the absence of a page.
+ */
+export function slotsFromPlan(campaignId: string, planItems: PlanItemBrief[]) {
+  return planItems
+    .filter((item) => planItemActionKind(item) === 'create')
+    .map((item) => ({
+      campaign_id: campaignId,
+      plan_item_id: item.id,
+      scheduled_date: item.scheduled_date,
+      page_type: item.page_type,
+      target_keyword: item.target_keyword,
+      target_city: item.target_city,
+      status: 'planned' as const,
+    }))
+}
+
 export async function saveEditorialSlots(slots: Omit<EditorialSlot, 'id' | 'created_at' | 'updated_at' | 'campaign' | 'generation'>[]) {
   if (slots.length === 0) return []
   const supabase = createServiceClient()
@@ -241,9 +273,13 @@ export interface DueEditorialSlots {
  */
 export async function listDueEditorialSlots(uptoDate: string, limit: number): Promise<DueEditorialSlots> {
   const supabase = createServiceClient()
+  // Inner join + `is_active`: deactivating a campaign has to stop its calendar.
+  // Without the filter it stopped only the plan-less campaign job, and the
+  // slots of a "paused" campaign kept generating and publishing.
   const { data, error, count } = await supabase
     .from('editorial_calendar')
-    .select('*, campaign:campaigns(*, site:sites(*))', { count: 'exact' })
+    .select('*, campaign:campaigns!inner(*, site:sites(*))', { count: 'exact' })
+    .eq('campaign.is_active', true)
     .eq('status', 'planned')
     .lte('scheduled_date', uptoDate)
     .order('scheduled_date', { ascending: true })

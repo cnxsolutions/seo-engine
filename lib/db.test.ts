@@ -44,6 +44,8 @@ interface RecordedCall {
 const tables: string[] = []
 /** Tous les appels chaines de la requete en cours, dans l'ordre. */
 const calls: RecordedCall[] = []
+/** Ce que la prochaine requete rend. Vide par defaut : c'est la question qui est sous test. */
+let nextRows: unknown[] = []
 
 /**
  * Un constructeur de requete qui n'execute rien et retient tout.
@@ -65,12 +67,12 @@ function queryDouble(): Record<string, unknown> {
     return builder
   }
 
-  for (const method of ['select', 'eq', 'neq', 'not', 'in', 'is', 'order', 'limit']) {
+  for (const method of ['select', 'eq', 'neq', 'not', 'in', 'is', 'lte', 'order', 'limit']) {
     builder[method] = record(method)
   }
 
   builder.then = (resolve: (value: { data: unknown[]; error: null }) => unknown) =>
-    resolve({ data: [], error: null })
+    resolve({ data: nextRows, error: null })
 
   return builder
 }
@@ -84,7 +86,7 @@ vi.mock('@/lib/supabase', () => ({
   }),
 }))
 
-const { listPendingPublishGenerations } = await import('./db')
+const { listDueCampaigns, listPendingPublishGenerations } = await import('./db')
 
 // ─── Lecture des appels ──────────────────────────────────────────────────────
 
@@ -96,6 +98,7 @@ function equalities(): Array<[unknown, unknown]> {
 beforeEach(() => {
   tables.length = 0
   calls.length = 0
+  nextRows = []
 })
 
 // ─── Le filtre d'intention ───────────────────────────────────────────────────
@@ -140,5 +143,41 @@ describe('listPendingPublishGenerations', () => {
 
     // Un tick ne doit pas pouvoir declencher une centaine de publications.
     expect(calls.find(call => call.method === 'limit')?.args[0]).toBe(10)
+  })
+})
+
+// ─── Le job de campagne sans plan ────────────────────────────────────────────
+//
+// Ce job date d'avant le calendrier editorial : sans brief, il vise toujours
+// « activite + premiere commune ». Il tournait aussi pour les campagnes qui ont
+// un plan, a cote de leur calendrier, et des son deuxieme passage il tombait sur
+// l'adresse prise par le premier : « L'adresse /taxi-troyes est deja occupee »,
+// une ligne « Sans titre » en echec tous les deux jours.
+
+describe('listDueCampaigns', () => {
+  it('ecarte toute campagne qui a un plan de cycle, meme en brouillon', async () => {
+    nextRows = [
+      { id: 'sans-plan', cycle_plans: [] },
+      { id: 'avec-plan', cycle_plans: [{ id: 'p1' }] },
+    ]
+
+    const due = await listDueCampaigns()
+
+    expect(due.map((campaign) => campaign.id)).toEqual(['sans-plan'])
+  })
+
+  it('ne laisse pas fuir la jointure dans la campagne rendue', async () => {
+    nextRows = [{ id: 'sans-plan', cycle_plans: [] }]
+
+    const [campaign] = await listDueCampaigns()
+
+    expect(campaign).not.toHaveProperty('cycle_plans')
+  })
+
+  it('demande les plans de cycle et garde les filtres existants', async () => {
+    await listDueCampaigns()
+
+    expect(calls.find((call) => call.method === 'select')?.args[0]).toContain('cycle_plans(id)')
+    expect(equalities()).toContainEqual(['is_active', true])
   })
 })

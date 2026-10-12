@@ -44,6 +44,7 @@ import {
   listStaleGeneratingSlots,
   listStalePublishingGenerations,
   minutesSinceLocalMidnight,
+  planItemActionKind,
   releaseEditorialSlot,
   scheduleTimeToMinutes,
   todayLocalDate,
@@ -566,6 +567,30 @@ async function processEditorialSlot(slot: EditorialSlot, config: JobConfig): Pro
     targetCity: slot.target_city,
   }
 
+  const planBrief = await getPlanItemBrief(campaign.id, slot.plan_item_id, campaign.current_cycle_id).catch(() => null)
+
+  // Slots confirmed before `slotsFromPlan` filtered them: a 'refresh' or 'skip'
+  // item that became a slot. Run, it would create a NEW page — refused on an
+  // occupied address, a duplicate otherwise. Closed before a generation row is
+  // opened, so it leaves no untitled failed row behind.
+  const planned = planBrief ? planItemActionKind(planBrief) : 'create'
+  if (planned !== 'create') {
+    const reason = planned === 'refresh'
+      ? 'Mise a jour d\'une page existante : elle se lance depuis la publication, pas depuis le calendrier.'
+      : 'Sujet ecarte par le plan : aucune page a produire.'
+    await updateEditorialSlot(slot.id, { status: 'skipped', error_message: reason }).catch(() => null)
+    await logJobExecution({
+      job_type: 'editorial_slot',
+      job_id: slot.id,
+      campaign_id: campaign.id,
+      status: 'skipped',
+      error_message: reason,
+      duration_ms: 0,
+    })
+    log('INFO', 'editorial_slot', `Slot ${slot.id} skipped — plan item is '${planned}', not a creation`)
+    return
+  }
+
   let generationId: string
   try {
     generationId = await openGeneration(campaign, override)
@@ -584,8 +609,6 @@ async function processEditorialSlot(slot: EditorialSlot, config: JobConfig): Pro
   const startTime = Date.now()
 
   try {
-    const planBrief = await getPlanItemBrief(campaign.id, slot.plan_item_id, campaign.current_cycle_id).catch(() => null)
-
     const result = await withTimeout(
       runCampaignNow(campaign, { ...override, planBrief: planBrief || undefined, generationId }),
       config.timeoutMs,

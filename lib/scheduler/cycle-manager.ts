@@ -9,7 +9,7 @@ import {
   upsertSitePages,
 } from '@/lib/db'
 import { indexSitePages } from '@/src/adapters/rag/VectorIndexingService'
-import { deleteEditorialSlots, saveEditorialSlots } from './editorial'
+import { deleteEditorialSlots, saveEditorialSlots, slotsFromPlan } from './editorial'
 import { generatePlanPreview } from './plan-preview'
 import type { Campaign, CyclePlan, PlanPreviewItem } from '@/lib/types'
 
@@ -149,15 +149,7 @@ export async function endCycleAndStartNew(campaign: Campaign, currentCycle: Cycl
 
   // 4. Create editorial slots from plan
   await deleteEditorialSlots(campaign.id)
-  const slots = planItems.map(item => ({
-    campaign_id: campaign.id,
-    plan_item_id: item.id,
-    scheduled_date: item.scheduled_date,
-    page_type: item.page_type,
-    target_keyword: item.target_keyword,
-    target_city: item.target_city,
-    status: 'planned' as const,
-  }))
+  const slots = slotsFromPlan(campaign.id, planItems)
   await saveEditorialSlots(slots)
 
   // 5. Update campaign
@@ -178,15 +170,7 @@ export async function startCycle(campaign: Campaign, planId: string, planItems: 
 
   // Create editorial calendar slots
   await deleteEditorialSlots(campaign.id)
-  const slots = planItems.map(item => ({
-    campaign_id: campaign.id,
-    plan_item_id: item.id,
-    scheduled_date: item.scheduled_date,
-    page_type: item.page_type,
-    target_keyword: item.target_keyword,
-    target_city: item.target_city,
-    status: 'planned' as const,
-  }))
+  const slots = slotsFromPlan(campaign.id, planItems)
   await saveEditorialSlots(slots)
 
   // Update campaign
