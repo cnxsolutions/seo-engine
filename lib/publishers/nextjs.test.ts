@@ -8,7 +8,7 @@
 // with no link back to us. These tests lock the guard that prevents it.
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { componentNameFromSlug, fillTemplate, publishToNextJs, TemplateSubstitutionError, validateTemplate } from './nextjs'
+import { componentNameFromSlug, fillTemplate, pageFilePath, publishToNextJs, TemplateSubstitutionError, validateTemplate } from './nextjs'
 import { GENERATED_MARKER } from './scaffold'
 import type { GeneratedPage } from '@/lib/ai/openai'
 
@@ -326,5 +326,52 @@ describe('publishToNextJs — collision de slug', () => {
 
     expect(result.success).toBe(false)
     expect(commits).toHaveLength(0)
+  })
+
+  // ── Site sans groupe de routes : `pageFolder` stocke avec un slash final ────
+  //
+  // L'analyseur enregistrait `src/app/` pour un site sans `(seo)`. Le chemin
+  // devenait `src/app//slug/page.tsx`, GitHub repondait 422 « malformed path
+  // component », et la meme publication echouait tous les quarts d'heure.
+
+  const SANS_GROUPE = { ...options, repoProfile: { ...PROFILE, pageFolder: 'src/app/' } }
+
+  it('commite sur un chemin sans double slash quand le dossier finit par /', async () => {
+    const { commits } = repoServing(null)
+
+    expect((await publishToNextJs(SANS_GROUPE)).success).toBe(true)
+    expect(commits).toEqual([
+      'https://api.github.com/repos/cnxsolutions/taxidriver10/contents/src/app/reserver-taxi-troyes-gare/page.tsx',
+    ])
+  })
+
+  it('voit la page ecrite a la main au meme chemin, et refuse de l ecraser', async () => {
+    // Le controle d'existence lisait le meme chemin casse, et GitHub repond 404
+    // a une lecture sur `//` (verifie sur l'API) : il ne trouvait jamais rien,
+    // et le garde contre l'ecrasement etait aveugle.
+    const commits: string[] = []
+    const source = 'export default function Fait() { return <div>a la main</div> }'
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (init?.method === 'PUT') {
+        commits.push(String(url))
+        return new Response('{}', { status: 200 })
+      }
+      if (String(url).split('/contents/')[1]?.includes('//')) return new Response('{}', { status: 404 })
+      return new Response(JSON.stringify({ sha: 'abc', content: Buffer.from(source).toString('base64') }), { status: 200 })
+    }))
+
+    const result = await publishToNextJs(SANS_GROUPE)
+
+    expect(result.success).toBe(false)
+    expect(result.error).toMatch(/n'a pas ete ecrite par le moteur/)
+    expect(commits).toHaveLength(0)
+  })
+})
+
+describe('pageFilePath', () => {
+  it('joint dossier et slug avec un seul slash', () => {
+    expect(pageFilePath('src/app/(seo)', 'taxi-troyes')).toBe('src/app/(seo)/taxi-troyes/page.tsx')
+    expect(pageFilePath('src/app/', 'taxi-troyes')).toBe('src/app/taxi-troyes/page.tsx')
+    expect(pageFilePath('app//', 'taxi-troyes')).toBe('app/taxi-troyes/page.tsx')
   })
 })
