@@ -131,18 +131,28 @@ export default function NewStrategyWorkflowPage() {
   const [inventory, setInventory] = useState<InventoryCheck>({ state: 'loading' })
   /** Le brief ouvert dans le panneau de l'étape du plan. */
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  /**
+   * Le site d'où l'on vient (`?site=`), une fois vérifié dans la liste. Le
+   * retour et la fin du parcours ramènent à SON onglet Stratégie : une
+   * stratégie se crée depuis la page du site, et doit y revenir.
+   */
+  const [originSiteId, setOriginSiteId] = useState<string | null>(null)
 
   useEffect(() => {
-    // `?site=` pre-selects the site the operator came from (the site page's
-    // « Créer une stratégie »). Checked against the loaded list: an unknown id
-    // leaves the selector empty rather than pointing the campaign at nothing.
+    // `?site=` pre-selects the site the operator came from (its Stratégie tab,
+    // « Nouvelle stratégie »). Checked against the loaded list: an unknown id
+    // leaves the selector empty rather than pointing the campaign at nothing,
+    // and the back link then falls back to the /strategy site picker.
     const requested = new URLSearchParams(window.location.search).get('site')
 
     fetch('/api/sites').then((res) => res.json()).then((data) => {
       const loadedSites: Site[] = data.sites ?? []
       setSites(loadedSites)
       setCreateSiteMode(loadedSites.length === 0)
-      if (requested && loadedSites.some((site) => site.id === requested)) setSelectedSiteId(requested)
+      if (requested && loadedSites.some((site) => site.id === requested)) {
+        setSelectedSiteId(requested)
+        setOriginSiteId(requested)
+      }
     }).catch(() => null)
   }, [])
 
@@ -362,7 +372,9 @@ export default function NewStrategyWorkflowPage() {
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || 'Confirmation impossible')
-      router.push('/strategy')
+      // Vers l'onglet Stratégie du site de la campagne — celui où son plan se
+      // relit désormais — et non vers une liste de tous les sites.
+      router.push(`/sites/${campaign.site_id}/strategie`)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Erreur confirmation')
     } finally {
@@ -378,10 +390,10 @@ export default function NewStrategyWorkflowPage() {
     <div style={{ maxWidth: 1080 }}>
       <PageHeader
         icon={Target}
-        badge="Étape 3"
+        badge="Stratégie"
         title="Nouvelle stratégie"
         subtitle="Analyse du site et des concurrents, plan de briefs daté, puis exécution automatique le jour prévu."
-        backHref="/strategy"
+        backHref={originSiteId ? `/sites/${originSiteId}/strategie` : '/strategy'}
       />
 
       <Stepper step={step} />

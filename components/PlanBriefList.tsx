@@ -12,8 +12,15 @@
 // Une ligne par brief, le titre et l'adresse en entier ; le brief ouvert se lit
 // et se corrige dans le panneau de droite (en dessous de la liste sur un
 // téléphone). Les deux écrans qui montrent un plan — le parcours de création
-// et la modale de la page Stratégie — partagent ce composant : seule la façon
-// de juger une adresse leur est propre, et ils la passent en `verdictFor`.
+// et l'onglet Stratégie d'un site — partagent ce composant : seule la façon de
+// juger une adresse leur est propre, et ils la passent en `verdictFor`.
+//
+// LES MISES À JOUR N'EXISTENT PLUS. Le moteur ne planifie plus la mise à jour
+// de pages existantes (décision du propriétaire, 17/10/2026). Un ancien plan
+// relu depuis la base peut encore porter des lignes 'refresh' : elles restent
+// affichées — les taire ferait disparaître des créneaux que l'opérateur a vus —
+// mais grisées et marquées « Mise à jour (ancien plan) — ne sera pas produite ».
+// Aucun texte ne les présente plus comme une option.
 //
 // AUCUNE LOGIQUE DE VERDICT ICI. Le composant ne sait pas ce qu'est une adresse
 // libre : l'écran de création le déduit de l'inventaire, la modale le relit du
@@ -25,7 +32,6 @@ import { useId, type ReactNode } from 'react'
 import { CircleCheck, Save, X } from 'lucide-react'
 import { Button, FieldError, FormField, StatusBadge, formatDayLong, formatMetric, formatWeekday, formatDay } from '@/components/ui'
 import { pageTypeLabel, type PlanItemBrief } from '@/lib/types'
-import type { RefreshScope } from '@/src/core/domain/existing/action'
 
 /** Une couleur et un mot, jamais la couleur seule. */
 export type VerdictTone = 'good' | 'info' | 'warning' | 'critical' | 'muted'
@@ -52,10 +58,8 @@ export function planActionKind(item: PlanItemBrief): PlanActionKind {
   return item.action?.kind ?? 'create'
 }
 
-export const REFRESH_SCOPE_LABELS: Record<RefreshScope, string> = {
-  metadata: 'Titre et description',
-  content: 'Contenu complet',
-}
+/** Ce qu'une ancienne ligne de mise à jour devient, dit en une fois. */
+const LEGACY_REFRESH_NOTE = 'ne sera pas produite'
 
 /** Les trois champs qu'un humain retape à cette étape, et pas un de plus. */
 export type PlanBriefPatch = Partial<Pick<PlanItemBrief, 'proposed_title' | 'proposed_slug' | 'target_keyword'>>
@@ -67,8 +71,8 @@ export interface PlanBriefListProps {
   /**
    * Le verdict d'adresse d'un brief à créer, ou `null` quand l'écran n'en a
    * aucun — un plan relu depuis la base, par exemple, n'affiche RIEN plutôt
-   * qu'un verdict inventé. Les briefs de mise à jour et les briefs écartés ne
-   * passent pas par ici : leur adresse n'est pas à juger.
+   * qu'un verdict inventé. Les anciennes lignes de mise à jour et les briefs
+   * écartés ne passent pas par ici : leur adresse n'est pas à juger.
    */
   verdictFor: (item: PlanItemBrief) => AddressVerdict | null
   /** Une annotation sous la requête visée — le badge « mesuré » de la modale. */
@@ -154,13 +158,16 @@ export function PlanBriefList({
 /**
  * Ce que ce brief fait au site qui existe déjà.
  *
- * `StatusBadge` porte déjà 'create' et 'refresh' dans le vocabulaire partagé —
- * on le lit, on n'écrit pas un second dictionnaire de deux entrées ici. Un plan
- * antérieur à ce lot ne porte aucun verdict : il s'affiche en « Nouvelle page »,
- * ce qu'il était, sans qu'on lui invente une décision rétroactive.
+ * `StatusBadge` porte déjà 'create' dans le vocabulaire partagé — on le lit, on
+ * n'écrit pas un second dictionnaire ici. Une ligne 'refresh' ne vient que d'un
+ * ancien plan : son badge le dit, en gris, et ne reprend PAS le « Mise à jour »
+ * bleu du vocabulaire partagé, qui la ferait lire comme une action à venir. Un
+ * plan antérieur aux verdicts n'en porte aucun : il s'affiche en « Nouvelle
+ * page », ce qu'il était, sans qu'on lui invente une décision rétroactive.
  */
 export function ActionBadge({ kind }: { kind: PlanActionKind }) {
   if (kind === 'skip') return <span className="badge badge-muted">Écarté</span>
+  if (kind === 'refresh') return <span className="badge badge-muted">Mise à jour (ancien plan)</span>
   return <StatusBadge status={kind} />
 }
 
@@ -174,7 +181,9 @@ function BriefRow({
 }) {
   const action = item.action
   const kind = planActionKind(item)
-  const skipped = kind === 'skip'
+  // Une ancienne mise à jour se grise comme un sujet écarté : ni l'une ni
+  // l'autre ne produira de page.
+  const skipped = kind !== 'create'
 
   return (
     // Un vrai bouton, pas une div cliquable : il se tabule, s'active au clavier,
@@ -198,7 +207,7 @@ function BriefRow({
             {action?.kind === 'skip'
               ? action.reasons[0] ?? 'Aucun motif enregistré.'
               : action?.kind === 'refresh'
-                ? `page existante · ${REFRESH_SCOPE_LABELS[action.scope]}`
+                ? `page existante · ${LEGACY_REFRESH_NOTE}`
                 : `${item.search_intent || '—'} · ${formatMetric(item.estimated_word_count, 'number')} mots`}
           </span>
         </span>
@@ -210,7 +219,7 @@ function BriefRow({
         ) : action?.kind === 'refresh' ? (
           <span className="plan-brief__slug mono">
             {action.targetPath}
-            <span className="plan-brief__verdict verdict--warning"> · ne partira qu’après votre validation</span>
+            <span className="plan-brief__verdict verdict--muted"> · {LEGACY_REFRESH_NOTE}</span>
           </span>
         ) : (
           <span className="plan-brief__slug mono">
@@ -292,9 +301,10 @@ function BriefDetail({
   const { item } = row
   const action = item.action
   const kind = planActionKind(item)
-  // Un brief écarté ne se corrige pas : rien ne sera produit, il n'y a rien à
-  // retaper. Une adresse ne se choisit que pour une page qui n'existe pas.
-  const canEdit = editable && kind !== 'skip' && onChange !== undefined
+  // Seule une page à créer se corrige : un sujet écarté ou une ancienne mise à
+  // jour ne produiront rien, il n'y a rien à retaper. Une adresse ne se choisit
+  // que pour une page qui n'existe pas.
+  const canEdit = editable && kind === 'create' && onChange !== undefined
   const patch = (next: PlanBriefPatch) => onChange?.(item.id, next)
 
   return (
@@ -308,9 +318,8 @@ function BriefDetail({
 
       <div className="plan-brief__tags">
         <ActionBadge kind={kind} />
-        {kind !== 'skip' && <span className="chip">{pageTypeLabel(item.page_type)}</span>}
-        {action?.kind === 'refresh' && <span className="badge badge-info">{REFRESH_SCOPE_LABELS[action.scope]}</span>}
-        {kind !== 'skip' && (
+        {kind === 'create' && <span className="chip">{pageTypeLabel(item.page_type)}</span>}
+        {kind === 'create' && (
           <span className="meta">{item.search_intent || '—'} · {formatMetric(item.estimated_word_count, 'number')} mots</span>
         )}
       </div>
@@ -326,7 +335,7 @@ function BriefDetail({
         </FormField>
       ) : (
         <ReadField label="Titre">
-          <span className={kind === 'skip' ? 'plan-brief-detail__struck' : undefined}>{item.proposed_title || 'Sans titre'}</span>
+          <span className={kind !== 'create' ? 'plan-brief-detail__struck' : undefined}>{item.proposed_title || 'Sans titre'}</span>
         </ReadField>
       )}
 
@@ -337,21 +346,17 @@ function BriefDetail({
         </ReadField>
       ) : action?.kind === 'refresh' ? (
         <>
-          {/* On ne choisit PAS l'adresse d'une page qui existe déjà : le chemin
-              cible est en lecture seule, quel que soit l'écran. */}
-          <ReadField label="Adresse">
+          <ReadField label="Page existante visée">
             <span className="mono">{action.targetPath}</span>
-            <p className="meta" style={{ margin: 'var(--space-1) 0 0' }}>
-              Adresse existante — elle n’est pas modifiable ici.
-            </p>
-            <p className="meta verdict--warning" style={{ margin: 'var(--space-1) 0 0' }}>
-              Cette mise à jour ne partira qu’après votre validation à l’étape 5.
+            <p className="meta" style={{ margin: 'var(--space-2) 0 0' }}>
+              Mise à jour (ancien plan) — ne sera pas produite : le moteur ne met plus à jour les pages existantes.
+              Aucune page ne sera écrite pour ce créneau, et cette page restera telle qu’elle est.
             </p>
           </ReadField>
           {/* Les phrases du domaine, RECOPIÉES TELLES QUELLES : elles portent
-              déjà les chiffres qui ont décidé, et les reformuler couperait le
-              seul lien entre la décision et sa mesure. */}
-          <ReadField label="Pourquoi cette mise à jour">
+              les chiffres qui avaient décidé, et les reformuler couperait le
+              seul lien entre l'ancienne décision et sa mesure. */}
+          <ReadField label="Ce qui motivait cette ligne">
             {action.evidence.length > 0 ? <BulletList lines={action.evidence} /> : <span className="meta">Aucun motif enregistré.</span>}
           </ReadField>
         </>
@@ -374,7 +379,7 @@ function BriefDetail({
         </ReadField>
       )}
 
-      {kind !== 'skip' && canEdit ? (
+      {canEdit ? (
         <FormField label="Requête visée" htmlFor={keywordId}>
           <input
             id={keywordId}
@@ -391,7 +396,7 @@ function BriefDetail({
         </ReadField>
       )}
 
-      {kind !== 'skip' && (
+      {kind === 'create' && (
         <>
           <ReadField label="Plan de la page">
             {item.outline.length > 0 ? (

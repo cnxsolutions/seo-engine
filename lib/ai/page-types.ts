@@ -16,6 +16,7 @@ import {
 } from './openai'
 import { createFullRagContextBuilder, type RagGenerationContext } from './full-rag-context'
 import { buildExistingAwarenessBlock } from '@/lib/existing/prompt-block'
+import { AUDIT_THRESHOLDS } from '@/lib/pipeline/seo-audit'
 import type { EditorialAction } from '@/src/core/domain/existing/action'
 import type { InventoryEntry, InventoryFreshness } from '@/src/core/domain/existing/inventory'
 
@@ -76,6 +77,14 @@ export interface PageTypeGenerateOptions {
   // Full RAG integration
   siteId?: string
   campaignId?: string
+  /**
+   * Why the previous attempt at THIS page was refused, one actionable line per
+   * blocking finding (`PipelineReport.reasons`).
+   *
+   * Set only by the campaign runner when it regenerates a page the gate refused
+   * (lib/scheduler/cron.ts). Absent or empty, the prompt is exactly what it was.
+   */
+  revisionFeedback?: readonly string[]
 }
 
 export interface GeneratedSeoPage extends GeneratedPage {
@@ -236,7 +245,7 @@ Inclure des variantes "pres de moi", "a proximite", "dans le quartier" dans le c
 Elle doit contenir un lien retour vers la page pilier et des liens vers les pages soeurs.
 Plus focalisee qu'une page pilier, elle approfondit un angle precis et longue traine.
 SLUG LONG-TAIL: format [service-specifique]-[action]-[contexte]-[ville]-[quartier] (minimum 6 mots).
-Le title DOIT etre sous forme de question longue traine ou intention specifique.
+Le title DOIT etre sous forme de question longue traine ou intention specifique, en 60 caracteres maximum.
 Inclure un breadcrumb: Accueil > [Page Pilier] > [Cette page].
 Entites NLP: noms de quartiers, communes voisines, points de repere locaux.`,
     targetLengthMultiplier: 1.0,
@@ -503,6 +512,7 @@ export async function generateSeoPage(opts: PageTypeGenerateOptions): Promise<Ge
     googleContext: opts.googleContext || undefined,
     fullRagContext,
     searchIntent,
+    revisionFeedback: opts.revisionFeedback,
   })
 
   const raw = await generateJson({
@@ -565,6 +575,8 @@ export function buildUserPrompt(opts: {
   fullRagContext?: RagGenerationContext
   searchIntent: SearchIntent
   today?: string
+  /** See `PageTypeGenerateOptions.revisionFeedback`. */
+  revisionFeedback?: readonly string[]
 }): string {
   const mainKeyword = opts.planBrief?.target_keyword || `${opts.businessType} ${opts.city}`
   const year = new Date().getFullYear()
@@ -735,7 +747,7 @@ REPONDS EN JSON avec cette structure :
 ${opts.existingAwareness}
 
 STRATEGIE LONG-TAIL (OBLIGATOIRE):
-- Le TITLE doit cibler une question ou intention longue-traine (ex: "Comment trouver un plombier pas cher a Troyes pour une fuite urgente?")
+- Le TITLE doit cibler une question ou intention longue-traine, en 60 caracteres maximum (ex: "Fuite urgente a Troyes : quel plombier appeler ?")
 - OBLIGATOIRE dans le contenu:
   * Au moins 3 variantes semantiques LSI du mot-cle focus
   * Au moins 2 formulations "pres de moi" / "a proximite" / "dans le quartier de"
@@ -754,6 +766,15 @@ Contraintes critiques :
 7. Le slug est celui qui t'est donne. Il est deja reserve : toute autre valeur sera ignoree.
 8. Si une page listee ci-dessus traite deja le sujet, VARIER l'angle (sous-intention, geo-specifique, question differente).
 
+${buildAuditChecklist({
+    mainKeyword,
+    city: opts.city,
+    businessName: opts.businessName,
+    minFaq: opts.minFaq,
+    enableExternalLinks: opts.enableExternalLinks,
+    requiredEntities: opts.planBrief?.required_entities ?? [],
+  })}
+
 RAPPEL FINAL — LES TROIS POINTS QUI DECIDENT DE LA VALIDATION DE CETTE PAGE :
 1. LONGUEUR : le texte reel de htmlContent (hors balises) doit tenir entre ${opts.adjustedLength} et
    ${maximumWords} mots. En dessous de ${minimumWords} mots la page est REJETEE automatiquement.
@@ -764,7 +785,73 @@ RAPPEL FINAL — LES TROIS POINTS QUI DECIDENT DE LA VALIDATION DE CETTE PAGE :
    recopiee a l'identique dans "directAnswer".
 3. AUCUN FAIT INVENTE : pas de chiffre, de prix, de note, d'avis, de source ou de citation qui ne
    figure pas dans les donnees fournies ci-dessus. En cas de doute, supprime l'element.
-`.trim()
+${buildRevisionBlock(opts.revisionFeedback)}`.trim()
+}
+
+/**
+ * What the pre-publication audit checks, said to the model BEFORE it writes.
+ *
+ * Every figure comes from `AUDIT_THRESHOLDS` (lib/pipeline/seo-audit.ts), the
+ * very constants the gate judges the page with. A prompt that asked for "a
+ * question-shaped long title" while the gate refused titles over 70 characters
+ * made the first attempt fail by construction and paid a regeneration to learn
+ * what the prompt could have said. One source, so the two cannot drift apart.
+ */
+export function buildAuditChecklist(opts: {
+  mainKeyword: string
+  city: string
+  businessName: string
+  minFaq: number
+  enableExternalLinks: boolean
+  requiredEntities: readonly string[]
+}): string {
+  const T = AUDIT_THRESHOLDS
+  const entities = opts.requiredEntities.filter(Boolean)
+
+  const lines = [
+    `- title : entre ${T.titleMin} et ${T.titleComfortMax} caracteres (jamais plus de ${T.titleMax}), avec les mots du mot-cle focus "${opts.mainKeyword}". Une question longue-traine n'est acceptee que si elle tient dans cette longueur.`,
+    `- metaDescription : entre ${T.metaComfortMin} et ${T.metaComfortMax} caracteres.`,
+    `- Un seul H1, qui contient les mots du mot-cle focus. Hierarchie stricte : H2 puis H3, jamais de niveau saute, jamais de H3 avant le premier H2.`,
+    `- Au moins ${T.h2MinLong} H2 (au moins ${T.h2MinShort} si la page fait moins de ${T.h2LongPageWords} mots), dont au moins ${T.questionHeadingsMin} formules en questions.`,
+    `- Les mots du mot-cle focus apparaissent dans les ${T.introWords} premiers mots apres le H1. L'expression exacte ne depasse jamais ${Math.round(T.keywordDensityMax * 100)} % des mots, et n'apparait pas dans plus de la moitie des H2.`,
+    `- Le premier <p> apres le H1 est la reponse directe : entre ${T.directAnswerMin} et ${T.directAnswerMax} mots, avant tout autre titre.`,
+    `- Au moins une liste <ul> ou <ol>, ou un tableau <table>, dans le contenu.`,
+    opts.city ? `- "${opts.city}" est nomme au moins ${T.cityMentionsMin} fois dans le texte.` : '',
+    `- "${opts.businessName}" est nomme au moins une fois dans le texte.`,
+    entities.length >= T.requiredEntitiesMinListed
+      ? `- Citer ces entites dans le texte : ${entities.join(', ')}.`
+      : '',
+    `- Au moins ${opts.minFaq} questions FAQ, avec EXACTEMENT les memes questions dans faqItems et dans schemaFaqPage.`,
+    opts.enableExternalLinks ? `- Au moins un lien externe https vers une source reelle et fiable.` : '',
+    `- Chaque <img> a un alt non vide ; aucun lien vide ; aucun paragraphe repete ; aucun texte a completer ([VOTRE ...], TODO, lorem ipsum).`,
+    `- Paragraphes de ${T.paragraphMaxWords} mots au plus, phrases courtes.`,
+  ].filter(Boolean)
+
+  return `CONTROLE AVANT PUBLICATION — la page est verifiee automatiquement sur chacun de ces points, et refusee si l'un manque :\n${lines.join('\n')}`
+}
+
+/**
+ * The corrections a regeneration must make, placed LAST in the prompt.
+ *
+ * Last on purpose: it is the one part of this prompt that is specific to the
+ * attempt, and the end of a long prompt is where an instruction is least likely
+ * to be diluted. The address and the focus keyword are pinned explicitly — the
+ * slug is already reserved and the keyword comes from the plan, so a model that
+ * "fixed" a duplicate by moving either would produce a page the runner cannot
+ * store where it was ordered.
+ */
+export function buildRevisionBlock(feedback: readonly string[] | undefined): string {
+  const lines = (feedback ?? []).map(line => line.trim()).filter(Boolean)
+  if (lines.length === 0) return ''
+
+  return `
+
+VERSION PRÉCÉDENTE REFUSÉE — CORRIGE IMPÉRATIVEMENT :
+${lines.map(line => `- ${line}`).join('\n')}
+Ne change ni l'adresse ni le mot-clé principal.
+Si une page existante est citée (doublon, titre ou meta trop proche, même requête), démarque-toi
+d'elle : autre angle, autre title, autre meta description, contenu réécrit — jamais une paraphrase.
+Toutes les autres consignes ci-dessus restent valables.`
 }
 
 // ─── Normalization ─────────────────────────────────────────────────────────

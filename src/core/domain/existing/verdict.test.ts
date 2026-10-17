@@ -6,9 +6,9 @@
 // Le verdict traverse un jsonb : il est ecrit par une version du code et relu
 // par une autre, parfois edite a la main pendant un incident. La suite verrouille
 // donc trois choses : que l'ordre de gravite est bien l'ordre du tableau, que
-// CANNIBALIZATION ne bloque pas, et qu'aucune forme de jsonb malforme ne fait
-// jeter la relecture — un feed qui plante sur une ligne abimee cache les vingt
-// autres.
+// les six codes bloquent — CANNIBALIZATION comprise depuis le 2026-10-17 — et
+// qu'aucune forme de jsonb malforme ne fait jeter la relecture — un feed qui
+// plante sur une ligne abimee cache les vingt autres.
 
 import { describe, it, expect } from 'vitest'
 import {
@@ -41,11 +41,25 @@ describe('le vocabulaire', () => {
     expect(DUPLICATE_CODES.length).toBe(6)
   })
 
-  it('exclut CANNIBALIZATION des codes bloquants', () => {
-    // Deux pages qui se disputent une requete est un fait a corriger
-    // editorialement, jamais une raison de retenir une publication.
-    expect(BLOCKING_DUPLICATE_CODES).not.toContain('CANNIBALIZATION')
-    expect(BLOCKING_DUPLICATE_CODES.length).toBe(DUPLICATE_CODES.length - 1)
+  it('compte CANNIBALIZATION parmi les codes bloquants, comme les cinq autres', () => {
+    // Deux pages qui se disputent une requete divisent le classement des deux.
+    // Depuis qu'une page retenue est regeneree plutot que parquee, c'est une
+    // raison de la retenir.
+    expect(BLOCKING_DUPLICATE_CODES).toContain('CANNIBALIZATION')
+    expect([...BLOCKING_DUPLICATE_CODES].sort()).toEqual([...DUPLICATE_CODES].sort())
+  })
+
+  it('n a pas reordonne l ordre de gravite persiste en ajoutant un membre', () => {
+    // L'interface lit cet ordre (summarizeVerdict) : la bascule de
+    // CANNIBALIZATION devait ajouter une appartenance, pas renumeroter.
+    expect(DUPLICATE_CODES).toEqual([
+      'DUPLICATE_EXACT',
+      'DUPLICATE_NEAR',
+      'TITLE_NEAR_DUPLICATE',
+      'META_NEAR_DUPLICATE',
+      'SLUG_COLLISION',
+      'CANNIBALIZATION',
+    ])
   })
 
   it('reconnait un code et rejette tout le reste', () => {
@@ -72,13 +86,15 @@ describe('isBlocking', () => {
     expect(isBlocking(verdict)).toBe(true)
   })
 
-  it('ne bloque pas un verdict qui ne porte que des avertissements', () => {
+  it('bloque sur une cannibalisation seule', () => {
+    // Le cas qui ne bloquait pas avant le 2026-10-17 : `preuve()` porte
+    // CANNIBALIZATION par defaut.
     const verdict = buildDuplicateVerdict(
       { decidedBy: 'policy', mode: 'block', reasons: [], matches: [preuve()] },
       QUAND,
     )
 
-    expect(isBlocking(verdict)).toBe(false)
+    expect(isBlocking(verdict)).toBe(true)
   })
 
   it('ne bloque pas un verdict sans preuve', () => {

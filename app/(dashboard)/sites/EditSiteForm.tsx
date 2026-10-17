@@ -1,11 +1,21 @@
 'use client'
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Le formulaire d'un site — section « Identité et accès » de l'onglet Réglages
+//
+// Il vivait seul sur /sites/[id]/edit et renvoyait vers la liste des sites
+// après l'enregistrement. Il est maintenant une section des réglages du site :
+// enregistrer RESTE sur le site (l'en-tête du layout se relit, le nom changé y
+// apparaît), et la zone de suppression est rendue par la page, en dernier, sous
+// la connexion Google et le schéma — un formulaire n'a pas à décider de ce qui
+// le suit.
+// ─────────────────────────────────────────────────────────────────────────────
+
 import { useState } from 'react'
 import { Eye, EyeOff, Save } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { Button, FormField, Notice } from '@/components/ui'
 import type { SiteType } from '@/lib/types'
-import { DeleteSiteZone } from './SiteActions'
 
 /**
  * Everything the form needs, and NOTHING the page must not have.
@@ -28,12 +38,9 @@ export interface EditableSite {
   auto_promote: boolean
 }
 
-export function EditSiteForm({ site }: { site: EditableSite }) {
-  const router = useRouter()
-  const [saving, setSaving] = useState(false)
-  const [error, setError] = useState('')
-  const [showPassword, setShowPassword] = useState(false)
-  const [form, setForm] = useState({
+/** Le formulaire tel que la page l'ouvre : les secrets toujours vides. */
+function initialForm(site: EditableSite) {
+  return {
     name: site.name,
     url: site.url,
     is_active: site.is_active,
@@ -45,13 +52,24 @@ export function EditSiteForm({ site }: { site: EditableSite }) {
     github_token: '',
     github_branch: site.github_branch,
     auto_promote: site.auto_promote,
-  })
+  }
+}
 
-  const handle = (e: React.ChangeEvent<HTMLInputElement>) =>
+export function EditSiteForm({ site }: { site: EditableSite }) {
+  const router = useRouter()
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+  const [saved, setSaved] = useState(false)
+  const [showPassword, setShowPassword] = useState(false)
+  const [form, setForm] = useState(() => initialForm(site))
+
+  const handle = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setSaved(false)
     setForm((prev) => ({
       ...prev,
       [e.target.name]: e.target.type === 'checkbox' ? e.target.checked : e.target.value,
     }))
+  }
 
   /**
    * Sends only the connector's own fields. A WordPress site has no business
@@ -62,6 +80,7 @@ export function EditSiteForm({ site }: { site: EditableSite }) {
   const submit = async () => {
     setSaving(true)
     setError('')
+    setSaved(false)
 
     const body: Record<string, string | boolean> = {
       name: form.name.trim(),
@@ -92,10 +111,12 @@ export function EditSiteForm({ site }: { site: EditableSite }) {
         setError(data.error || `Enregistrement refusé (erreur ${res.status})`)
         return
       }
-      // push THEN refresh: the list is a server component rendered from the
-      // database, and without the refresh it would show the previous name
-      // from the router cache for as long as the cache lives.
-      router.push('/sites')
+      // On reste sur le site. `refresh()` relit les composants serveur — l'en-tête
+      // du layout, le rail — qui afficheraient sinon l'ancien nom, l'ancienne
+      // adresse ou l'ancien état actif depuis le cache du routeur. Les secrets
+      // tapés sont effacés du formulaire : enregistrés, ils ne se relisent plus.
+      setForm((prev) => ({ ...prev, wp_app_password: '', github_token: '' }))
+      setSaved(true)
       router.refresh()
     } catch {
       setError('Impossible de joindre le serveur')
@@ -248,18 +269,30 @@ export function EditSiteForm({ site }: { site: EditableSite }) {
           )}
 
           {error && <Notice inline tone="critical" title="Modifications non enregistrées" body={error} />}
+          {saved && <Notice inline tone="good" title="Modifications enregistrées" body="Le site a été mis à jour." />}
         </div>
 
-        <div className="panel__footer" style={{ display: 'flex', gap: 'var(--space-3)', alignItems: 'center' }}>
-          <Button variant="ghost" href="/sites">Annuler</Button>
+        <div className="panel__footer" style={{ display: 'flex', gap: 'var(--space-3)', alignItems: 'center', flexWrap: 'wrap' }}>
+          {/* « Annuler » revient aux valeurs enregistrées au lieu de quitter la
+              page : le formulaire est une section parmi d'autres, partir
+              ferait perdre la connexion Google et le schéma affichés autour. */}
+          <Button
+            variant="ghost"
+            disabled={saving}
+            onClick={() => {
+              setForm(initialForm(site))
+              setError('')
+              setSaved(false)
+            }}
+          >
+            Annuler les changements
+          </Button>
           <div style={{ flex: 1 }} />
           <Button icon={Save} loading={saving} onClick={submit} disabled={!complete}>
             Enregistrer les modifications
           </Button>
         </div>
       </div>
-
-      <DeleteSiteZone siteId={site.id} siteName={site.name} />
     </>
   )
 }

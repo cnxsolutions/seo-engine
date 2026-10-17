@@ -184,6 +184,29 @@ describe('buildUserPrompt()', () => {
     expect(prompt).toContain('DONNEES GOOGLE BUSINESS PROFILE: AUCUNE')
     expect(prompt).toMatch(/Aucune adresse, aucun telephone/)
   })
+
+  it('appends the refusal reasons of the previous attempt, last, as a correction list', () => {
+    const prompt = buildPrompt({
+      revisionFeedback: [
+        'FAQ_MINIMUM: 2 question(s) de FAQ (minimum 3 pour une page child) : ajouter des questions.',
+        '  ',
+        'SCANNABLE: Aucune liste ni tableau dans le contenu : ajouter une liste.',
+      ],
+    })
+
+    const block = prompt.indexOf('VERSION PRÉCÉDENTE REFUSÉE — CORRIGE IMPÉRATIVEMENT :')
+    expect(block).toBeGreaterThan(prompt.indexOf('RAPPEL FINAL'))
+    expect(prompt).toContain('- FAQ_MINIMUM: 2 question(s) de FAQ')
+    expect(prompt).toContain('- SCANNABLE: Aucune liste ni tableau')
+    // Blank lines are not turned into empty bullets.
+    expect(prompt).not.toMatch(/\n- \s*\n/)
+    expect(prompt).toContain("Ne change ni l'adresse ni le mot-clé principal.")
+  })
+
+  it('leaves the prompt untouched when there is nothing to correct', () => {
+    expect(buildPrompt({ revisionFeedback: [] })).toBe(buildPrompt())
+    expect(buildPrompt()).not.toContain('VERSION PRÉCÉDENTE REFUSÉE')
+  })
 })
 
 describe('normalizeResponse()', () => {

@@ -1,6 +1,5 @@
 import type { Metadata } from 'next'
 import { headers } from 'next/headers'
-import { Suspense } from 'react'
 import { Sidebar, type SidebarEnvironment, type SidebarSite } from '@/components/Sidebar'
 import { createServiceClient } from '@/lib/supabase'
 
@@ -61,12 +60,11 @@ export default async function DashboardLayout({
       {/* Every keyboard pass through the app had to walk the whole rail before
           reaching the page. `.sr-only` hides it until it takes focus. */}
       <a href="#contenu" className="sr-only skip-link">Aller au contenu</a>
-      {/* The rail reads `useSearchParams()` to light « Analytics » on the
-          performance tab; the boundary is what that hook asks for. The layout
-          is dynamic (it reads headers), so the fallback never actually shows. */}
-      <Suspense fallback={<aside className="sidebar" aria-hidden="true" />}>
-        <Sidebar sites={sites} environment={environment} />
-      </Suspense>
+      {/* No Suspense boundary any more: the rail used `useSearchParams()` to
+          light « Analytics » on the dashboard's performance tab. Analytics now
+          lives in each site's Performances tab, and the rail reads only the
+          pathname, which needs no boundary. */}
+      <Sidebar sites={sites} environment={environment} />
       <main id="contenu" className="main-content" tabIndex={-1}>
         {children}
       </main>

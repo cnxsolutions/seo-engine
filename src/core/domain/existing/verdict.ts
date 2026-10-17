@@ -40,12 +40,20 @@ export const DUPLICATE_CODES = [
 export type DuplicateCode = (typeof DUPLICATE_CODES)[number]
 
 /**
- * Ceux qui retiennent une page.
+ * Ceux qui retiennent une page — les six, depuis le 2026-10-17.
  *
- * CANNIBALIZATION en est exclue par construction : deux pages qui se disputent
- * une requete est un fait a corriger editorialement, pas une raison de refuser
- * la publication. Le `satisfies` interdit d'ecrire ici un code qui n'existe pas
- * dans DUPLICATE_CODES.
+ * CANNIBALIZATION en a longtemps ete exclue : deux pages qui se disputent une
+ * requete passait pour un fait a corriger editorialement, et une page refusee
+ * attendait un humain. Elle bloque desormais, parce qu'un refus n'arrete plus la
+ * production : la page est regeneree sous un autre angle, la page concurrente
+ * nommee dans ses corrections (lib/scheduler/cron.ts), et publier deux pages
+ * pour un meme clic divise le classement des deux.
+ *
+ * Ce tableau dit QUI bloque ; il ne dit pas dans quel ORDRE de gravite —
+ * DUPLICATE_CODES s'en charge, et c'est pour cela que l'appartenance a ete
+ * ajoutee ici sans toucher a l'ordre persiste de l'autre tableau. Le
+ * `satisfies` interdit d'ecrire ici un code qui n'existe pas dans
+ * DUPLICATE_CODES.
  */
 export const BLOCKING_DUPLICATE_CODES = [
   'DUPLICATE_EXACT',
@@ -53,6 +61,7 @@ export const BLOCKING_DUPLICATE_CODES = [
   'TITLE_NEAR_DUPLICATE',
   'META_NEAR_DUPLICATE',
   'SLUG_COLLISION',
+  'CANNIBALIZATION',
 ] as const satisfies readonly DuplicateCode[]
 
 /** Une page existante contre laquelle la page en cours d'ecriture a ete pesee. */

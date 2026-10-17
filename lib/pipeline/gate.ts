@@ -4,37 +4,59 @@
 // The single place that answers "does this page ship?"
 // ─────────────────────────────────────────────────────────────────────────────
 //
-// Three sources feed the verdict:
+// Four sources feed the verdict:
 //
 //  1. The structural checks in structure.ts and word-count.ts — length, H1,
 //     JSON-LD — which are the defects the audit actually found in production.
-//  2. `ValidationPipelineOrchestrator` (src/adapters/rag/validation), called
+//  2. The deep SEO + GEO audit (seo-audit.ts): every on-page concept a search
+//     engine and an answer engine weigh — title and meta lengths, the keyword in
+//     the title, the H1 and the intro, the heading outline, stuffing, internal
+//     links, alt text, slug, placeholders, repeated paragraphs, empty links, the
+//     direct answer under the H1, question headings, the FAQ and its schema, the
+//     city, the business and the brief's entities, lists, invented NAP, sources.
+//  3. `ValidationPipelineOrchestrator` (src/adapters/rag/validation), called
 //     through its published API and never modified from here.
-//  3. What the site ALREADY has online — the third source, and the newest. Two
-//     independent comparisons feed it: `DuplicateDetector`, which weighs BODIES
-//     lexically, and `judgeEditorialIdentity`, which weighs the three things a
-//     searcher sees before clicking — address, title, meta description. Both are
-//     HANDED their candidates; neither goes looking for them.
+//  4. What the site ALREADY has online. Two independent comparisons feed it:
+//     `DuplicateDetector`, which weighs BODIES lexically, and
+//     `judgeEditorialIdentity`, which weighs the three things a searcher sees
+//     before clicking — address, title, meta description. Both are HANDED their
+//     candidates; neither goes looking for them.
 //
-// The orchestrator's own `canPublish` is deliberately NOT used as the verdict.
-// It fails a page as soon as any validator reports a single error, including
-// "no images" and "readability is difficult" — advice, not release blockers.
-// Wiring it straight to the publisher would reject nearly every page and the
-// engine would stop producing anything, which is a worse outcome than the one
-// this gate exists to fix. So the orchestrator's findings are read, and only the
-// codes listed below stop a publication. Everything else is recorded as a
-// warning, visible in the logs, and ships.
+// THE POLICY IS STRICT SINCE 2026-10-17, AND THAT REVERSES THE ORIGINAL ONE.
 //
-// THE DUPLICATE GATE SHIPS IN OBSERVATION MODE, and that is the whole point of
-// this delivery. Its findings are computed, persisted in
-// `generations.duplicate_verdict` and displayed — and the page still ships. The
-// measurement has to come before the barrier: nobody can size a blocking rule
-// that has never run, and a gate delivered blocking would cut production by an
-// amount no one could name afterwards. `DUPLICATE_ENFORCEMENT` and
-// `GateInput.duplicateMode` govern the CLASSIFICATION of those findings, never
-// their COMPUTATION — if observation measured less than enforcement, the figures
-// that must justify flipping the switch would describe something other than what
-// is about to be blocked.
+// This gate was born lenient on purpose: only a dozen codes blocked, duplicates
+// and cannibalisation were OBSERVED without holding anything, and the generator's
+// `directAnswer` anomaly was downgraded to a warning. The reasoning was sound for
+// its time — a refused page went to `rejected` and waited for a human, so every
+// extra blocking rule was a page the engine stopped producing, and a gate that
+// refused too much would have looked, from the outside, exactly like a dead
+// engine.
+//
+// The owner's decision of 2026-10-17 answers that fear instead of living with
+// it: « tous les tests SEO approfondis et GEO approfondis [...] avant de
+// publier, et si ça ne respecte pas : régénération ». A refusal no longer parks
+// the page — lib/scheduler/cron.ts (`runCampaignNow`) regenerates it up to twice,
+// handing the model the blocking reasons as corrections to make, and only a page
+// that fails THREE attempts waits for a human. Blocking therefore costs a
+// regeneration, not a page, and the rules can afford to say what a page must be:
+//
+//   - every blocking finding of the audit blocks, and each message is written as
+//     an instruction, because it IS the next prompt's correction list;
+//   - duplicates AND cannibalisation hold the page (`DUPLICATE_ENFORCEMENT` is
+//     'block', `CANNIBALIZATION` joined BLOCKING_DUPLICATE_CODES);
+//   - the direct answer is measured on the page itself (DIRECT_ANSWER), which is
+//     why the generator's own `directAnswer` anomaly may stay a warning.
+//
+// The orchestrator's own `canPublish` is still NOT used as the verdict: it fails
+// a page on "no images" or "readability is difficult", advice no regeneration can
+// be expected to converge on. Its findings are read, and only the codes listed
+// below stop a publication. Everything else is recorded as a warning, visible in
+// the logs, and ships.
+//
+// `DUPLICATE_ENFORCEMENT` and `GateInput.duplicateMode` govern the
+// CLASSIFICATION of the duplicate findings, never their COMPUTATION: under
+// SEO_DUPLICATE_GATE=observe the very same evidence is measured and persisted,
+// it simply does not hold the page.
 
 import type { PageAnomaly } from '@/lib/ai/openai'
 import type { DuplicateGateMode } from '@/lib/existing/mode'
@@ -54,6 +76,7 @@ import {
   type DuplicateMatchEvidence,
   type DuplicateVerdict,
 } from '@/src/core/domain/existing/verdict'
+import { auditSeoGeo, type AuditFaqItem } from './seo-audit'
 import { checkAllJsonLd, censusHeadings } from './structure'
 import { MAX_LENGTH_RATIO, MIN_LENGTH_RATIO, type LengthMeasurement } from './word-count'
 
@@ -132,12 +155,13 @@ export const BLOCKING_JSON_LD_CODES = [
  * The generator marks three fields `blocking`: `title`, `metaDescription` and
  * `directAnswer`. Only the first two are honoured here.
  *
- * `directAnswer` is deliberately downgraded to a warning. It is a brand-new
- * prompt requirement with no production track record, and blocking on it would
- * mean that any model drift on one optional JSON field silently stops the whole
- * engine — the exact failure this gate is built to avoid. A page without its
- * extract block loses a featured-snippet opportunity; it is not unpublishable.
- * Promote it here once the observed rate says it is safe.
+ * `directAnswer` stays a warning, but no longer for the reason it was first
+ * downgraded (a new, untested prompt requirement). The direct answer is now
+ * BLOCKING through the audit's DIRECT_ANSWER, which measures the page itself —
+ * the paragraph right after the H1 and the `directAnswer` field — instead of
+ * trusting the generator's self-report. Blocking here as well would refuse the
+ * same defect twice under two codes; when DIRECT_ANSWER fires, the anomaly is
+ * not even reported (see `runValidationGate`).
  */
 export const BLOCKING_ANOMALY_FIELDS = [
   'title',
@@ -157,12 +181,15 @@ export const BLOCKING_ANOMALY_FIELDS = [
 export { BLOCKING_DUPLICATE_CODES } from '@/src/core/domain/existing/verdict'
 
 /**
- * What the gate DOES with its duplicate verdict, by default.
+ * What the gate DOES with its duplicate verdict, by default: 'block'.
  *
- * 'observe': every finding is computed, persisted and shown — and the page
- * ships. Deliberate. The site owner has to see the real volume of near
- * duplicates his site already carries BEFORE a barrier closes on it; a gate that
- * started out blocking would cut production by an amount nobody could name.
+ * It shipped as 'observe' — every finding computed, persisted and shown, and the
+ * page shipped anyway — because a barrier nobody had measured would have cut
+ * production by an amount nobody could name, with a human as the only way out.
+ * Since 2026-10-17 a held page is REGENERATED with the duplicate named in its
+ * correction list (lib/scheduler/cron.ts), so holding it costs an attempt, not
+ * the page, and publishing a near copy of a page the site already carries is the
+ * worse outcome. `SEO_DUPLICATE_GATE=observe` still restores observation.
  *
  * THIS IS ONLY A DEFAULT. The real mode arrives through `GateInput.duplicateMode`
  * and the product's single environment read (`duplicateGateMode()`,
@@ -176,15 +203,16 @@ export { BLOCKING_DUPLICATE_CODES } from '@/src/core/domain/existing/verdict'
  * has no reader and flipping to enforcement in a later wave would mean editing
  * this file instead of an environment variable.
  */
-export const DUPLICATE_ENFORCEMENT: DuplicateGateMode = 'observe'
+export const DUPLICATE_ENFORCEMENT: DuplicateGateMode = 'block'
 
 // ─── Findings ───────────────────────────────────────────────────────────────
 
 // 'gbp' is declared for lib/publishing/gbp/gate.ts, whose findings need a source
 // of their own: reusing 'seo' or 'quality' would file a Google Business Profile
-// defect under a page validator and make both unreadable in a log.
+// defect under a page validator and make both unreadable in a log. 'geo' files
+// the answer-engine rules of seo-audit.ts apart from the search-engine ones.
 export type FindingSource =
-  | 'length' | 'structure' | 'links' | 'quality' | 'seo' | 'duplicate' | 'generator' | 'gbp'
+  | 'length' | 'structure' | 'links' | 'quality' | 'seo' | 'geo' | 'duplicate' | 'generator' | 'gbp'
 
 export interface GateFinding {
   code: string
@@ -266,6 +294,36 @@ export interface GateInput {
   duplicateMode?: DuplicateGateMode
   quality?: ContentQualityConfig
   seo?: SeoValidationConfig
+
+  // ─── What the SEO + GEO audit needs beyond the page itself ─────────────
+  //
+  // Every field below is optional, and absence has ONE of two meanings, fixed
+  // per field in seo-audit.ts: CONTENT the page should carry counts as empty
+  // (`faqItems`, `directAnswer`, `schemaArticle`); CONTEXT the caller may not
+  // know switches the rule off (`city`, `businessName`, `requiredEntities`,
+  // `enableExternalLinks`, `hasGoogleBusinessProfile`, the two link counts).
+  // Guessing a context would refuse a correct page on a fact nobody supplied.
+
+  /** JSON-LD Article of the page. */
+  schemaArticle?: string
+  /** `GeneratedPage.directAnswer`. */
+  directAnswer?: string
+  /** The visible FAQ (`GeneratedPage.faqItems`). */
+  faqItems?: readonly AuditFaqItem[]
+  /** Target city of the page. */
+  city?: string
+  businessName?: string
+  /** `PlanItemBrief.required_entities`. */
+  requiredEntities?: readonly string[]
+  enableExternalLinks?: boolean
+  /** False = no Google Business Profile: no phone, no street address allowed. */
+  hasGoogleBusinessProfile?: boolean
+  /** Pages the site already has, home and the page itself excluded. */
+  knownInternalPathsCount?: number
+  /** Internal links that resolved and were kept. */
+  internalLinksKept?: number
+  /** Tells an internal absolute link from an external source. */
+  siteUrl?: string
 }
 
 // ─── Validator Configuration ────────────────────────────────────────────────
@@ -421,11 +479,53 @@ export async function runValidationGate(input: GateInput): Promise<GateVerdict> 
     })
   }
 
-  // ─── 5. What the generator already told us about this page ────────────
+  // ─── 5. The deep SEO + GEO audit ──────────────────────────────────────
+  //
+  // Pure and synchronous, so it runs outside the validators' try/catch: a
+  // validator crash must not silently switch off the rules this policy rests
+  // on. Its blocking messages are, word for word, the corrections the next
+  // regeneration is asked to make.
+  const audit = auditSeoGeo({
+    html: input.html,
+    title: input.title,
+    metaDescription: input.metaDescription,
+    focusKeyword: input.focusKeyword,
+    slug: input.slug,
+    city: input.city,
+    businessName: input.businessName,
+    requiredEntities: input.requiredEntities,
+    faqItems: input.faqItems,
+    schemas: {
+      localBusiness: input.schemaLocalBusiness,
+      faqPage: input.schemaFaqPage,
+      breadcrumb: input.schemaBreadcrumb,
+      article: input.schemaArticle,
+    },
+    directAnswer: input.directAnswer,
+    pageType: input.pageType,
+    enableExternalLinks: input.enableExternalLinks,
+    hasGoogleBusinessProfile: input.hasGoogleBusinessProfile,
+    knownInternalPathsCount: input.knownInternalPathsCount,
+    internalLinksKept: input.internalLinksKept,
+    siteUrl: input.siteUrl,
+  })
+
+  for (const finding of audit) {
+    const entry: GateFinding = { code: finding.code, source: finding.source, message: finding.message }
+    if (finding.severity === 'blocking') blocking.push(entry)
+    else warnings.push(entry)
+  }
+
+  const directAnswerMeasured = audit.some(finding => finding.code === 'DIRECT_ANSWER')
+
+  // ─── 6. What the generator already told us about this page ────────────
   //
   // Checked here, before the external validators, so these findings survive a
   // validator crash: they cost nothing and they are first-hand.
   for (const anomaly of input.anomalies ?? []) {
+    // Said once: DIRECT_ANSWER above already measured this defect on the page.
+    if (anomaly.field === 'directAnswer' && directAnswerMeasured) continue
+
     const finding: GateFinding = {
       code: `GENERATOR_${anomaly.field.toUpperCase()}`,
       source: 'generator',
@@ -439,7 +539,7 @@ export async function runValidationGate(input: GateInput): Promise<GateVerdict> 
     else warnings.push(finding)
   }
 
-  // ─── 6. Editorial identity: the part that needs no score ──────────────
+  // ─── 7. Editorial identity: the part that needs no score ──────────────
   //
   // Address, title, meta description. Run BEFORE the validators, and outside
   // their try/catch, for the same reason as the anomalies above: these findings
@@ -449,7 +549,7 @@ export async function runValidationGate(input: GateInput): Promise<GateVerdict> 
   // something already known.
   duplicates.push(...observeIdentity(input))
 
-  // ─── 7. Existing validation pipeline ──────────────────────────────────
+  // ─── 8. Existing validation pipeline ──────────────────────────────────
   let score: number | undefined
   let grade: string | undefined
   let degraded: string | undefined
@@ -578,12 +678,12 @@ export async function runValidationGate(input: GateInput): Promise<GateVerdict> 
     degraded = error instanceof Error ? error.message : String(error)
   }
 
-  // ─── 8. What the duplicate findings are worth, and where they land ────
+  // ─── 9. What the duplicate findings are worth, and where they land ────
   //
   // The measurement above is identical in both modes; only this classification
-  // changes. That is the whole contract of the observation period — figures
-  // gathered under 'observe' have to describe exactly what 'block' will refuse,
-  // otherwise the replay that must justify the switch measures a different rule.
+  // changes. Figures gathered under 'observe' describe exactly what 'block'
+  // refuses — otherwise the replay (scripts/replay-duplicate-gate.ts) would
+  // measure a rule other than the one in force.
   const duplicateVerdict = summarizeDuplicates(duplicates, input)
 
   // `isBlocking` rather than a second membership test against
@@ -664,9 +764,13 @@ function observeIdentity(input: GateInput): DuplicateObservation[] {
     truncated: input.inventoryTruncated ?? false,
   })
 
+  // `judgeEditorialIdentity` still files CANNIBALIZATION under `warnings`: the
+  // domain says what the measurements ALLOW, the gate decides what they cost.
+  // Since 2026-10-17 two pages chasing the same query is a reason to hold the
+  // page and regenerate it on another angle, so its warnings hold the page too.
   return [
     ...verdict.blocking.map(item => identityObservation(item.code, item.comparison, true)),
-    ...verdict.warnings.map(item => identityObservation(item.code, item.comparison, false)),
+    ...verdict.warnings.map(item => identityObservation(item.code, item.comparison, true)),
   ]
 }
 
@@ -752,12 +856,14 @@ function observeContentDuplicates(
       continue
     }
 
+    // Holds the page since 2026-10-17, like its identity twin above: the
+    // regeneration is told which page already answers this query.
     if (match.reason === 'cannibalization') {
-      const warning: DuplicateMatchEvidence = { ...evidence, code: 'CANNIBALIZATION' }
+      const cannibal: DuplicateMatchEvidence = { ...evidence, code: 'CANNIBALIZATION' }
       observations.push({
-        finding: duplicateFinding(warning, IDENTITY_HEADLINES.CANNIBALIZATION),
-        evidence: warning,
-        holdsPage: false,
+        finding: duplicateFinding(cannibal, IDENTITY_HEADLINES.CANNIBALIZATION),
+        evidence: cannibal,
+        holdsPage: true,
       })
       continue
     }
@@ -806,9 +912,9 @@ function percent(similarity: number): string {
  * absent verdict has to keep meaning "not compared". Confusing the two would
  * make a site nobody crawled look exactly like a site with no duplicates.
  *
- * `reasons` lists the findings that WOULD hold the page, whatever the mode. In
- * observation they read as would-be refusals, which is what the replay needs to
- * count before the barrier closes.
+ * `reasons` lists the findings that hold the page, whatever the mode. Under
+ * SEO_DUPLICATE_GATE=observe they read as would-be refusals, which is what the
+ * replay counts.
  */
 function summarizeDuplicates(
   observations: readonly DuplicateObservation[],

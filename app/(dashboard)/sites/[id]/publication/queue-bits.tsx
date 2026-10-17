@@ -1,13 +1,13 @@
 // ─────────────────────────────────────────────────────────────────────────────
-// Les pièces communes aux deux files de publication — étapes 4 et 5
+// Les pièces communes aux deux files de l'onglet Publication d'un site
 // ─────────────────────────────────────────────────────────────────────────────
 //
 // Même rôle que app/(dashboard)/dashboard/ui-bits.tsx : ce que le système de
-// design ne fournit pas et que SEULES les deux files de publication ont besoin
-// de rendre. Il vit sous /publish parce que c'est là que la file est née, et il
-// est importé par /generate — jamais l'inverse, et jamais l'une des deux pages
-// depuis l'autre : deux pages qui s'importent mutuellement forment un cycle ESM
-// dès que la seconde a besoin d'une pièce de la première.
+// design ne fournit pas et que SEULES les files de publication ont besoin de
+// rendre. La file à publier (./PublishQueue.tsx), le flux de génération
+// (./GenerationPanel.tsx) et les posts de fiche (./GbpTab.tsx) l'importent —
+// jamais l'un d'eux depuis un autre : deux modules qui s'importent mutuellement
+// forment un cycle ESM dès que le second a besoin d'une pièce du premier.
 //
 // POURQUOI CE FICHIER EXISTE. La preuve d'un quasi-doublon doit s'afficher LÀ OÙ
 // LA DÉCISION SE PREND — dans la ligne de la génération, sur les deux écrans qui
@@ -51,9 +51,9 @@ import type { InventorySummary } from '@/app/api/sites/[id]/inventory/types'
 
 // ─── Mise en page d'une file ────────────────────────────────────────────────
 //
-// Déplacés depuis publish/page.tsx, sans changement de rendu. Ils ont un second
-// lecteur depuis que /generate rend la même ligne : la page en gardait une copie
-// écrite à la main, aux mêmes champs et au même ordre.
+// Partagés par la file à publier et le flux de génération, qui rendent la même
+// ligne : chacun en gardait une copie écrite à la main, aux mêmes champs et au
+// même ordre.
 
 export function Panel({
   title,
@@ -93,10 +93,13 @@ export function rowStyle(last: boolean, gap: boolean): React.CSSProperties {
 /**
  * Le titre d'une ligne et sa ligne de contexte.
  *
- * Le badge « Mise à jour » est rendu ICI plutôt qu'à côté du StatusBadge de
- * chaque appelant : `intent` est une propriété de la ligne, pas de l'écran, et
- * une mise à jour qui ressemblerait à une création dans la file ferait valider
- * un remplacement de page en croyant publier une page neuve.
+ * Le moteur ne met plus à jour les pages existantes (décision du propriétaire,
+ * 17/10/2026) : aucune ligne d'intention 'refresh' n'est plus créée. Celles qui
+ * existent encore en base sont d'anciennes demandes, que le planificateur ne
+ * publie pas (`listPendingPublishGenerations` ne lit que les créations). Le
+ * badge le dit ICI, sur la ligne, plutôt qu'à côté du StatusBadge de chaque
+ * appelant : une ancienne demande qui ressemblerait à une page neuve ferait
+ * croire qu'elle partira.
  */
 export function RowHead({ generation: g, extra }: { generation: FeedGeneration; extra?: string }) {
   const refresh = g.intent === 'refresh'
@@ -107,7 +110,11 @@ export function RowHead({ generation: g, extra }: { generation: FeedGeneration; 
         <span style={{ fontWeight: 600, fontSize: 'var(--fs-sm)' }}>
           {g.title || g.slug || g.focus_keyword || g.city}
         </span>
-        {refresh && <span className="badge badge-info">Mise à jour</span>}
+        {refresh && (
+          <span className="badge badge-muted" title="Le moteur ne met plus à jour les pages existantes : cette demande ne sera pas publiée.">
+            Ancienne demande de mise à jour — ignorée
+          </span>
+        )}
       </div>
       <div className="meta" style={{ marginTop: 2 }}>
         {[g.page_type, g.city, g.ai_model, g.campaign?.name, g.site?.name, extra].filter(Boolean).join(' • ')}
@@ -197,9 +204,9 @@ export function DuplicateFlag({ verdict }: { verdict: DuplicateVerdict | null })
 /**
  * CONTRE QUOI cette page a été pesée, et ce qui en a été conclu.
  *
- * L'UNIQUE rendu de la preuve dans tout le produit : /generate et /publish
- * l'importent tous deux, et une seconde implémentation aurait divergé au premier
- * correctif de formulation.
+ * L'UNIQUE rendu de la preuve dans tout le produit : la file à publier et le
+ * flux de génération l'importent tous deux, et une seconde implémentation
+ * aurait divergé au premier correctif de formulation.
  *
  * TROIS CADRAGES, ET LA DIFFÉRENCE EST TOUT LE SUJET :
  *  · `mode === 'observe'` et les preuves retiendraient la page → la page EST
@@ -409,7 +416,7 @@ export interface FreshnessNotice {
  * problèmes que seul le propriétaire peut trancher. Les confondre enverrait
  * relancer une analyse qui rendra le même vide.
  *
- * DETTE CONNUE : app/(dashboard)/sites/[id]/existing/page.tsx porte encore son
+ * DETTE CONNUE : app/(dashboard)/sites/[id]/pages/page.tsx porte encore son
  * `freshnessBanner()` local, plus riche (il nomme aussi le régime 'fresh' et
  * l'adresse enregistrée du site). Son propre commentaire désigne CE fichier
  * comme sa destination. La migration est une suppression suivie d'un import,
@@ -435,7 +442,7 @@ export function freshnessNotice(summary: InventorySummary | null): FreshnessNoti
     return {
       tone: 'serious',
       title: 'Inventaire trop vieux pour être utilisé',
-      body: `Dernière analyse${day ? ` le ${day}` : ''}${summary.ageDays === null ? '' : `, il y a ${summary.ageDays} jours`}. Le moteur ne s’en sert plus pour décider : il vérifie chaque adresse directement sur le site, mais il ne compare plus aucun titre et ne propose aucune mise à jour.`,
+      body: `Dernière analyse${day ? ` le ${day}` : ''}${summary.ageDays === null ? '' : `, il y a ${summary.ageDays} jours`}. Le moteur ne s’en sert plus pour décider : il vérifie chaque adresse directement sur le site, mais il ne compare plus aucun titre.`,
     }
   }
 
@@ -450,6 +457,6 @@ export function freshnessNotice(summary: InventorySummary | null): FreshnessNoti
   return {
     tone: 'info',
     title: 'Le moteur n’a jamais regardé ce site',
-    body: 'Aucune analyse n’a été menée. Il ne sait donc pas quelles pages existent déjà, ni quels titres sont pris. Il continue de produire — il vérifie chaque adresse directement sur le site avant d’écrire — mais il ne peut ni comparer les titres, ni proposer la mise à jour d’une page existante.',
+    body: 'Aucune analyse n’a été menée. Il ne sait donc pas quelles pages existent déjà, ni quels titres sont pris. Il continue de produire — il vérifie chaque adresse directement sur le site avant d’écrire — mais il ne peut pas comparer les titres.',
   }
 }

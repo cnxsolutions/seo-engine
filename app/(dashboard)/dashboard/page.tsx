@@ -1,66 +1,59 @@
 // ─────────────────────────────────────────────────────────────────────────────
-// The dashboard — one page, two tabs, one scope
+// The dashboard — the one cross-site screen
 //
-// It used to be two pages that each mixed two kinds of measurement in the same
-// tile grid: "1 page générée" sitting next to "#26,2 position moyenne" and
-// "0,9 % CTR". Three universes of measurement, one row of tiles, nothing
-// readable.
+// Everything about ONE site now lives in its own section (/sites/<id>):
+// strategy, calendar, publication, Search Console, settings. The owner's rule
+// (17/10/2026): « Analytics doit être dans chaque site, pas dans une section à
+// part. » So this page no longer carries a Performance tab nor a site filter —
+// both measured « the site picked in a menu », which is exactly what the site's
+// own Performances tab now does without a menu.
 //
-// The split is now structural rather than cosmetic:
-//   Production   our own rows — what the engine manufactured.
-//   Performance  Search Console rows — what Google did with it.
-// Each tab states its source and its period; neither borrows the other's
-// figures. Site and period live in the URL, so a view is shareable and survives
-// a reload.
+// What stays here is what is true ACROSS sites:
+//   · the sites themselves, each with its state and a way into its section;
+//   · what the engine manufactured on all of them (the Production figures,
+//     unchanged: our own rows, never a Google number).
+//
+// Old links keep resolving: `?tab=performance` goes to the /analytics site
+// picker, `?site=<id>` to that site's Performances tab.
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { LayoutDashboard } from 'lucide-react'
+import { ChevronRight, LayoutDashboard } from 'lucide-react'
+import Link from 'next/link'
+import { redirect } from 'next/navigation'
 import { Suspense } from 'react'
 import {
-  DASHBOARD_TABS,
-  getPerformanceMetrics,
   getProductionMetrics,
   listDashboardSites,
   resolvePeriod,
-  resolveTab,
-  type DashboardTab,
+  type DashboardSite,
 } from '@/app/api/dashboard/metrics'
-import { EmptyState, PageHeader, TabNav } from '@/components/ui'
+import { EmptyState, PageHeader } from '@/components/ui'
 import { DashboardFilters } from './DashboardFilters'
-import { PerformanceTab } from './PerformanceTab'
 import { ProductionTab } from './ProductionTab'
 
 export const dynamic = 'force-dynamic'
-
-const TAB_META: Record<DashboardTab, { label: string; caption: string }> = {
-  production: { label: 'Production', caption: 'Ce que le moteur fabrique' },
-  performance: { label: 'Performance', caption: 'Ce que Google en pense' },
-}
 
 type SearchParams = Record<string, string | string[] | undefined>
 
 export default async function DashboardPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const params = await searchParams
-  const tab = resolveTab(single(params.tab))
   const days = resolvePeriod(single(params.days))
+  const requested = single(params.site)
+
+  // The two shapes of link the old dashboard handed out. `redirect()` throws,
+  // so both stay outside any try/catch.
+  if (single(params.tab) === 'performance') {
+    redirect(requested ? `/analytics?site=${encodeURIComponent(requested)}` : '/analytics')
+  }
 
   const sites = await listDashboardSites()
 
-  // An unknown or stale site id falls back to the aggregate rather than to an
-  // empty screen — a shared link must never dead-end.
-  const requested = single(params.site)
-  const siteId = requested && sites.some((site) => site.id === requested) ? requested : null
-  const site = siteId ? sites.find((candidate) => candidate.id === siteId) : null
-  const scopeLabel = site ? site.name : `tous les sites (${sites.length})`
-
-  // Link-tabs, not a client tablist: each tab is a real, bookmarkable URL, and
-  // `TabNav` is the shared component that renders exactly that (aria-current on
-  // links rather than a tablist role, which would lie about what a click does).
-  const tabItems = DASHBOARD_TABS.map((candidate) => {
-    const query = new URLSearchParams({ tab: candidate, days: String(days) })
-    if (siteId) query.set('site', siteId)
-    return { id: candidate, label: TAB_META[candidate].label, href: `/dashboard?${query.toString()}` }
-  })
+  // A known site in the query means « this site's figures »: they live in its
+  // own Performances tab now. An unknown id falls back to the overview rather
+  // than to an empty screen — a shared link must never dead-end.
+  if (requested && sites.some((site) => site.id === requested)) {
+    redirect(`/sites/${requested}/performances?vue=production&days=${days}`)
+  }
 
   return (
     <div>
@@ -68,15 +61,8 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
         icon={LayoutDashboard}
         badge="Tableau de bord"
         title="Tableau de bord"
-        subtitle="Deux mesures, deux onglets : ce que le moteur produit, et ce que Google en fait."
-      >
-        {sites.length > 0 && (
-          <>
-            <TabNav items={tabItems} active={tab} ariaLabel="Nature des métriques" />
-            <p className="meta" style={{ marginTop: 'var(--space-2)' }}>{TAB_META[tab].caption}</p>
-          </>
-        )}
-      </PageHeader>
+        subtitle="Tous les sites d’un coup d’œil, et ce que le moteur fabrique sur l’ensemble. Le détail d’un site — calendrier, publication, Search Console — se lit dans sa page."
+      />
 
       {sites.length === 0 ? (
         <EmptyState
@@ -87,26 +73,83 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
         />
       ) : (
         <>
+          <SitesOverview sites={sites} />
+
+          <h2 className="tab-intro__title" style={{ margin: 'var(--space-8) 0 var(--space-3)' }}>
+            Production — tous les sites
+          </h2>
+
           <Suspense fallback={<div style={{ height: 44, marginBottom: 'var(--space-5)' }} />}>
-            <DashboardFilters
-              sites={sites.map(({ id, name, url, type }) => ({ id, name, url, type }))}
-              siteId={siteId}
-              days={days}
-            />
+            <DashboardFilters days={days} />
           </Suspense>
 
-          {tab === 'production' ? (
-            <ProductionTab metrics={await getProductionMetrics(siteId, days)} scopeLabel={scopeLabel} />
-          ) : (
-            <PerformanceTab
-              metrics={await getPerformanceMetrics(siteId, days, sites)}
-              scopeLabel={scopeLabel}
-              siteId={siteId}
-            />
-          )}
+          <ProductionTab metrics={await getProductionMetrics(null, days)} scopeLabel={`tous les sites (${sites.length})`} />
         </>
       )}
     </div>
+  )
+}
+
+/**
+ * One row per site: its state in words, and the way into its section. The
+ * Search Console column says which of three facts holds — never a blank cell
+ * that could pass for « nothing to measure ».
+ */
+function SitesOverview({ sites }: { sites: DashboardSite[] }) {
+  // Active sites first: a deactivated site stays listed — the scheduler ignores
+  // it, the operator should not forget it exists — but below the ones at work.
+  const ordered = [...sites.filter((site) => site.isActive), ...sites.filter((site) => !site.isActive)]
+
+  return (
+    <section className="panel" aria-labelledby="dashboard-sites">
+      <div className="panel__header">
+        <h2 id="dashboard-sites" className="card-title">Vos sites</h2>
+        <Link href="/sites" className="btn-link">Gérer les sites</Link>
+      </div>
+      <div className="panel__body--flush scroll-x">
+        <table className="data-table">
+          <thead>
+            <tr>
+              <th scope="col">Site</th>
+              <th scope="col">Connecteur</th>
+              <th scope="col">Planificateur</th>
+              <th scope="col">Search Console</th>
+              <th scope="col"><span className="sr-only">Ouvrir</span></th>
+            </tr>
+          </thead>
+          <tbody>
+            {ordered.map((site) => (
+              <tr key={site.id}>
+                <th scope="row">
+                  <Link href={`/sites/${site.id}`} className="cell-strong">{site.name}</Link>
+                  <div className="meta truncate" style={{ maxWidth: '22rem' }}>{site.url}</div>
+                </th>
+                <td><span className="chip">{site.type === 'nextjs' ? 'Next.js' : 'WordPress'}</span></td>
+                <td>
+                  {site.isActive
+                    ? <span className="badge badge-success">Actif</span>
+                    : <span className="badge badge-muted">Désactivé</span>}
+                </td>
+                <td>
+                  {!site.googleConnected ? (
+                    <span className="badge badge-warning">Google non connecté</span>
+                  ) : !site.gscProperty ? (
+                    <span className="badge badge-warning">Propriété à choisir</span>
+                  ) : (
+                    <Link href={`/sites/${site.id}/performances`} className="btn-link">Reliée — voir les performances</Link>
+                  )}
+                </td>
+                <td style={{ textAlign: 'right' }}>
+                  <Link href={`/sites/${site.id}`} className="btn-ghost btn-sm" aria-label={`Ouvrir ${site.name}`}>
+                    Ouvrir <ChevronRight size={14} aria-hidden="true" />
+                  </Link>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
   )
 }
 

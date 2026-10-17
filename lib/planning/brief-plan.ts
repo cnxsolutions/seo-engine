@@ -5,7 +5,6 @@ import {
   STRIKING_DISTANCE_MAX_POSITION,
   STRIKING_DISTANCE_MIN_POSITION,
   type GscPlanningSignals,
-  type StrikingDistanceOpportunity,
 } from '@/lib/google/performance'
 import { buildSerpEvidence, type SerpEvidence } from '@/lib/serp'
 import { loadSiteInventory } from '@/lib/existing/inventory'
@@ -17,6 +16,18 @@ import {
 } from '@/src/core/domain/existing/action'
 import type { EditorialTarget } from '@/src/core/domain/existing/identity'
 import { blindInventory, type SiteInventory } from '@/src/core/domain/existing/inventory'
+import {
+  avoidedPageOf,
+  avoidPromptLine,
+  cannibalizationReasons,
+  distinctAngleNote,
+  distinctAngleRule,
+  keywordGuardsOf,
+  keywordInContext,
+  noDistinctAngleReason,
+  reusesAvoidedAddress,
+  type AvoidedPage,
+} from './distinct-angle'
 import type {
   AnalysisRun,
   Campaign,
@@ -80,19 +91,23 @@ export async function generateBriefPlan(opts: GenerateBriefPlanOptions): Promise
  * Same plan, plus what the real performance data said about the previous cycle.
  *
  * The engine used to plan the cycle N+1 knowing nothing of what cycle N
- * produced: volume without measurement. When Search Console data exists, three
- * facts now steer the plan — queries already ranking 5 to 20 (the cheapest
- * traffic available), pages seen and never clicked (a title problem, not a
- * content problem), and subjects that got zero impression after 30 days (stop
- * insisting). When it does not, nothing changes.
+ * produced: volume without measurement. When Search Console data exists, it now
+ * tells the plan which queries the site's pages ALREADY carry (ranking 5 to 20,
+ * split between pages, already won, or seen and never clicked) — so that no new
+ * page competes with them — and which subjects got zero impression after 30
+ * days (stop insisting). When it does not, nothing changes.
  *
- * ET C'EST ICI QUE LE MOTEUR CESSE DE NE SAVOIR DIRE QU'« UNE PAGE DE PLUS ».
- * Chaque sujet du cycle est confronte a l'existant AVANT que le modele ne soit
- * ouvert : ce qui ressort 'refresh' ou 'skip' ne lui est jamais soumis, donc ne
- * coute pas un jeton. Un 'refresh' voyage dans le plan comme une PROPOSITION —
- * il nomme la page visee, sa portee et la preuve qui l'a designee, et il attend
- * un clic humain plus loin dans la chaine. Rien, dans ce module ni en aval de
- * lui, ne supprime, ne fusionne ni ne redirige quoi que ce soit.
+ * AUCUNE MISE A JOUR, JAMAIS (decision du proprietaire, 2026-10-17 : « Je ne
+ * veux pas de mise a jour. Les pages deja redigees, on ne reprend pas leur
+ * slug. »). Chaque sujet du cycle est confronte a l'existant AVANT que le
+ * modele ne soit ouvert :
+ *  - un sujet bloque par Search Console ressort 'skip' et ne lui est jamais
+ *    soumis ;
+ *  - un sujet qu'une page du site couvre deja (le 'refresh' du domaine) reste
+ *    une CREATION, mais sur un angle distinct : le modele recoit la page a ne
+ *    pas concurrencer, et le brief qu'il rend est ecarte s'il en reprend le
+ *    mot-cle ou l'adresse (lib/planning/distinct-angle.ts).
+ * Aucune page existante n'est reecrite, supprimee, fusionnee ni redirigee.
  *
  * UNE PANNE DE CONNAISSANCE NE BLOQUE JAMAIS LA PLANIFICATION. Inventaire
  * aveugle, Search Console absente, site inconnu : le plan sort quand meme, en
@@ -107,9 +122,18 @@ export async function generateBriefPlanWithSignals(opts: GenerateBriefPlanOption
   const inventory = await resolveInventory(campaign)
   const takenPaths = new Set<string>(inventory.takenPaths)
 
+  // Occupation et couverture sont deux faits : une generation 'failed' garde son
+  // adresse (existingSlugs, takenPaths) mais ne couvre pas son sujet. Ses
+  // mots-cles restent donc libres — la garde finale de normalizeBriefs refuse
+  // tout mot-cle de cette liste, elle ne doit pas refuser un sujet jamais ecrit.
   const existingSlugs = opts.existingSlugs ?? inventory.entries.map(entry => entry.path.replace(/^\//, ''))
   const existingKeywords =
-    opts.existingKeywords ?? dedupe(inventory.entries.map(entry => (entry.focusKeyword ?? '').toLowerCase()))
+    opts.existingKeywords ??
+    dedupe(
+      inventory.entries
+        .filter(entry => entry.coversTopic)
+        .map(entry => (entry.focusKeyword ?? '').toLowerCase())
+    )
 
   const signals = await resolveSignals(opts)
   const serpEvidence = await resolveSerpEvidence(opts)
@@ -140,18 +164,18 @@ export async function generateBriefPlanWithSignals(opts: GenerateBriefPlanOption
 
   if (calendarSlots.length === 0) return { items: [], signals, serpEvidence }
 
-  // Aligned with calendarSlots: the highest-potential opportunities go to the
-  // earliest dates, because a cycle publishes in date order.
-  const opportunities = assignOpportunities(calendarSlots.length, signals)
+  // Les requetes Search Console ne sont plus distribuees comme cibles des
+  // creneaux. Une requete en position 5-20 est, par definition, deja portee par
+  // une page du site : y envoyer une page neuve la concurrencerait, et la
+  // reecriture de la page qui la porte n'est plus une option. Elles restent
+  // dans le prompt, comme requetes a NE PAS viser, et dans la garde finale.
 
   // ── LA DECISION, AVANT LE PREMIER JETON ───────────────────────────────────
   //
   // Chaque creneau est confronte a l'existant avant que le modele ne soit
-  // ouvert. Ce qui en sort 'refresh' ou 'skip' ne lui est PAS soumis : le
-  // moteur cesse de payer une page pour decouvrir ensuite qu'il ne fallait pas
-  // l'ecrire. Un sujet a rafraichir n'a pas besoin d'un brief neuf — il a
-  // besoin d'une cible, d'une portee et d'une preuve, et les trois sont deja
-  // rendues ici.
+  // ouvert. Ce qui en sort 'skip' ne lui est PAS soumis : le moteur cesse de
+  // payer une page pour decouvrir ensuite qu'il ne fallait pas l'ecrire. Un
+  // sujet deja couvert lui est soumis AVEC la page a ne pas concurrencer.
   const decisionContext = {
     campaign,
     inventory,
@@ -159,20 +183,18 @@ export async function generateBriefPlanWithSignals(opts: GenerateBriefPlanOption
     // Les communes desservies, resolues UNE fois : c'est ce qui permet au
     // comparateur d'identite de voir que « Taxi Troyes » et « Taxi Reims » sont
     // le meme titre a la ville pres.
-    cityTokens: dedupe([...campaign.communes, campaign.department ?? '']),
+    cityTokens: campaignCityNames(campaign),
   }
 
-  const subjects = calendarSlots.map((slot, index) =>
-    decideForSlot(slot, opportunities[index] ?? null, decisionContext)
-  )
+  const subjects = calendarSlots.map(slot => decideForSlot(slot, decisionContext))
 
   const toWrite = subjects.filter(subject => subject.action.kind === 'create')
-  const refreshCount = subjects.filter(subject => subject.action.kind === 'refresh').length
-  const skipCount = subjects.length - toWrite.length - refreshCount
+  const distinctCount = toWrite.filter(subject => subject.avoid !== null).length
+  const skipCount = subjects.length - toWrite.length
 
   console.log(
-    `[plan] decision avant depense : ${toWrite.length} page(s) a ecrire, ` +
-      `${refreshCount} mise(s) a jour proposee(s), ${skipCount} sujet(s) ecarte(s)` +
+    `[plan] decision avant depense : ${toWrite.length} page(s) a ecrire dont ${distinctCount} sur un angle distinct, ` +
+      `${skipCount} ecarte(s)` +
       `${inventory.freshness.state !== 'fresh' ? ` — inventaire ${inventory.freshness.state}` : ''}` +
       `${signals ? '' : ` — ${WITHOUT_SEARCH_CONSOLE}`}`
   )
@@ -189,11 +211,21 @@ export async function generateBriefPlanWithSignals(opts: GenerateBriefPlanOption
         serpEvidence,
       })
 
-  return {
-    items: normalizeBriefs({ subjects, rawItems, campaign, takenPaths, inventory, signals }),
-    signals,
-    serpEvidence,
+  const items = normalizeBriefs({ subjects, rawItems, campaign, takenPaths, inventory, signals, existingKeywords })
+
+  // Le modele a pu rendre un sujet qui ne se distingue pas de la page a eviter,
+  // ou qui reprend un mot-cle deja porte : ces creneaux tombent apres la
+  // redaction, et il faut les voir.
+  const kept = items.filter(item => item.action?.kind === 'create').length
+  const lateSkips = items.length - kept - skipCount
+  if (lateSkips > 0) {
+    console.log(
+      `[plan] apres redaction : ${kept} page(s) retenue(s), ${lateSkips} creneau(x) ecarte(s) ` +
+        `(angle non distinct, mot-cle deja porte ou adresse occupee)`
+    )
   }
+
+  return { items, signals, serpEvidence }
 }
 
 /**
@@ -265,9 +297,8 @@ Tu ne rediges jamais la page, tu ne fournis jamais de HTML, et tu reponds unique
       analysisRun: opts.analysisRun,
       existingSlugs: opts.existingSlugs,
       existingKeywords: opts.existingKeywords,
-      calendarSlots: opts.subjects.map(subject => subject.slot),
+      subjects: opts.subjects,
       signals: opts.signals,
-      opportunities: opts.subjects.map(subject => subject.opportunity),
       serpEvidence: opts.serpEvidence,
     }),
     model: DEFAULT_PLANNING_MODEL,
@@ -298,24 +329,30 @@ function itemsOf(parsed: unknown): Array<Partial<PlanItemBrief>> {
 // ─── Ce que le plan decide, sujet par sujet ─────────────────────────────────
 
 /** Un creneau du calendrier, tel que generateEditorialCalendar le rend. */
-type PlanSlot = ReturnType<typeof generateEditorialCalendar>[number]
+export type PlanSlot = ReturnType<typeof generateEditorialCalendar>[number]
 
 /**
  * Un creneau, son sujet de depart, et ce que le moteur a decide d'en faire.
  *
  * `seedKeyword` est le sujet SEME PAR LE CALENDRIER, pas celui que le modele
  * proposera : c'est sur lui que le verdict est rendu, puisqu'il est le seul
- * connu avant la depense. Le modele ne peut ensuite affiner que le sujet d'un
- * creneau deja juge libre — et la page qu'il produira repassera de toute facon
- * devant le gate de duplicat, qui la compare a l'existant pour de vrai.
+ * connu avant la depense. Le modele affine ensuite le sujet — et la page qu'il
+ * produira repassera de toute facon devant le gate de duplicat, qui la compare
+ * a l'existant pour de vrai.
+ *
+ * `action` ne peut PAS etre 'refresh', et c'est le type qui le garantit : le
+ * planificateur ne propose plus aucune mise a jour (decision du proprietaire,
+ * 2026-10-17). Un sujet que le site couvre deja reste 'create' et porte dans
+ * `avoid` la page existante qu'il ne doit pas concurrencer.
  */
-interface PlannedSubject {
+export interface PlannedSubject {
   slot: PlanSlot
-  opportunity: StrikingDistanceOpportunity | null
   pageType: PageType
   city: string
   seedKeyword: string
-  action: EditorialAction
+  action: Exclude<EditorialAction, { kind: 'refresh' }>
+  /** La page existante qui couvre deja le sujet seme ; null quand rien ne le couvre. */
+  avoid: AvoidedPage | null
 }
 
 /**
@@ -338,17 +375,23 @@ const NO_SEARCH_CONSOLE: GscPlanningSignals = {
 }
 
 /**
- * Creer, rafraichir ou ecarter — pour UN creneau, avant tout appel au modele.
+ * Creer, creer sur un angle distinct, ou ecarter — pour UN creneau, avant tout
+ * appel au modele.
  *
  * La page confrontee a l'existant est celle que ce creneau produirait :
  * l'adresse que la fabrique de slug lui donnerait, le titre que le repli lui
  * donnerait, son mot-cle seme. La meta description manque, et c'est exact — elle
  * n'est pas encore ecrite. Le comparateur d'identite le sait : une comparaison
  * sans corps ni meta se declare PARTIELLE, et un score bas n'y prouve rien.
+ *
+ * Le verdict 'refresh' du domaine n'est plus execute (decision du proprietaire,
+ * 2026-10-17). Il reste une MESURE juste — « une page du site couvre deja ce
+ * sujet » — et c'est sous cette forme qu'il voyage : le creneau reste une
+ * creation, et la page designee devient celle qu'il ne doit pas concurrencer.
+ * Un 'skip' (requete bloquee par Search Console) reste un 'skip'.
  */
-function decideForSlot(
+export function decideForSlot(
   slot: PlanSlot,
-  opportunity: StrikingDistanceOpportunity | null,
   context: {
     campaign: Campaign
     inventory: SiteInventory
@@ -368,13 +411,29 @@ function decideForSlot(
     focusKeyword: seedKeyword,
   }
 
-  const action = decideEditorialAction(target, {
+  const verdict = decideEditorialAction(target, {
     gsc: signals ?? NO_SEARCH_CONSOLE,
     inventory,
     cityTokens,
   })
 
-  return { slot, opportunity, pageType, city, seedKeyword, action }
+  if (verdict.kind === 'refresh') {
+    return {
+      slot,
+      pageType,
+      city,
+      seedKeyword,
+      action: { kind: 'create' },
+      avoid: avoidedPageOf(verdict, inventory, keywordInContext(seedKeyword, city, cityTokens)),
+    }
+  }
+
+  return { slot, pageType, city, seedKeyword, action: verdict, avoid: null }
+}
+
+/** Les communes de la campagne et son departement : ce qu'on retire d'un mot-cle pour en lire le sujet. */
+function campaignCityNames(campaign: Campaign): string[] {
+  return dedupe([...campaign.communes, campaign.department ?? ''])
 }
 
 /**
@@ -456,37 +515,25 @@ async function resolveSignals(opts: GenerateBriefPlanOptions): Promise<GscPlanni
   return provided && provided.available ? provided : null
 }
 
-/**
- * Share of a cycle that measured opportunities may take. The rest keeps
- * exploring new subjects: a plan built only on queries the site already ranks
- * for stops discovering anything, and next cycle would have no new data to
- * learn from.
- */
-const MAX_OPPORTUNITY_SHARE = 0.6
+// `assignOpportunities` used to live here.
+//
+// It handed the striking-distance queries (a page of the site already ranking
+// 5-20) to the earliest slots as their target, on the theory that a new
+// sub-intent page linking to the ranking one would push it up. With no refresh
+// any more (owner's decision, 2026-10-17), that theory collapses: a query in
+// striking distance is, by definition, already carried by an existing page, and
+// a new page aimed at it competes with that page. These queries now reach the
+// model as queries NOT to target (buildPerformanceSection), and the final guard
+// of normalizeBriefs refuses a brief that targets one anyway.
 
-function assignOpportunities(
-  slotCount: number,
-  signals: GscPlanningSignals | null
-): Array<StrikingDistanceOpportunity | null> {
-  if (!signals) return Array.from({ length: slotCount }, () => null)
-
-  // A query already split between several pages is excluded: it needs
-  // consolidation, and one more page on it would deepen the split.
-  const blocked = new Set(signals.cannibalized.map((entry) => entry.query.toLowerCase()))
-  const pool = signals.strikingDistance.filter((opportunity) => !blocked.has(opportunity.query.toLowerCase()))
-  const budget = Math.max(1, Math.ceil(slotCount * MAX_OPPORTUNITY_SHARE))
-
-  return Array.from({ length: slotCount }, (_, index) => (index < budget ? pool[index] ?? null : null))
-}
-
-function buildPrompt(opts: {
+/** Exporte pour les tests : le prompt est pur, seul l'appel au modele ne l'est pas. */
+export function buildPrompt(opts: {
   campaign: Campaign
   analysisRun?: AnalysisRun | null
   existingSlugs: string[]
   existingKeywords: string[]
-  calendarSlots: ReturnType<typeof generateEditorialCalendar>
+  subjects: readonly PlannedSubject[]
   signals: GscPlanningSignals | null
-  opportunities: Array<StrikingDistanceOpportunity | null>
   serpEvidence: SerpEvidence[]
 }) {
   const analysis = opts.analysisRun?.analysis_data
@@ -504,26 +551,29 @@ function buildPrompt(opts: {
     })),
   })) || []
 
-  const slots = opts.calendarSlots.map((slot, index) => {
-    const opportunity = opts.opportunities[index]
-    return {
-      scheduled_date: slot.scheduled_date,
-      page_type: slot.page_type,
-      target_keyword_seed: slot.target_keyword,
-      target_city: slot.target_city,
-      // Present only when Search Console proved this query is within reach.
-      ...(opportunity
-        ? {
-            gsc_opportunity: {
-              query: opportunity.query,
-              position_actuelle: opportunity.position,
-              impressions_30j: opportunity.impressions,
-              page_qui_ranke: opportunity.pageUrl,
-            },
-          }
-        : {}),
-    }
-  })
+  // `creneau` numerote les slots tels que le modele les voit : c'est par ce
+  // numero que les lignes « deja couvert » ci-dessous designent leur slot, et
+  // c'est dans cet ordre que normalizeBriefs relit les items rendus.
+  const slots = opts.subjects.map((subject, index) => ({
+    creneau: index + 1,
+    scheduled_date: subject.slot.scheduled_date,
+    page_type: subject.slot.page_type,
+    target_keyword_seed: subject.slot.target_keyword,
+    target_city: subject.slot.target_city,
+    ...(subject.avoid ? { deja_couvert_par: subject.avoid.url } : {}),
+  }))
+
+  const avoidLines = opts.subjects.flatMap((subject, index) =>
+    subject.avoid ? [avoidPromptLine(index + 1, subject.avoid)] : []
+  )
+
+  const avoidSection = avoidLines.length > 0
+    ? `
+Creneaux dont le sujet de depart est DEJA couvert par une page du site (cette page n'est PAS mise a jour,
+et le brief ne doit pas la concurrencer) :
+${avoidLines.join('\n')}
+`
+    : ''
 
   return `
 Campagne:
@@ -544,19 +594,19 @@ ${analysis ? JSON.stringify({
 Analyse concurrents:
 ${JSON.stringify(competitorSummary, null, 1)}
 
-Anti-doublon:
+Anti-doublon (pages DEJA en ligne sur le site, qui ne seront ni mises a jour ni remplacees):
 - Slugs deja utilises: ${opts.existingSlugs.slice(0, 50).join(', ') || 'aucun'}
 - Mots-cles deja cibles: ${opts.existingKeywords.slice(0, 50).join(', ') || 'aucun'}
 
 ${buildPerformanceSection(opts.signals)}
 ${buildSerpSection(opts.serpEvidence)}
-Slots a transformer en briefs (ce sont les SEULS sujets qu'aucune page du site ne couvre deja :
-ceux que le site traite deja ont ete retires avant cet appel, ne les reintroduis pas):
+Slots a transformer en briefs (les sujets bloques par Search Console ont deja ete retires avant cet appel) :
 ${JSON.stringify(slots, null, 1)}
-
+${avoidSection}
 Objectif:
-Pour chaque slot, produire un brief SEO complet. Ce brief servira le jour J a rediger la page avec une autre IA.
-Ne redige pas la page. Ne donne pas de HTML.
+Pour chaque slot, produire un brief SEO complet pour une page NEUVE. Ce brief servira le jour J a rediger
+la page avec une autre IA. Reponds avec exactement un item par slot, dans l'ordre de la liste.
+Ne redige pas la page. Ne donne pas de HTML. Ne propose jamais de mettre a jour une page existante.
 
 Regles:
 1. proposed_slug dit ce que la page traite, en 7 mots maximum, et jamais un slug deja utilise.
@@ -572,11 +622,16 @@ Regles:
 8. outline contient uniquement les H2/H3 attendus, pas les paragraphes.
 9. seo_rules contient les contraintes de redaction a respecter plus tard.
 10. competitor_insights reprend des observations utiles des concurrents, sans copier leur contenu.
-11. Si le slot porte un "gsc_opportunity", la page ne doit PAS cibler la requete telle quelle :
-    une page du site la travaille deja. Cible une sous-intention longue traine de cette requete,
-    et mets "page_qui_ranke" dans internal_link_targets. C'est ce lien qui fait monter la page
-    existante de la position ${STRIKING_DISTANCE_MIN_POSITION}-${STRIKING_DISTANCE_MAX_POSITION} vers le top 3.
-12. N'utilise jamais comme target_keyword une requete listee en "requetes interdites".
+11. Les slugs et mots-cles listes en "Anti-doublon" appartiennent a des pages existantes : ne les reutilise
+    JAMAIS comme target_keyword ni comme proposed_slug, ni tels quels ni paraphrases (pluriel, ordre des
+    mots, mots vides, synonyme, nom de la ville ajoute ou retire). Une page neuve qui reprend le sujet
+    d'une page existante la concurrence : elle sera ecartee.
+12. N'utilise jamais comme target_keyword une requete listee en "requetes interdites", ni une requete
+    deja portee par une page existante (sections A, B et D ci-dessus), ni une reformulation proche.
+13. Un creneau signale "deja couvert" recoit un sujet DIFFERENT et complementaire de la page citee, avec
+    son propre target_keyword et son propre proposed_slug ; mets l'URL de cette page dans
+    internal_link_targets. S'il n'existe vraiment aucun angle distinct, garde le sujet seme : le creneau
+    sera ecarte plutot que de concurrencer la page.
 
 Reponds avec ce JSON:
 {
@@ -681,23 +736,26 @@ function buildPerformanceSection(signals: GscPlanningSignals | null): string {
   if (signals.strikingDistance.length > 0) {
     blocks.push(
       '',
-      `A. GISEMENT PRIORITAIRE — requetes ou une page du site est deja en position ${STRIKING_DISTANCE_MIN_POSITION} a ${STRIKING_DISTANCE_MAX_POSITION} :`,
+      `A. Requêtes déjà portées par une page existante — NE PAS les viser, ne pas écrire une page concurrente.`,
+      `   Une page du site y est deja en position ${STRIKING_DISTANCE_MIN_POSITION} a ${STRIKING_DISTANCE_MAX_POSITION} :`,
       ...signals.strikingDistance.slice(0, 15).map((opportunity) =>
         `- "${opportunity.query}" : position ${opportunity.position}, ${opportunity.impressions} impressions, ${opportunity.clicks} clics -> ${opportunity.pageUrl}`
       ),
-      'Le contenu existe deja et Google le montre. Renforcer coute moins cher que repartir de zero :',
-      'ecris une page de sous-intention qui LIE vers l\'URL indiquee, ne redouble pas la requete.'
+      'Ces requetes appartiennent a la page indiquee, qui ne sera pas mise a jour. Aucun target_keyword ne les',
+      'reprend, ni telles quelles ni reformulees : une page neuve sur l\'une d\'elles prendrait ses signaux a la page',
+      'qui la porte. Une page neuve d\'un AUTRE sujet peut seulement lier vers ces URL.'
     )
   }
 
   if (signals.lowCtrPages.length > 0) {
     blocks.push(
       '',
-      'B. PAGES VUES ET IGNOREES — fortes impressions, CTR faible (probleme de title/meta, PAS de contenu) :',
+      'B. PAGES VUES ET IGNOREES — fortes impressions, CTR faible (contexte seulement) :',
       ...signals.lowCtrPages.slice(0, 10).map((page) =>
         `- ${page.pageUrl} : ${page.impressions} impressions, ${page.clicks} clics (CTR ${(page.ctr * 100).toFixed(2)}%), position ${page.position}, requete principale "${page.topQuery}"`
       ),
-      'Aucune nouvelle page a ecrire pour ces sujets : la reponse est une reecriture de title et de meta description.'
+      'Ces pages existent et portent deja leur requete principale : aucune page neuve sur ces requetes ni sur',
+      'leurs variantes proches.'
     )
   }
 
@@ -720,7 +778,7 @@ function buildPerformanceSection(signals: GscPlanningSignals | null): string {
         `- "${entry.query}" (${entry.impressions} impressions) : ${entry.pages.length} pages en concurrence. A garder: ${entry.winner}. A faire pointer vers elle: ${entry.losers.join(', ')}`
       ),
       'Ces pages s\'affaiblissent mutuellement. INTERDIT d\'en ajouter une de plus sur ces requetes :',
-      'le cycle doit consolider vers l\'URL gagnante par des liens internes.'
+      'une page neuve d\'un autre sujet peut lier vers l\'URL gagnante, jamais la concurrencer.'
     )
   }
 
@@ -735,13 +793,16 @@ function buildPerformanceSection(signals: GscPlanningSignals | null): string {
 }
 
 /**
- * Turn decisions into briefs — l'adresse d'une page neuve PROUVEE libre, la
- * cible d'une mise a jour nommee, un sujet ecarte qui dit pourquoi.
+ * Turn decisions into briefs — l'adresse d'une page neuve PROUVEE libre, un
+ * sujet ecarte qui dit pourquoi. Jamais une mise a jour : ce module n'en
+ * produit plus aucune (decision du proprietaire, 2026-10-17).
  *
  * `takenPaths` is mutated as the plan is built, and that is the point: two
  * sibling slots of the same cycle produce the same address far more often than
  * a slot collides with a page already online, and a set refreshed only between
- * cycles would catch the rare case and miss the common one.
+ * cycles would catch the rare case and miss the common one. The keyword guards
+ * grow the same way: a brief retained in this plan protects its keyword from
+ * the slots that follow it.
  *
  * Une adresse qui ne se libere pas ne fait plus DISPARAITRE son creneau : elle
  * le fait basculer en 'skip', avec le motif. Aucun suffixe numerique — `-2`
@@ -749,30 +810,38 @@ function buildPerformanceSection(signals: GscPlanningSignals | null): string {
  * seule decision du plan que personne ne pouvait relire. Elle est desormais
  * ecrite dans l'item, et elle ne coute toujours aucun jeton.
  *
+ * LA GARDE FINALE porte sur le mot-cle que le modele a VRAIMENT rendu, pas sur
+ * le sujet seme : un creneau deja couvert dont le brief reprend le mot-cle de la
+ * page a eviter, ou tout brief qui reprend un mot-cle de l'existant, une requete
+ * qu'une page du site porte deja en Search Console ou le mot-cle d'un autre
+ * creneau retenu, est ecarte avec son motif plutot que d'ecrire une page
+ * concurrente.
+ *
  * `rawItems` est aligne sur les SEULS sujets soumis au modele, dans leur ordre.
  * C'est pourquoi son compteur avance dans la branche 'create' et nulle part
  * ailleurs : le lire par l'index du creneau decalerait tous les briefs des le
  * premier sujet ecarte.
+ *
+ * Exporte pour les tests : rien ici n'appelle le modele ni la base.
  */
-function normalizeBriefs(input: {
+export function normalizeBriefs(input: {
   subjects: readonly PlannedSubject[]
   rawItems: ReadonlyArray<Partial<PlanItemBrief>>
   campaign: Campaign
   takenPaths: Set<string>
   inventory: SiteInventory
   signals: GscPlanningSignals | null
+  /** Les mots-cles deja cibles par le site — les memes que ceux montres au modele. */
+  existingKeywords: readonly string[]
 }): PlanItemBrief[] {
   const { subjects, rawItems, campaign, takenPaths, inventory, signals } = input
   const briefs: PlanItemBrief[] = []
+  const cityNames = campaignCityNames(campaign)
+  const guards = keywordGuardsOf(input.existingKeywords, signals)
   let written = 0
 
   subjects.forEach((subject, index) => {
-    const { action } = subject
-
-    if (action.kind === 'refresh') {
-      briefs.push(refreshBrief(subject, action, campaign, index))
-      return
-    }
+    const { action, avoid } = subject
 
     if (action.kind === 'skip') {
       briefs.push(skipBrief(subject, action.reasons, campaign, index))
@@ -780,7 +849,27 @@ function normalizeBriefs(input: {
     }
 
     const item = rawItems[written++] ?? {}
-    const fields = fieldsOf(subject, item, campaign, subIntentKeyword(subject.opportunity, subject.city))
+    const fields = fieldsOf(subject, item, campaign)
+
+    // L'adresse de la page a eviter est deja dans takenPaths — c'est une page
+    // de l'inventaire. La redire ne coute rien et ne depend plus de la facon
+    // dont l'appelant a construit l'ensemble.
+    if (avoid) takenPaths.add(avoid.path)
+
+    // Le mot-cle tel que la page le portera, dans sa commune : c'est lui qui
+    // est compare a l'existant, aux requetes Search Console et aux creneaux
+    // deja retenus.
+    const names = dedupe([...cityNames, fields.city])
+    const keyword = keywordInContext(fields.targetKeyword, fields.city, names)
+    const conflict = cannibalizationReasons({ keyword, avoid, guards, cityNames: names })
+
+    if (conflict) {
+      console.warn(
+        `[plan] creneau du ${item.scheduled_date || subject.slot.scheduled_date} ecarte : ${conflict[0]}`
+      )
+      briefs.push(skipBrief(subject, conflict, campaign, index))
+      return
+    }
 
     // The page type never enters the URL, and the slug is not padded to reach a
     // word count: both were doing exactly that, in two different ways.
@@ -813,11 +902,9 @@ function normalizeBriefs(input: {
         `[plan] creneau du ${item.scheduled_date || subject.slot.scheduled_date} ecarte : ${reason}`
       )
 
-      // Ecarte, et surtout PAS bascule en rafraichissement. La page qui occupe
-      // cette adresse n'a pas ete jugee proche du sujet — ou l'inventaire etait
-      // trop vieux pour qu'on en juge — et decider ici de la reecrire
-      // contournerait la garde de fraicheur qui existe precisement pour empecher
-      // qu'on propose d'ecraser une page qu'on ne connait plus.
+      // Ecarte, et surtout PAS bascule en rafraichissement : le planificateur
+      // n'en propose plus aucun, et reprendre l'adresse d'une page existante
+      // est exactement ce que le proprietaire a exclu.
       briefs.push(
         skipBrief(
           subject,
@@ -840,10 +927,19 @@ function normalizeBriefs(input: {
       )
     }
 
+    // Defensif : l'adresse de la page a eviter est reservee, resolveFreeSlug ne
+    // peut donc pas la rendre. Si l'ensemble venait un jour a l'oublier, le
+    // creneau tomberait ici plutot que d'ecraser la page existante.
+    if (avoid && reusesAvoidedAddress(`/${resolution.slug}`, avoid)) {
+      briefs.push(skipBrief(subject, [noDistinctAngleReason(avoid), ...avoid.reasons], campaign, index))
+      return
+    }
+
     // Reserved for the rest of THIS plan as soon as it is retained. Without
     // this line the second sibling of a cycle would be told the address is free
     // by the very set that just handed it to the first.
     takenPaths.add(`/${resolution.slug}`)
+    guards.push({ keyword, origin: 'cycle' })
 
     briefs.push(
       buildBrief({
@@ -856,10 +952,14 @@ function normalizeBriefs(input: {
         slug: resolution.slug,
         // La degradation est nommee DANS l'item : un plan bati sans Search
         // Console ou sans inventaire sort quand meme, mais il ne se presente
-        // jamais comme un plan informe.
+        // jamais comme un plan informe. La page voisine aussi : un lecteur doit
+        // voir pourquoi ce sujet-la, et pas celui que le calendrier avait seme.
         rationale:
-          (item.rationale || rationaleFor(fields.pageType, subject.opportunity)) +
+          (item.rationale || rationaleFor(fields.pageType)) +
+          (avoid ? ` ${distinctAngleNote(avoid)}` : '') +
           degradationSuffix(inventory, signals),
+        extraRules: avoid ? [distinctAngleRule(avoid)] : [],
+        extraLinks: avoid ? [avoid.url] : [],
       })
     )
   })
@@ -867,42 +967,11 @@ function normalizeBriefs(input: {
   return briefs
 }
 
-/**
- * Le brief d'une mise a jour : une cible, une portee, une preuve.
- *
- * RIEN NE PART SEUL D'ICI. Cet item ne declenche aucune ecriture : il porte
- * l'adresse de la page visee et les phrases qui l'ont designee, pour qu'un
- * humain lise les deux avant de cliquer. Le moteur ne supprime pas, ne fusionne
- * pas et ne redirige pas — les pages perdantes d'une cannibalisation sont
- * NOMMEES dans `evidence` et rien d'autre ne leur arrive.
- */
-function refreshBrief(
-  subject: PlannedSubject,
-  action: Extract<EditorialAction, { kind: 'refresh' }>,
-  campaign: Campaign,
-  index: number
-): PlanItemBrief {
-  const fields = fieldsOf(subject, {}, campaign, null)
-
-  return buildBrief({
-    subject,
-    campaign,
-    index,
-    fields,
-    item: {},
-    action,
-    // L'adresse d'une mise a jour est celle de la page visee : on ne CHOISIT
-    // pas l'URL d'une page qui existe deja, on la reprend. Rien n'est ajoute a
-    // takenPaths — cette adresse y figure deja, c'est meme ce qui l'a designee.
-    slug: action.targetPath.replace(/^\//, ''),
-    rationale: action.evidence.join(' '),
-    extraRules: scopeRules(action),
-    pageGoal:
-      action.scope === 'metadata'
-        ? `Reecrire le titre et la meta description de ${action.targetPath} sur ${fields.targetKeyword}.`
-        : `Mettre a jour le contenu de ${action.targetPath} sur ${fields.targetKeyword}.`,
-  })
-}
+// `refreshBrief` and `scopeRules` used to live here: they turned a 'refresh'
+// verdict into a brief that reused the existing page's address. The planner no
+// longer proposes any refresh (owner's decision, 2026-10-17), so nothing builds
+// such a brief any more. Refresh plan items written before that date are still
+// readable downstream: `PlanItemAction` keeps its 'refresh' branch.
 
 /**
  * Le brief d'un sujet ecarte : une ligne qui ne produira rien, et qui le dit.
@@ -922,7 +991,7 @@ function skipBrief(
     subject,
     campaign,
     index,
-    fields: fieldsOf(subject, {}, campaign, null),
+    fields: fieldsOf(subject, {}, campaign),
     item: {},
     action: { kind: 'skip', reasons: [...reasons] },
     slug: '',
@@ -941,20 +1010,18 @@ interface BriefFields {
 }
 
 /**
- * `fallbackKeyword` n'est passe que sur une page NEUVE : c'est la sous-intention
- * derivee d'une opportunite mesuree, utile quand le modele n'a rien repondu.
- * Une mise a jour, elle, garde le sujet du creneau — celui sur lequel le verdict
- * a ete rendu.
+ * Sans reponse du modele, le sujet seme. Sur un creneau deja couvert, ce repli
+ * reprend precisement le sujet de la page a eviter — et c'est voulu : la garde
+ * finale l'ecarte, faute d'angle distinct, au lieu de l'ecrire quand meme.
  */
 function fieldsOf(
   subject: PlannedSubject,
   item: Partial<PlanItemBrief>,
-  campaign: Campaign,
-  fallbackKeyword: string | null
+  campaign: Campaign
 ): BriefFields {
   const pageType = item.page_type || subject.pageType
   const city = item.target_city || subject.city
-  const targetKeyword = item.target_keyword || fallbackKeyword || subject.seedKeyword
+  const targetKeyword = item.target_keyword || subject.seedKeyword
 
   return {
     pageType,
@@ -966,12 +1033,14 @@ function fieldsOf(
 }
 
 /**
- * Le brief lui-meme, ecrit UNE fois pour les trois verdicts.
+ * Le brief lui-meme, ecrit UNE fois pour la page neuve et le sujet ecarte.
  *
- * Les trois partagent tout sauf leur adresse, leur objectif et leur motif : les
- * separer en trois fabriques aurait fait diverger les valeurs par defaut de la
- * page neuve et celles de la mise a jour, alors que ce sont les memes briefs
- * lus par le meme generateur.
+ * Les deux partagent tout sauf leur adresse, leur objectif et leur motif : les
+ * separer en deux fabriques aurait fait diverger leurs valeurs par defaut, alors
+ * que ce sont les memes briefs lus par les memes ecrans.
+ *
+ * `action` exclut 'refresh' par son type : ce module ne fabrique plus aucune
+ * mise a jour (decision du proprietaire, 2026-10-17).
  */
 function buildBrief(draft: {
   subject: PlannedSubject
@@ -979,36 +1048,22 @@ function buildBrief(draft: {
   index: number
   fields: BriefFields
   item: Partial<PlanItemBrief>
-  action: PlanItemAction
+  action: Exclude<PlanItemAction, { kind: 'refresh' }>
   slug: string
   rationale: string
   pageGoal?: string
   extraRules?: string[]
+  /** Pages a lier en plus de celles du modele : la page existante a ne pas concurrencer. */
+  extraLinks?: string[]
 }): PlanItemBrief {
   const { subject, campaign, index, fields, item, action } = draft
   const { pageType, city, targetKeyword, requiredEntities, searchIntent } = fields
-
-  // Lier vers la page qui ranke n'a de sens que sur une page NEUVE. Quand c'est
-  // cette page-la qu'on met a jour, se lier a soi-meme n'apporte rien, et lui
-  // demander de « ne pas la concurrencer » serait absurde.
-  const opportunity = action.kind === 'create' ? subject.opportunity : null
-
-  const dataRules = opportunity
-    ? [`Requete "${opportunity.query}" en position ${opportunity.position} sur ${opportunity.pageUrl} : traiter une sous-intention et lier vers cette URL, ne pas la concurrencer.`]
-    : []
 
   return {
     id: item.id || createPlanItemId(),
     scheduled_date: item.scheduled_date || subject.slot.scheduled_date,
     page_type: pageType,
-    // A measured opportunity outranks any heuristic: it is the only priority
-    // on this plan backed by an observed impression count.
-    priority:
-      action.kind === 'skip'
-        ? 'low'
-        : subject.opportunity
-          ? 'high'
-          : item.priority || priorityFor(pageType, index),
+    priority: action.kind === 'skip' ? 'low' : item.priority || priorityFor(pageType, index),
     target_city: city,
     target_keyword: targetKeyword,
     secondary_keywords: asStringArray(item.secondary_keywords, [
@@ -1025,40 +1080,18 @@ function buildBrief(draft: {
     seo_rules: [
       ...asStringArray(item.seo_rules, defaultRules(pageType, targetKeyword)),
       ...(draft.extraRules ?? []),
-      ...dataRules,
     ],
     required_entities: requiredEntities,
     internal_link_targets: dedupe([
       ...asStringArray(item.internal_link_targets, pageType === 'pillar' ? ['pages filles du cluster'] : ['page pilier parente']),
-      ...(opportunity ? [opportunity.pageUrl] : []),
+      ...(draft.extraLinks ?? []),
     ]),
     competitor_insights: asStringArray(item.competitor_insights, []),
     estimated_word_count:
       action.kind === 'skip' ? 0 : item.estimated_word_count || estimatedWords(pageType, campaign.target_length),
     rationale: draft.rationale,
     action,
-    ...(action.kind === 'refresh'
-      ? {
-          refresh_target_path: action.targetPath,
-          refresh_scope: action.scope,
-          ...(action.targetGenerationId ? { refresh_target_generation_id: action.targetGenerationId } : {}),
-        }
-      : {}),
   }
-}
-
-/**
- * Ce que la portee autorise a reecrire, dit au generateur.
- *
- * Le brief est le seul canal entre la decision et la redaction : sans cette
- * ligne, une mise a jour de portee 'metadata' arriverait au generateur comme
- * n'importe quelle page et il reecrirait le corps qui obtient deja les
- * impressions.
- */
-function scopeRules(action: Extract<EditorialAction, { kind: 'refresh' }>): string[] {
-  return action.scope === 'metadata'
-    ? [`Portee de la mise a jour : title et meta description UNIQUEMENT. Le corps de ${action.targetPath} n'est pas reecrit.`]
-    : [`Cette page met a jour ${action.targetPath} : reprendre ce que cette page couvre deja et le completer, jamais partir d'un sujet different.`]
 }
 
 /**
@@ -1091,9 +1124,9 @@ function slugDtoFor(
  * La panne de connaissance, NOMMEE dans l'item qui en decoule.
  *
  * Une source absente ne bloque jamais le plan — mais un plan degrade qui ne le
- * dit pas se lit comme un plan mesure. Les items 'refresh' et 'skip' portent
- * deja ces mentions, ecrites par le domaine avec leur preuve : les redire ici
- * les compterait deux fois, donc seule la page neuve les recoit.
+ * dit pas se lit comme un plan mesure. Les items 'skip' portent deja ces
+ * mentions, ecrites par le domaine avec leur preuve : les redire ici les
+ * compterait deux fois, donc seule la page neuve les recoit.
  */
 function degradationSuffix(inventory: SiteInventory, signals: GscPlanningSignals | null): string {
   const notes: string[] = []
@@ -1107,7 +1140,7 @@ function degradationSuffix(inventory: SiteInventory, signals: GscPlanningSignals
   if (inventory.freshness.state === 'blind') {
     notes.push(
       `Inventaire aveugle${inventory.freshness.blindReason ? ` (${inventory.freshness.blindReason})` : ''} : ` +
-        `le moteur ne sait pas quelles pages ce site porte deja, aucune mise a jour ne pouvait etre proposee.`
+        `le moteur ne sait pas quelles pages ce site porte deja, le sujet n'a pas pu etre confronte a l'existant.`
     )
   } else if (inventory.freshness.state === 'stale') {
     notes.push(
@@ -1120,59 +1153,25 @@ function degradationSuffix(inventory: SiteInventory, signals: GscPlanningSignals
   return notes.length === 0 ? '' : ` ${notes.join(' ')}`
 }
 
-/**
- * Deterministic keyword for a slot carrying a measured opportunity, used when
- * the model answered nothing usable.
- *
- * Adding the city creates a genuinely different intent from the query the
- * existing page ranks on. When the query already names the city there is no
- * such variation available, so this returns null and the previous default
- * applies — inventing a near-duplicate would be the cannibalization this whole
- * module exists to avoid.
- */
-function subIntentKeyword(opportunity: StrikingDistanceOpportunity | null, city: string): string | null {
-  if (!opportunity) return null
-
-  const query = opportunity.query.trim()
-  if (!query) return null
-  if (!city) return null
-  if (normalizeText(query).includes(normalizeText(city))) return null
-
-  return `${query} ${city}`
-}
-
-// `guardAgainstCannibalization` used to live here.
+// `subIntentKeyword` used to live here: it derived a fallback keyword from the
+// striking-distance query assigned to a slot. No query is assigned any more
+// (see the note that replaced `assignOpportunities`), so it had nothing to read.
 //
-// It called itself a last line of defence, and what it actually did was compare
-// two strings for exact equality and paste the town on the end when they
-// matched. Two facts made it worthless: an exact string match between a model's
-// keyword and a Search Console query almost never happens, and appending the
-// town produces a keyword that a page of the same cycle, in the same town, has
-// every chance of carrying too.
-//
-// What replaces it is not a smarter comparison, it is a different question. The
-// blocked queries still reach the model through `buildPerformanceSection`, and
-// the ADDRESS — the one thing a published page can never take back — is now
-// proven free against the inventory before the brief is written at all.
+// `guardAgainstCannibalization` used to live here too. It compared two strings
+// for exact equality and pasted the town on the end when they matched — an
+// exact match almost never happens, and the town-suffixed keyword was one a
+// sibling slot had every chance of carrying. Its successor is the final guard of
+// normalizeBriefs (lib/planning/distinct-angle.ts): a normalised, city- and
+// stopword-insensitive comparison of the keyword the model actually returned
+// against the site's keywords, the queries Search Console already credits to one
+// of its pages, and the briefs retained earlier in the same plan.
 
-function rationaleFor(pageType: PageType, opportunity: StrikingDistanceOpportunity | null): string {
-  if (opportunity) {
-    return `Requete mesuree a ${opportunity.impressions} impressions et position ${opportunity.position} en Search Console : gain de places atteignable en renforcant ${opportunity.pageUrl}.`
-  }
+function rationaleFor(pageType: PageType): string {
   return `Page ${pageType} planifiee pour renforcer la couverture longue traine.`
 }
 
 function dedupe(values: string[]): string[] {
   return [...new Set(values.filter(Boolean))]
-}
-
-function normalizeText(value: string): string {
-  return value
-    .toLowerCase()
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .replace(/\s+/g, ' ')
-    .trim()
 }
 
 function asStringArray(value: unknown, fallback: string[]) {

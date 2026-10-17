@@ -1776,3 +1776,209 @@ textarea.input {
   .hub-slot__date { flex-basis: 4rem; }
   .hub-slot__title { flex-basis: 100%; order: 3; }
 }
+
+/* ═══ Site section — /sites/[id]/* ═══════════════════════════════════════
+   Everything about one site lives under its own URL: a shared header and tab
+   bar (sites/[id]/layout.tsx), then one tab per concern. The cross-site tool
+   screens are gone; their old addresses are site pickers. */
+
+/* The tab bar sits flush under the site header: the header already carries
+   the bottom margin, a second one from `.tabs__list` would double the gap. */
+.site-tabs .tabs__list {
+  margin-bottom: 0;
+}
+
+.site-shell > .hub-warning {
+  margin-bottom: var(--space-5);
+}
+
+/* ── Tab intro — the <h2> that opens each tab (the site name is the <h1>) ── */
+
+.tab-intro {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: var(--space-3) var(--space-4);
+  flex-wrap: wrap;
+  margin-bottom: var(--space-5);
+}
+
+.tab-intro__title {
+  margin: 0;
+  font-size: var(--fs-xl);
+  font-weight: 650;
+  color: var(--ink-primary);
+  letter-spacing: var(--ls-tight);
+  line-height: var(--lh-tight);
+}
+
+.tab-intro__subtitle {
+  margin: var(--space-1) 0 0;
+  font-size: var(--fs-sm);
+  color: var(--ink-secondary);
+  line-height: var(--lh-snug);
+  max-width: 68ch;
+}
+
+.tab-intro__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+/* ── Settings tab — four stacked sections, each reachable by its anchor ── */
+
+.settings {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+}
+
+.settings-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  /* `#google`, `#schema`: an anchor lands with the heading visible. */
+  scroll-margin-top: var(--space-5);
+}
+
+.settings-section__head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  padding-bottom: var(--space-2);
+  border-bottom: 1px solid var(--line);
+}
+
+.settings-section__title {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+  font-size: var(--fs-lg);
+  font-weight: 600;
+  color: var(--ink-primary);
+}
+
+.settings-section__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+/* ── Strategy tab — the cycle plan, flat, under each campaign ── */
+
+.strategy-plan {
+  display: grid;
+  gap: var(--space-4);
+  padding: var(--space-5);
+  border-top: 1px solid var(--line);
+}
+
+.strategy-plan__head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: var(--space-3) var(--space-4);
+  flex-wrap: wrap;
+}
+
+.strategy-plan__title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  margin: 0 0 var(--space-1);
+  font-size: var(--fs-md);
+  font-weight: 600;
+  color: var(--ink-primary);
+}
+
+.strategy-plan__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+/* ── Site picker — what the old cross-site screens became ── */
+
+.site-picker {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--space-2);
+}
+
+.site-picker__row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  background: var(--surface-card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  color: var(--ink-primary);
+  text-decoration: none;
+  transition: border-color var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease);
+}
+
+.site-picker__row:hover {
+  border-color: var(--accent);
+  background: var(--surface-hover);
+}
+
+.site-picker__body {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+}
+
+.site-picker__name {
+  font-weight: 600;
+  font-size: var(--fs-sm);
+}
+
+/* ── Rail — the current site's tabs, indented under its entry ── */
+
+.nav-subtabs {
+  list-style: none;
+  margin: 2px 0 var(--space-2);
+  padding: 0 0 0 calc(var(--space-3) + 17px);
+}
+
+.nav-subtab {
+  display: block;
+  padding: 0.3125rem var(--space-3);
+  margin: 1px var(--space-3) 1px 0;
+  border-left: 1px solid var(--line);
+  color: var(--ink-secondary);
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  text-decoration: none;
+  transition: color var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease);
+}
+
+.nav-subtab:hover {
+  color: var(--ink-primary);
+  background: var(--surface-hover);
+}
+
+/* The current tab: a rule and a weight, never the colour alone. */
+.nav-subtab--active {
+  color: var(--accent-text);
+  border-left: 2px solid var(--accent);
+  font-weight: 600;
+}
+
+@media (max-width: 560px) {
+  .tab-intro__title { font-size: var(--fs-lg); }
+  .strategy-plan { padding: var(--space-4); }
+  .site-picker__row { flex-wrap: wrap; }
+}

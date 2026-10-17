@@ -38,7 +38,27 @@ const JOB_TYPE_LABELS: Record<string, string> = {
 /** A curve over one or two points is decoration; below this the tab says so instead. */
 const MIN_DAYS_FOR_A_CURVE = 3
 
-export function ProductionTab({ metrics, scopeLabel }: { metrics: ProductionMetrics; scopeLabel: string }) {
+/**
+ * Where the tab's two outbound links lead. The cross-site dashboard keeps the
+ * site pickers (/calendar, /strategy/new); a site's Performances tab passes its
+ * own calendar and strategy, so a click never asks for the site a second time.
+ */
+export interface ProductionLinks {
+  calendar: string
+  strategy: string
+}
+
+const CROSS_SITE_LINKS: ProductionLinks = { calendar: '/calendar', strategy: '/strategy/new' }
+
+export function ProductionTab({
+  metrics,
+  scopeLabel,
+  links = CROSS_SITE_LINKS,
+}: {
+  metrics: ProductionMetrics
+  scopeLabel: string
+  links?: ProductionLinks
+}) {
   const { counts, window } = metrics
   const period = `${formatDayLong(window.start)} → ${formatDayLong(window.end)} (${window.days} jours)`
 
@@ -71,7 +91,7 @@ export function ProductionTab({ metrics, scopeLabel }: { metrics: ProductionMetr
           variant="no-data"
           title="Le moteur n'a encore rien produit"
           description="Aucune génération, aucun créneau planifié pour ce scope. Lancez une analyse de site pour obtenir un plan de contenu, puis planifiez un cycle."
-          action={{ label: 'Analyser un site', href: '/strategy/new' }}
+          action={{ label: 'Analyser un site', href: links.strategy }}
         />
       ) : (
         <>
@@ -168,7 +188,7 @@ export function ProductionTab({ metrics, scopeLabel }: { metrics: ProductionMetr
               title="Prochains créneaux"
               subtitle="Calendrier éditorial — ce que le moteur produira ensuite"
               icon={CalendarClock}
-              action={<Link href="/calendar" className="btn-link">Calendrier</Link>}
+              action={<Link href={links.calendar} className="btn-link">Calendrier</Link>}
             >
               {metrics.upcomingSlots.length === 0 ? (
                 <p className="meta" style={{ margin: 0, lineHeight: 'var(--lh-normal)' }}>

@@ -14,6 +14,12 @@
 export async function register() {
   if (process.env.NEXT_RUNTIME !== 'nodejs') return
 
+  // Never during `next build`. The build workers load this hook too, and
+  // `initScheduler()` fires the reapers immediately: a local `npm run build`
+  // with a `.env.local` pointing at the production database would rewrite
+  // production rows — a second scheduler, for the length of a build.
+  if (process.env.NEXT_PHASE === 'phase-production-build') return
+
   const { initScheduler } = await import('@/lib/scheduler/cron')
   initScheduler()
 }

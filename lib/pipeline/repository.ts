@@ -79,10 +79,10 @@ export async function markGenerationRejected(
  * exist when they blocked would report 100 % every time.
  *
  * `refusal_kind` is only set when a blocking code is present, because that
- * column means "the engine declined on purpose" and an observation is not a
- * decision. While DUPLICATE_ENFORCEMENT stays at 'observe' the row therefore
- * keeps its verdict and its status, which is exactly what a measurement period
- * needs.
+ * column means "the engine declined on purpose". It is SET, never cleared —
+ * which is why the campaign runner files the verdict of the FINAL attempt only,
+ * once its regenerations are over: filing the first attempt's duplicate would
+ * leave `refusal_kind = 'duplicat'` on a row whose third attempt shipped clean.
  *
  * Never throws: this is bookkeeping ABOUT a page that already exists, and
  * losing the page because its evidence could not be filed would be the worse

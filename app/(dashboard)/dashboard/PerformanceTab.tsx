@@ -134,7 +134,9 @@ export function PerformanceTab({
             )}
           </div>
 
-          <Link href="/strategy/new" className="btn-primary" style={{ flexShrink: 0 }}>
+          {/* On a site, the cycle is planned from its own Stratégie tab; the
+              creation form only when no single site is in scope. */}
+          <Link href={siteId ? `/sites/${siteId}/strategie` : '/strategy/new'} className="btn-primary" style={{ flexShrink: 0 }}>
             Planifier un cycle
           </Link>
         </div>
