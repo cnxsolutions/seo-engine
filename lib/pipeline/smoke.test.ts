@@ -14,6 +14,21 @@
 // readability rule computes a Flesch score from a syllable count, and the bug it
 // replaced counted vowel CHARACTERS, which made every French text score deeply
 // negative. Lorem ipsum would not exercise that at all.
+//
+// FIXTURE CHANGES (2026-10-17), made when the gate became strict on every SEO
+// and GEO concept. The prose is untouched; what changed is what the generator is
+// now held to, and what this "normal" page was missing to be a normal page by
+// that standard:
+//   - the opening paragraph names the keyword (« dépannage de plomberie ») and
+//     the business: INTRO_KEYWORD and ENTITY_BUSINESS;
+//   - the served communes became a <ul>: SCANNABLE wants a list or a table;
+//   - the FAQ travels as `faqItems` and the FAQPage schema carries the same
+//     three questions instead of one: FAQ_MINIMUM and FAQ_SCHEMA_MISMATCH;
+//   - `directAnswer` repeats the opening paragraph: DIRECT_ANSWER;
+//   - an author line, a cited official source and an Article schema close the
+//     page: AUTHOR_DATE, SOURCES, ARTICLE_SCHEMA;
+//   - the campaign context the pipeline passes in production (city, business,
+//     a connected Google profile — the LocalBusiness schema carries a phone).
 
 import { describe, expect, it } from 'vitest'
 import { measureLength } from './word-count'
@@ -21,16 +36,18 @@ import { runValidationGate } from './gate'
 
 // ─── A page as the generator produces it ────────────────────────────────────
 
-/** Matches the fixture below (~740 measured words), comfortably above the 85% floor. */
+/** Matches the fixture below (~770 measured words), comfortably above the 85% floor. */
 const TARGET_WORDS = 800
+
+/** The opening paragraph, repeated word for word in `directAnswer` as the generator must. */
+const DIRECT_ANSWER = "Le dépannage de plomberie à Troyes est assuré par Plomberie Exemple en moins de deux "
+  + 'heures pour une fuite, une canalisation bouchée ou une panne de chauffe-eau. Le déplacement est facturé '
+  + "au tarif convenu avant l'intervention, et le devis est remis sur place avant tout travail engagé."
 
 const BODY = `
 <h1>Dépannage plomberie à Troyes : intervention rapide et tarifs clairs</h1>
 
-<p>Un plombier intervient à Troyes en moins de deux heures pour une fuite, une
-canalisation bouchée ou une panne de chauffe-eau. Le déplacement est facturé au
-tarif convenu avant l'intervention, et le devis est remis sur place avant tout
-travail engagé.</p>
+<p>${DIRECT_ANSWER}</p>
 
 <h2>Quand faut-il appeler un plombier en urgence ?</h2>
 
@@ -64,9 +81,16 @@ facture, qui sont la première source de litige dans le métier.</p>
 
 <h2>Quelles zones sont desservies autour de Troyes ?</h2>
 
-<p>L'intervention couvre Troyes et sa périphérie immédiate : Saint-André-les-Vergers,
-Sainte-Savine, La Chapelle-Saint-Luc, Pont-Sainte-Marie et Saint-Julien-les-Villas.
-Les communes plus éloignées de l'Aube sont traitées sur rendez-vous, avec un
+<p>L'intervention couvre Troyes et sa périphérie immédiate :</p>
+
+<ul>
+  <li>Saint-André-les-Vergers ;</li>
+  <li>Sainte-Savine ;</li>
+  <li>La Chapelle-Saint-Luc ;</li>
+  <li>Pont-Sainte-Marie et Saint-Julien-les-Villas.</li>
+</ul>
+
+<p>Les communes plus éloignées de l'Aube sont traitées sur rendez-vous, avec un
 délai adapté à la distance. Le secteur d'intervention est volontairement
 resserré : c'est ce qui permet de tenir un délai de deux heures en urgence
 plutôt que de promettre une couverture départementale impossible à honorer.</p>
@@ -114,7 +138,28 @@ déplacement est facturé si aucune réparation n'est engagée.</p>
 <h3>Intervenez-vous le week-end ?</h3>
 <p>Oui, samedi, dimanche et jours fériés, avec une majoration annoncée par
 téléphone avant le déplacement.</p>
+
+<p>En cas de dégât des eaux, les démarches auprès de l'assureur sont détaillées sur
+<a href="https://www.service-public.fr/particuliers/vosdroits/F2061" target="_blank" rel="noopener noreferrer">service-public.fr</a>.</p>
+
+<p class="page-auteur">Publié par Plomberie Exemple — mis à jour le
+<time datetime="2026-10-17">2026-10-17</time></p>
 `
+
+const FAQ_ITEMS = [
+  {
+    q: "Quel est le délai d'intervention en urgence ?",
+    a: 'Deux heures en moyenne sur Troyes et les communes limitrophes, selon la circulation et les interventions déjà engagées.',
+  },
+  {
+    q: 'Le devis est-il payant ?',
+    a: 'Le devis est gratuit et remis avant le début des travaux. Seul le déplacement est facturé si aucune réparation n\'est engagée.',
+  },
+  {
+    q: 'Intervenez-vous le week-end ?',
+    a: 'Oui, samedi, dimanche et jours fériés, avec une majoration annoncée par téléphone avant le déplacement.',
+  },
+]
 
 const SCHEMA_LOCAL_BUSINESS = JSON.stringify({
   '@context': 'https://schema.org',
@@ -127,13 +172,21 @@ const SCHEMA_LOCAL_BUSINESS = JSON.stringify({
 const SCHEMA_FAQ = JSON.stringify({
   '@context': 'https://schema.org',
   '@type': 'FAQPage',
-  mainEntity: [
-    {
-      '@type': 'Question',
-      name: "Quel est le délai d'intervention en urgence ?",
-      acceptedAnswer: { '@type': 'Answer', text: 'Deux heures en moyenne sur Troyes.' },
-    },
-  ],
+  mainEntity: FAQ_ITEMS.map(item => ({
+    '@type': 'Question',
+    name: item.q,
+    acceptedAnswer: { '@type': 'Answer', text: item.a },
+  })),
+})
+
+const SCHEMA_ARTICLE = JSON.stringify({
+  '@context': 'https://schema.org',
+  '@type': 'Article',
+  headline: 'Dépannage plomberie à Troyes : intervention rapide et tarifs clairs',
+  author: { '@type': 'Organization', name: 'Plomberie Exemple' },
+  publisher: { '@type': 'Organization', name: 'Plomberie Exemple' },
+  datePublished: '2026-10-17',
+  dateModified: '2026-10-17',
 })
 
 const SCHEMA_BREADCRUMB = JSON.stringify({
@@ -163,9 +216,19 @@ function gateInput(overrides: Partial<Parameters<typeof runValidationGate>[0]> =
     schemaLocalBusiness: SCHEMA_LOCAL_BUSINESS,
     schemaFaqPage: SCHEMA_FAQ,
     schemaBreadcrumb: SCHEMA_BREADCRUMB,
+    schemaArticle: SCHEMA_ARTICLE,
     measurement: measureLength({ html, target: TARGET_WORDS }),
     deadInternalLinks: 0,
     anomalies: [],
+    directAnswer: DIRECT_ANSWER,
+    faqItems: FAQ_ITEMS,
+    city: 'Troyes',
+    businessName: 'Plomberie Exemple',
+    enableExternalLinks: true,
+    // The LocalBusiness schema carries a phone: this is a campaign whose Google
+    // Business Profile is connected, the only case where a NAP may appear.
+    hasGoogleBusinessProfile: true,
+    siteUrl: 'https://exemple.fr',
     ...overrides,
   }
 }

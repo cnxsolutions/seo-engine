@@ -89,7 +89,12 @@ export default function NewSitePage() {
         setError(data.error || `Enregistrement refusé (erreur ${res.status})`)
         return
       }
-      router.push('/sites')
+      // Straight into the new site's own section: its overview says what to do
+      // next (connect Google, read the schema, create a strategy), and every
+      // tab from there is about this site. The list is the fallback when the
+      // response carries no id.
+      const createdId = typeof data.site?.id === 'string' ? data.site.id : null
+      router.push(createdId ? `/sites/${createdId}` : '/sites')
     } catch {
       setError('Impossible de joindre le serveur')
     } finally {
@@ -107,7 +112,7 @@ export default function NewSitePage() {
     <div style={{ maxWidth: 680 }}>
       <PageHeader
         icon={Globe}
-        badge="Étape 1"
+        badge="Sites"
         title="Ajouter un site"
         subtitle="Connectez le site qui recevra les pages générées. Les identifiants restent côté serveur : ils ne repartent jamais dans une réponse HTTP."
         backHref="/sites"

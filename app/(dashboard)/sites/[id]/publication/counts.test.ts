@@ -1,16 +1,15 @@
 // ─────────────────────────────────────────────────────────────────────────────
-// Les compteurs de l'écran de publication — tests
+// Le compteur de l'onglet Publication — tests
 // SEO Engine - « Une ligne, un geste. » Jamais deux.
 // ─────────────────────────────────────────────────────────────────────────────
 //
 // CE QUE CE FICHIER PROTÈGE. Un compteur faux ne lève aucune exception et ne
-// casse aucun rendu : il se contente d'annoncer huit décisions à prendre là où
-// il y en a cinq, tous les jours, sans que rien ne le signale. C'est exactement
-// le genre de mensonge tranquille que ce lot existe pour empêcher, et c'est la
-// seule règle de cet écran qu'un test peut tenir.
+// casse aucun rendu : il se contente d'annoncer cinq pages à publier là où il y
+// en a deux, tous les jours, sans que rien ne le signale.
 //
-// LE CAS DE RECETTE, MOT POUR MOT : trois lignes 'refresh' et deux lignes
-// 'create', toutes 'generated', doivent rendre 2 et 3 — jamais 5 et 3.
+// LE CAS DE RECETTE : trois anciennes demandes de mise à jour et deux pages
+// neuves, toutes 'generated', doivent rendre 2 à publier — jamais 5 — et les
+// trois anciennes demandes ne doivent jamais atteindre la file.
 
 import { describe, expect, it } from 'vitest'
 import { splitPublishQueue, toPublishCount, type QueueLine } from './counts'
@@ -21,8 +20,8 @@ type Line = QueueLine & { id: string }
 const line = (id: string, intent: 'create' | 'refresh', status: Line['status']): Line =>
   ({ id, intent, status })
 
-// Le jeu de la consigne : 3 mises à jour + 2 pages neuves, toutes finies.
-const THREE_REFRESH_TWO_CREATE: Line[] = [
+// 3 anciennes demandes de mise à jour + 2 pages neuves, toutes finies.
+const THREE_LEGACY_TWO_CREATE: Line[] = [
   line('r1', 'refresh', 'generated'),
   line('c1', 'create', 'generated'),
   line('r2', 'refresh', 'generated'),
@@ -33,12 +32,12 @@ const THREE_REFRESH_TWO_CREATE: Line[] = [
 /** Le total autoritaire tel que GET /api/generate le compte : cinq lignes 'generated'. */
 const GENERATED_COUNT = 5
 
-describe('les deux tuiles de « generated »', () => {
-  it('rendent 2 et 3 sur 3 refresh + 2 create, jamais 5 et 3', () => {
-    const { refreshPending } = splitPublishQueue(THREE_REFRESH_TWO_CREATE)
-    const toPublish = toPublishCount(GENERATED_COUNT, refreshPending.length)
+describe('la tuile « À publier »', () => {
+  it('rend 2 sur 3 anciennes demandes + 2 pages neuves, jamais 5', () => {
+    const { legacyRefresh } = splitPublishQueue(THREE_LEGACY_TWO_CREATE)
+    const toPublish = toPublishCount(GENERATED_COUNT, legacyRefresh.length)
 
-    expect(refreshPending).toHaveLength(3)
+    expect(legacyRefresh).toHaveLength(3)
     expect(toPublish).toBe(2)
 
     // La formulation négative de la recette, écrite telle quelle : le jour où
@@ -46,44 +45,43 @@ describe('les deux tuiles de « generated »', () => {
     expect(toPublish).not.toBe(GENERATED_COUNT)
   })
 
-  it('se partagent exactement le total, sans jamais le dépasser', () => {
-    const { refreshPending } = splitPublishQueue(THREE_REFRESH_TWO_CREATE)
+  it('se partage exactement le total avec les anciennes demandes, sans jamais le dépasser', () => {
+    const { legacyRefresh } = splitPublishQueue(THREE_LEGACY_TWO_CREATE)
 
-    expect(toPublishCount(GENERATED_COUNT, refreshPending.length) + refreshPending.length)
+    expect(toPublishCount(GENERATED_COUNT, legacyRefresh.length) + legacyRefresh.length)
       .toBe(GENERATED_COUNT)
   })
 
-  it('ne comptent jamais la MÊME ligne des deux côtés', () => {
-    const { refreshPending, queue } = splitPublishQueue(THREE_REFRESH_TWO_CREATE)
+  it('ne range jamais la MÊME ligne des deux côtés', () => {
+    const { legacyRefresh, queue } = splitPublishQueue(THREE_LEGACY_TWO_CREATE)
 
     // La propriété de fond, vérifiée sur les identités et pas sur les longueurs :
     // deux listes de bonne taille peuvent parfaitement se recouvrir.
-    const inBoth = refreshPending.filter((r) => queue.some((q) => q.id === r.id))
+    const inBoth = legacyRefresh.filter((r) => queue.some((q) => q.id === r.id))
     expect(inBoth).toEqual([])
-    expect([...refreshPending, ...queue].map((g) => g.id).sort())
-      .toEqual(THREE_REFRESH_TWO_CREATE.map((g) => g.id).sort())
+    expect([...legacyRefresh, ...queue].map((g) => g.id).sort())
+      .toEqual(THREE_LEGACY_TWO_CREATE.map((g) => g.id).sort())
   })
 
-  it('laisse la file ordinaire refuser les mises à jour, quelle que soit leur place', () => {
-    const { queue } = splitPublishQueue(THREE_REFRESH_TWO_CREATE)
+  it('tient les anciennes demandes hors de la file, quelle que soit leur place', () => {
+    const { queue } = splitPublishQueue(THREE_LEGACY_TWO_CREATE)
 
-    // « Publier maintenant » n'envoie ni `replaces` ni modale : une ligne
-    // 'refresh' atteignable par ce bouton serait un remplacement expédié sans
-    // qu'un humain ait lu la page écrasée.
+    // « Publier maintenant » remplacerait la page existante : le produit ne met
+    // plus à jour, une ancienne demande ne doit donc jamais atteindre ce bouton.
     expect(queue.map((g) => g.id)).toEqual(['c1', 'c2'])
   })
 })
 
 describe('les lignes qui n attendent plus de décision', () => {
-  it('garde une mise à jour DÉJÀ EN VOL dans la file ordinaire, et hors des deux tuiles', () => {
+  it('garde une ancienne demande DÉJÀ EN VOL dans la file ordinaire, et hors des anciennes demandes', () => {
     const flying = line('r-flying', 'refresh', 'publishing')
-    const { refreshPending, queue } = splitPublishQueue([...THREE_REFRESH_TWO_CREATE, flying])
+    const { legacyRefresh, queue } = splitPublishQueue([...THREE_LEGACY_TWO_CREATE, flying])
 
-    // 'publishing' a sa propre tuile (« En cours ») : la compter aussi dans
-    // « Mises à jour à valider » ferait réclamer un clic sur une ligne partie.
-    expect(refreshPending.map((g) => g.id)).not.toContain('r-flying')
+    // 'publishing' a sa propre tuile (« En cours ») : la ligne est partie, il
+    // n'y a plus rien à décider à son sujet.
+    expect(legacyRefresh.map((g) => g.id)).not.toContain('r-flying')
     expect(queue.map((g) => g.id)).toContain('r-flying')
-    expect(toPublishCount(GENERATED_COUNT, refreshPending.length)).toBe(2)
+    expect(toPublishCount(GENERATED_COUNT, legacyRefresh.length)).toBe(2)
   })
 
   it('ignore les statuts qui ne sont ni finis ni en vol', () => {
@@ -93,9 +91,9 @@ describe('les lignes qui n attendent plus de décision', () => {
       line('f', 'refresh', 'failed'),
       line('w', 'create', 'pending'),
     ]
-    const { refreshPending, queue } = splitPublishQueue([...THREE_REFRESH_TWO_CREATE, ...others])
+    const { legacyRefresh, queue } = splitPublishQueue([...THREE_LEGACY_TWO_CREATE, ...others])
 
-    expect(refreshPending).toHaveLength(3)
+    expect(legacyRefresh).toHaveLength(3)
     expect(queue.map((g) => g.id)).toEqual(['c1', 'c2'])
   })
 })
@@ -108,7 +106,7 @@ describe('toPublishCount', () => {
     expect(toPublishCount(2, 5)).toBe(0)
   })
 
-  it('rend le total inchangé quand aucune mise à jour n attend', () => {
+  it('rend le total inchangé quand aucune ancienne demande n attend', () => {
     expect(toPublishCount(5, 0)).toBe(5)
   })
 })

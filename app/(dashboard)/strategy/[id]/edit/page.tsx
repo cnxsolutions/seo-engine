@@ -207,6 +207,11 @@ export default function EditCampaignPage() {
   const [error, setError] = useState<string | null>(null)
   const [confirmingDelete, setConfirmingDelete] = useState(false)
 
+  // Le formulaire est atteint depuis l'onglet Stratégie d'un site : retour,
+  // annulation, enregistrement et suppression y ramènent. Tant que la campagne
+  // n'est pas lue, le sélecteur de site /strategy tient lieu de repli.
+  const backHref = campaign?.site_id ? `/sites/${campaign.site_id}/strategie` : '/strategy'
+
   const load = useCallback(async () => {
     setLoadError(null)
     try {
@@ -272,7 +277,7 @@ export default function EditCampaignPage() {
       // `refresh()` après `push()` : la liste est un composant client qui lit
       // /api/campaigns à son montage, mais une navigation retour vers une page
       // déjà visitée peut la servir depuis le cache du routeur.
-      router.push('/strategy')
+      router.push(backHref)
       router.refresh()
     } catch {
       setError('Impossible de joindre le serveur')
@@ -285,11 +290,11 @@ export default function EditCampaignPage() {
     <div style={{ maxWidth: 820 }}>
       <PageHeader
         icon={Target}
-        badge="Étape 3"
+        badge="Stratégie"
         title="Modifier la campagne"
         subtitle={campaign ? campaign.name : 'Lecture de la campagne…'}
         meta={campaign?.site ? <span>Site : {campaign.site.name}</span> : undefined}
-        backHref="/strategy"
+        backHref={backHref}
       />
 
       {loadError && (
@@ -298,7 +303,7 @@ export default function EditCampaignPage() {
           title="Campagne illisible"
           description={loadError}
           action={{ label: 'Réessayer', onClick: () => load() }}
-          secondaryAction={{ label: 'Retour aux stratégies', href: '/strategy' }}
+          secondaryAction={{ label: 'Retour aux stratégies', href: backHref }}
         />
       )}
 
@@ -466,7 +471,7 @@ export default function EditCampaignPage() {
                     inline
                     tone="warning"
                     title="Publication sans relecture"
-                    body="Chaque page générée part sur le site du client dès sa production. Décochez pour relire les pages à l’étape 5 avant leur mise en ligne."
+                    body="Chaque page générée part sur le site du client dès sa production. Décochez pour relire les pages dans l’onglet Publication du site avant leur mise en ligne."
                   />
                 )}
 
@@ -479,7 +484,7 @@ export default function EditCampaignPage() {
               <div className="panel__footer" style={{ display: 'flex', gap: 'var(--space-3)', alignItems: 'center' }}>
                 {error && <Notice inline tone="critical" title="Modifications non enregistrées" body={error} />}
                 <div style={{ flex: 1 }} />
-                <Button variant="ghost" href="/strategy" disabled={saving}>Annuler</Button>
+                <Button variant="ghost" href={backHref} disabled={saving}>Annuler</Button>
                 <Button icon={Save} loading={saving} onClick={submit}>Enregistrer les modifications</Button>
               </div>
             </section>
@@ -506,7 +511,7 @@ export default function EditCampaignPage() {
               campaign={campaign}
               onClose={() => setConfirmingDelete(false)}
               onDeleted={() => {
-                router.push('/strategy')
+                router.push(backHref)
                 router.refresh()
               }}
             />

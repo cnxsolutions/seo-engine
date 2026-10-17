@@ -3,24 +3,27 @@
 // SEO Engine - Un drapeau, une lecture, un fichier.
 // ─────────────────────────────────────────────────────────────────────────────
 //
-// Le gate anti-duplicat est livre en DEUX temps. D'abord il observe : il
-// compare chaque page produite a ce qui est en ligne, il persiste son verdict
-// dans generations.duplicate_verdict, il l'affiche — et il ne retient aucune
-// page. Ensuite seulement, quand le rejeu (scripts/replay-duplicate-gate.ts) a
-// montre sur les donnees reelles du site combien de pages seraient tombees, la
-// barriere se ferme. Ce fichier porte l'interrupteur qui separe les deux temps,
-// et rien d'autre.
+// Le gate anti-duplicat a ete livre en DEUX temps : d'abord il observait — il
+// comparait chaque page a ce qui est en ligne, persistait son verdict dans
+// generations.duplicate_verdict et l'affichait, sans retenir aucune page —
+// puis la barriere devait se fermer une fois le volume mesure. Ce fichier porte
+// l'interrupteur entre les deux, et rien d'autre.
 //
-// LE DEFAUT EST 'observe', ET C'EST UNE REGLE DE SURETE, PAS UNE COMMODITE.
+// LE DEFAUT EST 'block' DEPUIS LE 2026-10-17, ET C'EST LE RENVERSEMENT VOULU.
 // Variable absente, vide, mal orthographiee, ou porteuse d'une valeur inconnue :
-// 'observe'. Le bug empeche est un arret de production silencieux — un
-// deploiement qui oublie SEO_DUPLICATE_GATE se mettrait a refuser des pages
-// sans que personne ne l'ait decide, et le fait ne se lirait que des jours plus
-// tard sur un compteur de pages publiees. C'est la meme regle que le bloc catch
-// de runValidationGate applique deja a ses validateurs (lib/pipeline/gate.ts,
-// « a broken validator must not silently become a blanket rejection ») :
-// un composant defaillant degrade, il ne rejette pas en bloc. Traiter ce
-// drapeau comme un booleen a defaut ferme le retournerait exactement.
+// 'block'. Seule la valeur explicite 'observe' rouvre l'observation.
+//
+// Le defaut 'observe' protegeait d'un arret de production silencieux : une page
+// refusee partait en `rejected` et attendait un humain, si bien qu'un
+// deploiement qui aurait bloque par megarde aurait cesse de publier sans que
+// personne ne l'ait decide. Cette crainte a recu sa reponse : une page retenue
+// est desormais REGENEREE, le doublon nomme dans ses corrections
+// (lib/scheduler/cron.ts, `runCampaignNow`), et seule une page qui echoue trois
+// fois attend un humain. Bloquer coute une tentative, plus une page ; publier
+// un quasi-doublon de ce que le site porte deja est devenu le pire des deux
+// risques, et c'est donc lui que le defaut ecarte. La regle de surete s'inverse
+// avec : une valeur illisible ne doit jamais rouvrir la porte aux doublons sans
+// que personne ne l'ait decide.
 //
 // L'ENVIRONNEMENT ENTRE PAR LA PORTE. `env` est un parametre avec un defaut, et
 // le mode obtenu se passe ensuite en parametre a qui en depend
@@ -58,17 +61,17 @@ export type DuplicateGateMode = 'observe' | 'block'
 type EnvSource = Readonly<Record<string, string | undefined>>
 
 /**
- * Lit SEO_DUPLICATE_GATE. Rend 'block' pour cette valeur et pour elle seule ;
- * tout le reste rend 'observe'.
+ * Lit SEO_DUPLICATE_GATE. Rend 'observe' pour cette valeur et pour elle seule ;
+ * tout le reste — absence comprise — rend 'block'.
  *
  * La casse et les espaces de bord sont normalises AVANT la comparaison, et ce
- * n'est pas de la tolerance decorative : `SEO_DUPLICATE_GATE=block ` avec une
+ * n'est pas de la tolerance decorative : `SEO_DUPLICATE_GATE=observe ` avec une
  * espace finale — ce que produit couramment une ligne de .env ou un champ de
- * panneau d'hebergeur — a ete pose par un operateur qui a decide de bloquer.
+ * panneau d'hebergeur — a ete pose par un operateur qui a decide d'observer.
  * Le lui refuser sans un mot rendrait la bascule inexplicable. La normalisation
- * ne fait jamais qu'aider a RECONNAITRE 'block' : elle n'admet aucune autre
- * valeur, donc 'blok', 'true' ou '1' restent 'observe'.
+ * ne fait jamais qu'aider a RECONNAITRE 'observe' : elle n'admet aucune autre
+ * valeur, donc 'observ', 'false', '0' ou 'off' restent 'block'.
  */
 export function duplicateGateMode(env: EnvSource = process.env): DuplicateGateMode {
-  return env.SEO_DUPLICATE_GATE?.trim().toLowerCase() === 'block' ? 'block' : 'observe'
+  return env.SEO_DUPLICATE_GATE?.trim().toLowerCase() === 'observe' ? 'observe' : 'block'
 }

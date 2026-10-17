@@ -1,14 +1,19 @@
 'use client'
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Étape 5, onglet « Fiche Google » — composer, relire, publier un post de fiche
+// Onglet Publication d'un site, « Fiche Google » — composer, relire, publier
 // ─────────────────────────────────────────────────────────────────────────────
 //
-// ZÉRO ÉCRAN NOUVEAU. Le chantier des posts de fiche tient dans un onglet du
-// contenant existant : le patron de file de /publish (panneau, ligne, une action
-// par ligne avec `busy` et son erreur locale) et le patron de lancement de
-// /generate sont réemployés tels quels, jusqu'aux composants — `Panel` et
-// `rowStyle` viennent de ./queue-bits, sans un pixel réécrit.
+// ZÉRO ÉCRAN NOUVEAU. Le chantier des posts de fiche tient dans un sous-onglet
+// de la publication du site : le patron de file de ./PublishQueue (panneau,
+// ligne, une action par ligne avec `busy` et son erreur locale) et le patron de
+// lancement de ./GenerationPanel sont réemployés tels quels, jusqu'aux
+// composants — `Panel` et `rowStyle` viennent de ./queue-bits, sans un pixel
+// réécrit.
+//
+// LE SITE EST FIXÉ. L'onglet vit sous /sites/[id] et reçoit `siteId` : plus de
+// sélecteur de site, et donc plus d'éligibilité à initialiser sur « le premier
+// site de la liste » faute de choix.
 //
 // L'OPÉRATEUR CHOISIT UN ANGLE, PAS UN TEXTE. Il n'y a délibérément aucun champ
 // de saisie libre ici : un texte tapé à la main contournerait le contrôle
@@ -58,7 +63,6 @@ import {
   formatDay,
   shortenUrl,
 } from '@/components/ui'
-import { SiteSwitcher } from '@/components/charts'
 import { GBP_SUMMARY_MAX_CHARS, GBP_SUMMARY_TARGET, type GbpActionType } from '@/lib/publishing/gbp/format'
 import {
   splitReasons,
@@ -208,13 +212,12 @@ type ComposeOutcome =
 
 // ─── L'onglet ────────────────────────────────────────────────────────────────
 
-export function GbpTab({ initialSiteId }: { initialSiteId: string | null }) {
+export function GbpTab({ siteId }: { siteId: string }) {
   const [posts, setPosts] = useState<FeedGbpPost[]>([])
   const [counts, setCounts] = useState<GbpPostCounts>(UNKNOWN_COUNTS)
   const [eligibility, setEligibility] = useState<GbpEligibility | null>(null)
   const [sites, setSites] = useState<GbpPostFeedResponse['sites']>([])
   const [campaigns, setCampaigns] = useState<GbpPostFeedResponse['campaigns']>([])
-  const [siteId, setSiteId] = useState<string | null>(initialSiteId)
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [busyId, setBusyId] = useState<string | null>(null)
@@ -227,8 +230,9 @@ export function GbpTab({ initialSiteId }: { initialSiteId: string | null }) {
 
   const load = useCallback(async () => {
     setLoadError(null)
-    const params = new URLSearchParams({ limit: '100' })
-    if (siteId) params.set('site_id', siteId)
+    // `site_id` toujours présent : la route refuse de calculer une éligibilité
+    // sans lui, une éligibilité agrégée sur plusieurs fiches ne voulant rien dire.
+    const params = new URLSearchParams({ limit: '100', site_id: siteId })
 
     try {
       const res = await fetch(`/api/gbp/posts?${params.toString()}`)
@@ -251,20 +255,7 @@ export function GbpTab({ initialSiteId }: { initialSiteId: string | null }) {
     load()
   }, [load])
 
-  /**
-   * L'onglet choisit le site, parce que `SiteSwitcher` ne le fait pas.
-   *
-   * `allLabel={null}` retire seulement la ligne « Tous les sites » : le composant
-   * AFFICHE alors la première option quand `value` est nul, mais ne la
-   * sélectionne pas. Sans cette initialisation, `eligibility` resterait nulle —
-   * la route la refuse sans `site_id`, une éligibilité agrégée sur plusieurs
-   * fiches ne voulant rien dire — et l'écran entier paraîtrait cassé.
-   */
-  useEffect(() => {
-    if (siteId === null && sites.length > 0) setSiteId(sites[0].id)
-  }, [siteId, sites])
-
-  // Le scrutin, à la règle de /generate : il ne tourne que tant qu'une ligne est
+  // Le scrutin, à la règle du flux de génération : il ne tourne que tant qu'une ligne est
   // en vol, et il s'arrête de lui-même. Un compteur INCONNU (`null`) ne le
   // déclenche pas : on ne rappelle pas une route toutes les quinze secondes sur
   // la foi d'un chiffre qu'on n'a pas pu établir.
@@ -276,13 +267,14 @@ export function GbpTab({ initialSiteId }: { initialSiteId: string | null }) {
   }, [inFlight, load])
 
   const siteCampaigns = useMemo(
-    () => campaigns.filter((c) => (!siteId || c.site_id === siteId) && c.gbp_posts_enabled),
+    () => campaigns.filter((c) => c.site_id === siteId && c.gbp_posts_enabled),
     [campaigns, siteId]
   )
 
-  // La campagne sélectionnée doit toujours exister dans la liste visible : un
-  // changement de site laisserait sinon un identifiant fantôme dans le corps du
-  // POST, et le serveur répondrait 404 sur un choix que l'écran affiche encore.
+  // La campagne sélectionnée doit toujours exister dans la liste visible : une
+  // campagne désactivée entre deux lectures laisserait sinon un identifiant
+  // fantôme dans le corps du POST, et le serveur répondrait 404 sur un choix que
+  // l'écran affiche encore.
   useEffect(() => {
     if (campaignId && !siteCampaigns.some((c) => c.id === campaignId)) setCampaignId('')
   }, [campaignId, siteCampaigns])
@@ -409,15 +401,6 @@ export function GbpTab({ initialSiteId }: { initialSiteId: string | null }) {
 
   return (
     <div>
-      <div className="toolbar">
-        <SiteSwitcher
-          sites={sites}
-          value={siteId}
-          onChange={(next) => setSiteId(next)}
-          allLabel={null}
-        />
-      </div>
-
       <div className="kpi-row" style={{ marginBottom: 'var(--space-6)' }}>
         <StatTile label="À publier" value={countValue(counts.generated)} icon={Clock} />
         <StatTile label="En ligne" value={countValue(counts.published)} icon={CheckCircle} />
@@ -580,7 +563,7 @@ function ComposePanel({
   outcome,
   onCompose,
 }: {
-  siteId: string | null
+  siteId: string
   siteName: string
   campaigns: GbpPostFeedResponse['campaigns']
   campaignId: string
@@ -613,7 +596,7 @@ function ComposePanel({
             tone="critical"
             title="Fiche Google non reliée"
             body="Compte, fiche ou autorisation d’écriture manquants. Aucun post ne peut partir tant que les trois ne sont pas réunis."
-            action={siteId ? { label: 'Voir la connexion Google', href: `/sites/${siteId}/google` } : undefined}
+            action={{ label: 'Voir la connexion Google', href: `/sites/${siteId}/reglages#google` }}
           />
         )}
 
@@ -716,7 +699,7 @@ function ComposeOutcomeBlock({
 }: {
   outcome: ComposeOutcome
   siteName: string
-  siteId: string | null
+  siteId: string
 }) {
   if (outcome.ok) {
     return (
@@ -738,13 +721,13 @@ function ComposeOutcomeBlock({
   return (
     <div style={{ display: 'grid', gap: 'var(--space-3)' }}>
       <ReasonList title={outcome.message} reasons={outcome.reasons} />
-      {outcome.refusalKind === 'identifiants' && siteId && (
+      {outcome.refusalKind === 'identifiants' && (
         <Notice
           inline
           tone="warning"
           title="La connexion Google n’autorise pas l’écriture sur la fiche"
           body={REFUSAL_LABELS.identifiants.help}
-          action={{ label: 'Voir la connexion Google', href: `/sites/${siteId}/google` }}
+          action={{ label: 'Voir la connexion Google', href: `/sites/${siteId}/reglages#google` }}
         />
       )}
       {outcome.post && <PostPreview post={outcome.post} businessName={siteName} />}
@@ -968,7 +951,7 @@ function UncertainRow({
   )
 }
 
-function RefusedRow({ post, siteId, last }: { post: FeedGbpPost; siteId: string | null; last: boolean }) {
+function RefusedRow({ post, siteId, last }: { post: FeedGbpPost; siteId: string; last: boolean }) {
   const reasons = splitReasons(post.error_message)
   const kind = post.refusal_kind
   const help = kind ? REFUSAL_LABELS[kind]?.help : undefined
@@ -987,8 +970,8 @@ function RefusedRow({ post, siteId, last }: { post: FeedGbpPost; siteId: string 
 
       {help && <p className="meta" style={{ margin: 0 }}>{help}</p>}
 
-      {kind === 'identifiants' && siteId && (
-        <a href={`/sites/${siteId}/google`} className="btn-link">Voir la connexion Google</a>
+      {kind === 'identifiants' && (
+        <a href={`/sites/${siteId}/reglages#google`} className="btn-link">Voir la connexion Google</a>
       )}
     </div>
   )

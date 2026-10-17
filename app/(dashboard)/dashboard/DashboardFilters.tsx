@@ -27,11 +27,16 @@ const PERIODS = [
 
 export function DashboardFilters({
   sites,
-  siteId,
+  siteId = null,
   days,
 }: {
-  sites: SiteOption[]
-  siteId: string | null
+  /**
+   * Omitted on a site's own Performances tab: the site is the page, not a
+   * filter, and a switcher there would offer to leave the site without saying
+   * so. The period stays — it is the only scope a site tab still has.
+   */
+  sites?: SiteOption[]
+  siteId?: string | null
   days: number
 }) {
   const router = useRouter()
@@ -58,12 +63,14 @@ export function DashboardFilters({
         transition: `opacity var(--dur) var(--ease)`,
       }}
     >
-      <SiteSwitcher
-        sites={sites}
-        value={siteId}
-        onChange={(value) => apply({ site: value })}
-        size="sm"
-      />
+      {sites && (
+        <SiteSwitcher
+          sites={sites}
+          value={siteId}
+          onChange={(value) => apply({ site: value })}
+          size="sm"
+        />
+      )}
 
       <span className="toolbar__spacer" />
 

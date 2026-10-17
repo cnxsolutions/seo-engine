@@ -3,10 +3,14 @@
 //
 // Le parcours vivait dans la barre latérale, calculé sur TOUS les sites à la
 // fois : « Connecter Google » y était vrai d'un site et faux du suivant, et les
-// mêmes actions étaient répétées sur trois écrans. Cette page est le seul
-// endroit où un site se lit en entier : cinq étapes dans un ordre fixe, chacune
-// avec ses faits et ses actions, et un lien vers l'écran spécialisé quand il en
-// existe un (calendrier, publication, Search Console).
+// mêmes actions étaient répétées sur trois écrans. Cette page est la vue
+// d'ensemble du site : cinq étapes dans un ordre fixe, chacune avec ses faits
+// et ses actions, et un lien vers l'ONGLET du site qui la traite en détail
+// (stratégie, calendrier, publication, performances, réglages). Aucun lien
+// d'ici ne mène plus à un écran transverse qui ferait rechoisir le site.
+//
+// L'en-tête (nom, adresse, connecteur) et la barre d'onglets vivent dans
+// ./layout.tsx, communs à tous les onglets.
 //
 // Toutes les lectures se font ici, côté serveur, avec la clé de service. Rien
 // de ce qui traverse vers un composant client ne dépasse un identifiant de
@@ -14,48 +18,31 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import {
-  BarChart3, CalendarDays, Check, Code2, Globe2, Link2, Pencil, Send, Target, TriangleAlert, type LucideIcon,
+  BarChart3, CalendarDays, Check, Link2, Send, Target, type LucideIcon,
 } from 'lucide-react'
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import type { ReactNode } from 'react'
 import { getProductionMetrics, type ProductionMetrics } from '@/app/api/dashboard/metrics'
-import { PageHeader, formatDay, formatDayLong, formatMetric } from '@/components/ui'
-import { getActiveCyclePlan, listCampaigns, listSites, type SafeCampaign } from '@/lib/db'
+import { formatDay, formatDayLong, formatMetric } from '@/components/ui'
+import { getActiveCyclePlan, listCampaigns, type SafeCampaign } from '@/lib/db'
 import { getGscCoverage, type GscCoverage } from '@/lib/google/performance'
 import { getGoogleSyncState, type GoogleSyncState } from '@/lib/google/sync'
 import { DEFAULT_SCHEDULE_TIME, listEditorialSlots, todayLocalDate, type SafeEditorialSlot } from '@/lib/scheduler/editorial'
 import { createServiceClient } from '@/lib/supabase'
-import type { CyclePlan, ScheduleFrequency } from '@/lib/types'
+import type { CyclePlan } from '@/lib/types'
 import { AnalyzeRepoButton } from '../AnalyzeRepoButton'
-import { DisconnectGoogleButton } from './google/DisconnectGoogleButton'
+import { publicationModeOf, rhythmLabel } from './campaign-summary'
+import { DisconnectGoogleButton } from './reglages/DisconnectGoogleButton'
+import { loadSite, type SiteRow } from './site-data'
 import { deriveHubSteps, type HubFacts, type HubStep } from './steps'
 
 export const dynamic = 'force-dynamic'
 
-/** Même élargissement que /sites : `listSites()` attache ces deux drapeaux sans les déclarer. */
-type SiteRow = Awaited<ReturnType<typeof listSites>>[number] & { has_schema?: boolean; has_credentials?: boolean }
-
-const CONNECTOR = {
-  wordpress: { label: 'WordPress', icon: Globe2, color: 'var(--series-1)' },
-  nextjs: { label: 'Next.js', icon: Code2, color: 'var(--series-7)' },
-} as const
-
 /** Le tick principal du planificateur : toutes les quinze minutes (lib/scheduler/cron.ts). */
 const ENGINE_TICK_MINUTES = 15
 
-const FREQUENCY_LABELS: Record<ScheduleFrequency, string> = {
-  manual: 'lancement manuel',
-  daily: 'une page par jour',
-  every_2_days: 'une page tous les 2 jours',
-  every_3_days: 'une page tous les 3 jours',
-  weekly: 'une page par semaine',
-  biweekly: 'une page toutes les 2 semaines',
-  monthly: 'une page par mois',
-  custom: 'jours choisis',
-}
-
-/** Le vocabulaire du calendrier (app/(dashboard)/calendar/page.tsx), repris tel quel. */
+/** Le vocabulaire du calendrier (./calendrier/CalendarView.tsx), repris tel quel. */
 const SLOT_STATUS: Record<string, { label: string; badge: string }> = {
   planned: { label: 'Prévu', badge: 'badge badge-muted' },
   generating: { label: 'Génération…', badge: 'badge badge-warning' },
@@ -101,6 +88,12 @@ async function soft<T>(label: string, read: Promise<T>, fallback: T): Promise<T>
 /**
  * Compté côté serveur, `head: true` : PostgREST plafonne un select à 1000
  * lignes, un comptage exact ne transfère rien et ne plafonne pas.
+ *
+ * « Attend votre avis » exclut les anciennes demandes de mise à jour : le
+ * moteur ne met plus à jour les pages, elles ne partiront pas, et l'onglet
+ * Publication ne les propose plus. Les compter ici promettrait des décisions
+ * qu'aucun écran ne permet de prendre. `intent` est nul sur les lignes
+ * antérieures à la migration 018, d'où le `or`.
  */
 async function countGenerations(siteId: string, status: string, since?: string): Promise<number> {
   let query = createServiceClient()
@@ -108,6 +101,7 @@ async function countGenerations(siteId: string, status: string, since?: string):
     .select('id', { count: 'exact', head: true })
     .eq('site_id', siteId)
     .eq('status', status)
+  if (status === 'generated') query = query.or('intent.is.null,intent.neq.refresh')
   if (since) query = query.gte('published_at', since)
   const { count, error } = await query
   if (error) throw new Error(error.message)
@@ -182,42 +176,15 @@ async function readHub(site: SiteRow): Promise<HubData> {
 export default async function SiteHubPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
 
-  // Une lecture de liste plutôt qu'un `select('*')` : la liste est le seul
-  // lecteur garanti sans secret (voir sites/[id]/edit/page.tsx).
-  const site = ((await listSites()) as SiteRow[]).find((candidate) => candidate.id === id)
+  // La même lecture que le layout, dédupliquée par `cache()` (./site-data).
+  const site = await loadSite(id)
   if (!site) notFound()
 
   const hub = await readHub(site)
   const steps = deriveHubSteps(hub.facts)
-  const connector = site.type === 'nextjs' ? CONNECTOR.nextjs : CONNECTOR.wordpress
 
   return (
     <div className="hub">
-      <PageHeader
-        icon={connector.icon}
-        iconColor={connector.color}
-        badge={connector.label}
-        title={site.name}
-        backHref="/sites"
-        meta={
-          <>
-            <a href={site.url} target="_blank" rel="noopener noreferrer">{site.url}</a>
-            {site.type === 'nextjs' && site.github_repo && (
-              <span>dépôt {site.github_repo} · branche {site.github_branch || 'par défaut'}</span>
-            )}
-            {site.type === 'wordpress' && site.wp_username && <span>utilisateur {site.wp_username}</span>}
-          </>
-        }
-        action={{ label: 'Modifier le site', href: `/sites/${site.id}/edit`, icon: Pencil }}
-      />
-
-      {!site.is_active && (
-        <p className="hub-warning" role="status">
-          <TriangleAlert size={14} style={{ flexShrink: 0, marginTop: 2 }} />
-          Site désactivé : le planificateur l’ignore, rien n’y sera généré ni publié. Réactivez-le depuis « Modifier le site ».
-        </p>
-      )}
-
       <StepBar steps={steps} />
 
       <ConnexionSection site={site} google={hub.google} highlighted={toneOf(steps, 'connexion') === 'current'} />
@@ -324,7 +291,7 @@ function ConnexionSection({ site, google, highlighted }: { site: SiteRow; google
       title="Connexion"
       icon={Link2}
       highlighted={highlighted}
-      actions={<Link href={`/sites/${site.id}/existing`} className="btn-link">Pages connues</Link>}
+      actions={<Link href={`/sites/${site.id}/pages`} className="btn-link">Pages connues</Link>}
     >
       <div className="hub-grid">
         {site.type === 'wordpress' ? (
@@ -338,7 +305,7 @@ function ConnexionSection({ site, google, highlighted }: { site: SiteRow; google
                   : 'Manquants : ni la lecture du schéma ni la publication ne sont possibles'
               }
               action={
-                <Link href={`/sites/${site.id}/edit`} className="btn-link">
+                <Link href={`/sites/${site.id}/reglages`} className="btn-link">
                   {site.has_credentials ? 'Modifier' : 'Compléter'}
                 </Link>
               }
@@ -352,7 +319,7 @@ function ConnexionSection({ site, google, highlighted }: { site: SiteRow; google
                   : 'Jamais lu : types de contenu, champs et extension SEO guident la génération'
               }
               action={
-                <Link href={`/schema/${site.id}`} className="btn-link">
+                <Link href={`/sites/${site.id}/reglages#schema`} className="btn-link">
                   {site.has_schema ? 'Ouvrir' : 'Lire le schéma'}
                 </Link>
               }
@@ -372,7 +339,7 @@ function ConnexionSection({ site, google, highlighted }: { site: SiteRow; google
             action={
               site.github_repo
                 ? <AnalyzeRepoButton siteId={site.id} hasProfile={Boolean(site.repo_profile)} />
-                : <Link href={`/sites/${site.id}/edit`} className="btn-link">Configurer</Link>
+                : <Link href={`/sites/${site.id}/reglages`} className="btn-link">Configurer</Link>
             }
           />
         )}
@@ -392,7 +359,7 @@ function ConnexionSection({ site, google, highlighted }: { site: SiteRow; google
           action={
             google.connected ? (
               <span className="hub-fact__links">
-                <Link href={`/sites/${site.id}/google`} className="btn-link">Détail</Link>
+                <Link href={`/sites/${site.id}/reglages#google`} className="btn-link">Détail</Link>
                 <Link href={`/api/google/auth?site_id=${site.id}`} className="btn-link">Reconnecter</Link>
                 <DisconnectGoogleButton siteId={site.id} />
               </span>
@@ -407,18 +374,6 @@ function ConnexionSection({ site, google, highlighted }: { site: SiteRow; google
 }
 
 // ── 2. Stratégie ──
-
-function publicationModeOf(site: SiteRow, campaign: SafeCampaign): string {
-  if (!campaign.auto_publish) return 'manuelle, après relecture'
-  if (site.type === 'nextjs') {
-    return site.auto_promote ? 'automatique, fusionnée vers la branche par défaut' : 'automatique, sur la branche du moteur'
-  }
-  switch (campaign.publish_status) {
-    case 'draft': return 'automatique, en brouillon WordPress'
-    case 'pending': return 'automatique, en attente de relecture WordPress'
-    default: return 'automatique, en ligne directement'
-  }
-}
 
 function StrategieSection({ site, campaigns, highlighted }: { site: SiteRow; campaigns: CampaignView[]; highlighted: boolean }) {
   if (campaigns.length === 0) {
@@ -438,7 +393,7 @@ function StrategieSection({ site, campaigns, highlighted }: { site: SiteRow; cam
       title="Stratégie"
       icon={Target}
       highlighted={highlighted}
-      actions={<Link href="/strategy" className="btn-link">Voir le plan du cycle</Link>}
+      actions={<Link href={`/sites/${site.id}/strategie`} className="btn-link">Voir le plan du cycle</Link>}
     >
       <div className="hub-stack">
         {campaigns.map(({ campaign, cycle }) => (
@@ -457,8 +412,7 @@ function StrategieSection({ site, campaigns, highlighted }: { site: SiteRow; cam
               <div>
                 <dt>Rythme</dt>
                 <dd>
-                  {FREQUENCY_LABELS[campaign.schedule_frequency ?? 'daily']}
-                  {campaign.schedule_frequency !== 'manual' && `, à ${campaign.schedule_time || DEFAULT_SCHEDULE_TIME}`}
+                  {rhythmLabel(campaign, DEFAULT_SCHEDULE_TIME)}
                   {' · '}
                   <span className="chip">{campaign.ai_model}</span>
                 </dd>
@@ -505,7 +459,7 @@ function CalendrierSection({
       title="Calendrier"
       icon={CalendarDays}
       highlighted={highlighted}
-      actions={<Link href={`/calendar?site=${site.id}`} className="btn-link">Tout le calendrier</Link>}
+      actions={<Link href={`/sites/${site.id}/calendrier`} className="btn-link">Tout le calendrier</Link>}
     >
       {slots.length === 0 ? (
         <div className="hub-empty">
@@ -514,7 +468,7 @@ function CalendrierSection({
               ? 'Aucun créneau à venir : ce site ne produira rien tant qu’un plan de cycle n’est pas confirmé.'
               : 'Aucun créneau : le calendrier se remplit à la confirmation du premier plan de cycle.'}
           </p>
-          {hasCampaign && <Link href="/strategy" className="btn-secondary btn-sm">Ouvrir le plan du cycle</Link>}
+          {hasCampaign && <Link href={`/sites/${site.id}/strategie`} className="btn-secondary btn-sm">Ouvrir le plan du cycle</Link>}
         </div>
       ) : (
         <ol className="hub-slots" aria-label="Prochains créneaux">
@@ -554,7 +508,7 @@ function PublicationSection({ site, hub, highlighted }: { site: SiteRow; hub: Hu
       icon={Send}
       highlighted={highlighted}
       actions={
-        <Link href={`/publish?site=${site.id}`} className="btn-link">
+        <Link href={`/sites/${site.id}/publication`} className="btn-link">
           {awaiting ? `Voir ${awaiting > 1 ? `les ${awaiting} pages` : 'la page'} en attente` : 'File de publication'}
         </Link>
       }
@@ -627,7 +581,7 @@ function ResultatsSection({
         {google.gsc.lastSyncAt && ` Dernière synchronisation : ${formatDateTime(google.gsc.lastSyncAt)}.`}
       </>
     )
-    action = <Link href={`/dashboard?tab=performance&site=${site.id}`} className="btn-primary btn-sm"><BarChart3 size={14} /> Voir la performance</Link>
+    action = <Link href={`/sites/${site.id}/performances`} className="btn-primary btn-sm"><BarChart3 size={14} /> Voir les performances</Link>
   } else if (google.gsc.status === 'failed') {
     body = `Dernière synchronisation en échec${google.gsc.error ? ` : ${google.gsc.error}` : ''}.`
   } else {
@@ -642,7 +596,7 @@ function ResultatsSection({
       title="Résultats"
       icon={BarChart3}
       highlighted={highlighted}
-      actions={google.connected && <Link href={`/sites/${site.id}/google`} className="btn-link">Search Console en détail</Link>}
+      actions={google.connected && <Link href={`/sites/${site.id}/reglages#google`} className="btn-link">État de la synchronisation</Link>}
     >
       <div className="hub-empty">
         <p>{body}</p>

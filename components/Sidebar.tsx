@@ -1,27 +1,33 @@
 'use client'
 
 import Link from 'next/link'
-import { usePathname, useSearchParams } from 'next/navigation'
+import { usePathname } from 'next/navigation'
 import { useEffect, useState } from 'react'
 import {
-  BarChart3,
-  Calendar,
   ChevronRight,
   Globe,
   LayoutDashboard,
-  Send,
-  Wand2,
   Zap,
   type LucideIcon,
 } from 'lucide-react'
+import { SITE_TABS, activeSiteTab, siteIdFromPathname, siteTabHref } from './site-tabs'
 
 // ─── Navigation model ────────────────────────────────────────────────────────
 //
-// The rail used to carry a GLOBAL five-step path, computed across every site by
-// /api/workflow. « Connecter Google » there was true of one site and false of
-// the next, and the same actions sat on three screens. The path now lives on
-// each site's own page (/sites/[id]); the rail only says WHERE to go: the two
-// overview screens, the sites themselves, and the cross-site tools.
+// The rail used to carry a GLOBAL five-step path, then a group of cross-site
+// « Outils » (Calendrier, Générer, Publier, Analytics) that opened on every site
+// at once. The owner's rule (17/10/2026): everything about a site is done from
+// the site's own page — « pas de pages orphelines ailleurs ». So the rail now
+// says only WHERE to go:
+//
+//   · the cross-site overview and the list of sites;
+//   · « Vos sites », one entry per active site;
+//   · under the site being viewed, its tabs, indented — the same list as the
+//     tab bar of the site layout (components/site-tabs.ts), so the two cannot
+//     drift apart.
+//
+// The old tool URLs still resolve: each is a site picker that redirects into a
+// site's tab (app/(dashboard)/SitePicker.tsx).
 //
 // This component never reads the database: the layout (a server component)
 // hands it the site list and the environment, and it re-reads the public
@@ -50,27 +56,6 @@ interface ToolLinkModel {
 const OVERVIEW: ToolLinkModel[] = [
   { href: '/dashboard', icon: LayoutDashboard, label: 'Tableau de bord' },
   { href: '/sites', icon: Globe, label: 'Sites' },
-]
-
-/**
- * The cross-site screens. Each one is also reachable from the site page, from
- * the section it belongs to, with the site pre-selected; here they are the
- * un-scoped entrances, kept so nothing becomes unreachable.
- *
- * « Analytics » points straight at the performance tab of the dashboard, not at
- * `/analytics`: that route is a 307 to the very same tab, and a link through it
- * would never light up, the pathname ending up as `/dashboard`.
- *
- * `/schema` and `/strategy` are deliberately absent: both are reached from the
- * site page (Connexion and Stratégie sections) with the right site in hand,
- * and listing them here would restore the duplicated entrances this rail just
- * lost.
- */
-const TOOLS: ToolLinkModel[] = [
-  { href: '/calendar', icon: Calendar, label: 'Calendrier' },
-  { href: '/generate', icon: Wand2, label: 'Générer' },
-  { href: '/publish', icon: Send, label: 'Publier' },
-  { href: '/dashboard?tab=performance', icon: BarChart3, label: 'Analytics' },
 ]
 
 // ─── Site list ───────────────────────────────────────────────────────────────
@@ -118,23 +103,19 @@ function useSiteList(initial: SidebarSite[], pathname: string): SidebarSite[] {
 
 export function Sidebar({ sites: initialSites, environment }: { sites: SidebarSite[]; environment: SidebarEnvironment }) {
   const pathname = usePathname()
-  const searchParams = useSearchParams()
   const sites = useSiteList(initialSites, pathname)
-
-  const performanceTab = pathname === '/dashboard' && searchParams.get('tab') === 'performance'
 
   /**
    * One row lights up at a time. « Sites » owns the list and the creation form;
-   * a site's own pages (hub, edit, Google, inventory) light up its own entry.
+   * a site's own pages light up its entry and, below it, the tab being viewed.
    */
   const isActive = (href: string): boolean => {
-    if (href === '/dashboard') return pathname === '/dashboard' && !performanceTab
-    if (href === '/dashboard?tab=performance') return performanceTab
     if (href === '/sites') return pathname === '/sites' || pathname === '/sites/new'
     return pathname === href || pathname.startsWith(`${href}/`)
   }
 
-  const activeSiteId = sites.find((site) => pathname === `/sites/${site.id}` || pathname.startsWith(`/sites/${site.id}/`))?.id
+  const currentSiteId = siteIdFromPathname(pathname)
+  const activeSiteId = sites.find((site) => site.id === currentSiteId)?.id
 
   return (
     <aside className="sidebar">
@@ -159,14 +140,14 @@ export function Sidebar({ sites: initialSites, environment }: { sites: SidebarSi
           <ToolLink key={item.href} {...item} active={isActive(item.href)} />
         ))}
 
-        <div className="nav-section-label">Vos sites</div>
+        <div className="nav-section-label" id="nav-sites-label">Vos sites</div>
         {sites.length === 0 ? (
           <Link href="/sites/new" className="nav-item nav-item--site">
             <span className="nav-item__dot" aria-hidden="true" />
             <span style={{ flex: 1 }} className="meta">Aucun site actif — en ajouter un</span>
           </Link>
         ) : (
-          <ul className="nav-sites">
+          <ul className="nav-sites" aria-labelledby="nav-sites-label">
             {sites.map((site) => {
               const active = site.id === activeSiteId
               return (
@@ -174,23 +155,18 @@ export function Sidebar({ sites: initialSites, environment }: { sites: SidebarSi
                   <Link
                     href={`/sites/${site.id}`}
                     className={`nav-item nav-item--site ${active ? 'active' : ''}`}
-                    aria-current={pathname === `/sites/${site.id}` ? 'page' : undefined}
                     title={site.name}
                   >
                     <span className="nav-item__dot" aria-hidden="true" />
                     <span className="truncate" style={{ flex: 1, minWidth: 0 }}>{site.name}</span>
-                    {active && <ChevronRight size={14} style={{ opacity: 0.5, flexShrink: 0 }} />}
+                    {active && <ChevronRight size={14} style={{ opacity: 0.5, flexShrink: 0, transform: 'rotate(90deg)' }} aria-hidden="true" />}
                   </Link>
+                  {active && <SiteSubTabs siteId={site.id} siteName={site.name} pathname={pathname} />}
                 </li>
               )
             })}
           </ul>
         )}
-
-        <div className="nav-section-label">Outils</div>
-        {TOOLS.map((item) => (
-          <ToolLink key={item.href} {...item} active={isActive(item.href)} />
-        ))}
       </nav>
 
       {/* Which deployment this tab is talking to. It replaces a hard-coded
@@ -208,6 +184,34 @@ export function Sidebar({ sites: initialSites, environment }: { sites: SidebarSi
 }
 
 // ─── Rows ────────────────────────────────────────────────────────────────────
+
+/**
+ * The tabs of the site being viewed, indented under its entry. `aria-current`
+ * sits on the TAB, not on the site entry: both would otherwise announce the
+ * same page twice on the overview, and only the tab says which section it is.
+ */
+function SiteSubTabs({ siteId, siteName, pathname }: { siteId: string; siteName: string; pathname: string }) {
+  const active = activeSiteTab(pathname, siteId)
+
+  return (
+    <ul className="nav-subtabs" aria-label={`Sections de ${siteName}`}>
+      {SITE_TABS.map((tab) => {
+        const current = tab.slug === active
+        return (
+          <li key={tab.slug || 'overview'}>
+            <Link
+              href={siteTabHref(siteId, tab.slug)}
+              className={`nav-subtab ${current ? 'nav-subtab--active' : ''}`}
+              aria-current={current ? 'page' : undefined}
+            >
+              {tab.label}
+            </Link>
+          </li>
+        )
+      })}
+    </ul>
+  )
+}
 
 function ToolLink({
   href, icon: Icon, label, active,

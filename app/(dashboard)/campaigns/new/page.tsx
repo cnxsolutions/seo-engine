@@ -4,7 +4,7 @@ import { redirect } from 'next/navigation'
  * Bookmark shim for the old campaign creation URL. See ../page.tsx: creating a
  * campaign IS creating a strategy, and only /strategy/new does it.
  *
- * Still referenced by the dashboard quick actions, so it cannot be deleted yet.
+ * Nothing in the product links here any more; kept for old bookmarks only.
  */
 export default function CampaignsNewRedirect() {
   redirect('/strategy/new')

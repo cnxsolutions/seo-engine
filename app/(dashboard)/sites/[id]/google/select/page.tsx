@@ -10,12 +10,18 @@
 // Cloud project those APIs start with a quota of zero and answer 429 to every
 // call; the page says so, in words, instead of showing an empty list that reads
 // as "you own no business listing".
+//
+// Sous-page de l'onglet Réglages : le layout du site rend déjà son nom et la
+// barre d'onglets (« Réglages » reste allumé ici), et le retour mène à la
+// section Connexion Google de cet onglet.
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { AlertTriangle, Search, Store } from 'lucide-react'
+import { AlertTriangle, ArrowLeft, Search, Store } from 'lucide-react'
+import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import type { ReactNode } from 'react'
-import { EmptyState, PageHeader } from '@/components/ui'
+import { EmptyState } from '@/components/ui'
+import { TabIntro } from '../../TabIntro'
 import { getAuthenticatedClient, getGoogleConnection } from '@/lib/google/client'
 import { listAllLocations, type GbpAccount, type GbpLocation } from '@/lib/google/gbp'
 import { listProperties, type GscProperty } from '@/lib/google/gsc'
@@ -35,14 +41,14 @@ export default async function GoogleSelectPage({ params }: { params: Promise<{ i
   const connection = await getGoogleConnection(id)
   // Reaching this page without a connection means the OAuth round-trip failed
   // silently; the status page is where that gets explained.
-  if (!connection) redirect(`/sites/${id}/google`)
+  if (!connection) redirect(`/sites/${id}/reglages`)
 
   // A refresh token Google has revoked makes this throw. Rendering a 500 there
   // would tell the operator nothing; the status page names the problem.
   const client = await loadGoogleClient(id)
   if (!client) {
     redirect(
-      `/sites/${id}/google?error=${encodeURIComponent(
+      `/sites/${id}/reglages?error=${encodeURIComponent(
         'Jeton Google refusé — reconnectez le compte Google de ce site.'
       )}`
     )
@@ -70,12 +76,12 @@ export default async function GoogleSelectPage({ params }: { params: Promise<{ i
 
   return (
     <div>
-      <PageHeader
-        icon={Search}
-        badge="GOOGLE"
+      <Link href={`/sites/${id}/reglages#google`} className="btn-link" style={{ marginBottom: 'var(--space-2)' }}>
+        <ArrowLeft size={12} aria-hidden="true" /> Retour aux réglages
+      </Link>
+      <TabIntro
         title="Choisir les ressources à lire"
-        subtitle={`Ce que le moteur interrogera pour ${site.name}`}
-        backHref={`/sites/${id}/google`}
+        subtitle={`Ce que le moteur interrogera pour ${site.name} : la propriété Search Console, et la fiche d’établissement s’il y en a une.`}
       />
 
       <form action="/api/google/select" method="POST" style={{ display: 'grid', gap: 'var(--space-5)' }}>
@@ -85,7 +91,7 @@ export default async function GoogleSelectPage({ params }: { params: Promise<{ i
           <div className="panel__header">
             <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
               <Search size={15} color="var(--accent)" />
-              <h2 className="card-title">Search Console</h2>
+              <h3 className="card-title">Search Console</h3>
               <span className="badge badge-info">Requis</span>
             </div>
           </div>
@@ -126,7 +132,7 @@ export default async function GoogleSelectPage({ params }: { params: Promise<{ i
           <div className="panel__header">
             <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
               <Store size={15} color="var(--ink-secondary)" />
-              <h2 className="card-title">Business Profile</h2>
+              <h3 className="card-title">Business Profile</h3>
               <span className="badge badge-muted">Facultatif</span>
             </div>
           </div>

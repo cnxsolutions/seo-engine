@@ -53,7 +53,7 @@ interface SiteFacts {
   /** Editorial slots still waiting: what the site is about to produce. */
   plannedSlots: number
   /**
-   * Pages the crawler has actually seen — the same figure /sites/[id]/existing
+   * Pages the crawler has actually seen — the same figure /sites/[id]/pages
    * serves as `summary.crawledCount`, so the two screens can never disagree.
    *
    * `null`, never 0, when no analysis has ever completed AND nothing was read:
@@ -209,12 +209,12 @@ function nextStep(site: SiteRow, facts: SiteFacts | null): NextStep | null {
   // (migration 017). Reading the second as the first sent the operator to the
   // creation form for a site that was complete — and created it twice.
   //
-  // The link goes to the EDIT page, never to the creation form, which is
-  // exactly where the duplicate came from.
+  // The link goes to the site's SETTINGS tab, never to the creation form,
+  // which is exactly where the duplicate came from.
   if (site.type === 'wordpress' && !site.has_credentials) {
     return {
       label: 'Compléter les identifiants WordPress',
-      href: `/sites/${site.id}/edit`,
+      href: `/sites/${site.id}/reglages`,
       why: 'Sans utilisateur ni mot de passe d’application, ni la lecture du schéma ni la publication ne sont possibles.',
     }
   }
@@ -222,7 +222,7 @@ function nextStep(site: SiteRow, facts: SiteFacts | null): NextStep | null {
   if (site.type === 'wordpress' && !site.has_schema) {
     return {
       label: 'Lire le schéma WordPress',
-      href: '/schema',
+      href: `/sites/${site.id}/reglages#schema`,
       why: 'Types de contenu, champs et extension SEO guident la génération ; ils n’ont pas encore été lus.',
     }
   }
@@ -257,9 +257,9 @@ function nextStep(site: SiteRow, facts: SiteFacts | null): NextStep | null {
     }
   }
 
-  // From here on the destination is the site's own page, at the section the
-  // step belongs to: it shows the campaign, the cycle and the next slots of
-  // THIS site, where /strategy and /calendar open on every site at once.
+  // From here on the destination is the site's own tab for the step: it shows
+  // the campaign, the cycle and the slots of THIS site — the cross-site
+  // /strategy and /calendar screens are now mere site pickers.
   if (facts.campaigns === 0) {
     return {
       label: 'Créer une stratégie',
@@ -271,14 +271,14 @@ function nextStep(site: SiteRow, facts: SiteFacts | null): NextStep | null {
   if (facts.plannedSlots === 0) {
     return {
       label: 'Planifier un cycle',
-      href: `/sites/${site.id}#strategie`,
+      href: `/sites/${site.id}/strategie`,
       why: 'Aucun créneau n’attend : ce site ne produira rien tant qu’un cycle n’est pas lancé.',
     }
   }
 
   return {
     label: 'Voir le calendrier',
-    href: `/sites/${site.id}#calendrier`,
+    href: `/sites/${site.id}/calendrier`,
     why: `${facts.plannedSlots} créneau${facts.plannedSlots > 1 ? 'x' : ''} en attente de génération.`,
   }
 }
@@ -301,7 +301,7 @@ export default async function SitesPage() {
     <div>
       <PageHeader
         icon={Globe}
-        badge="Étape 1"
+        badge="Sites"
         title="Sites connectés"
         subtitle="Chaque site reçoit les pages générées. Un site n’est prêt que lorsqu’il est décrit et relié à Google."
         meta={
@@ -386,7 +386,7 @@ function SiteCard({ site, facts }: { site: SiteRow; facts: SiteFacts | null }) {
               <span style={{ display: 'inline-flex', alignItems: 'center', gap: 'var(--space-2)' }}>
                 <StatusBadge status={site.google_connected ? 'connected' : 'disconnected'} />
                 {site.google_connected
-                  ? <Link href={`/sites/${site.id}/google`} className="btn-link">Détail</Link>
+                  ? <Link href={`/sites/${site.id}/reglages#google`} className="btn-link">Détail</Link>
                   : <Link href={`/api/google/auth?site_id=${site.id}`} className="btn-link">Connecter</Link>}
               </span>
             }
@@ -407,8 +407,8 @@ function SiteCard({ site, facts }: { site: SiteRow; facts: SiteFacts | null }) {
             this site; these two say what can be done TO it. Kept apart so a
             red « Supprimer » never sits where the eye looks for the next step. */}
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 'var(--space-2)', flexWrap: 'wrap' }}>
-          <Link href={`/sites/${site.id}/edit`} className="btn-ghost btn-sm" title="Modifier ce site">
-            <Pencil size={13} /> Modifier
+          <Link href={`/sites/${site.id}/reglages`} className="btn-ghost btn-sm" title="Réglages de ce site">
+            <Pencil size={13} /> Réglages
           </Link>
           <DeleteSiteButton siteId={site.id} siteName={site.name} />
         </div>
@@ -451,8 +451,8 @@ function WordPressFacts({ site }: { site: SiteRow }) {
           !site.has_credentials
             ? <span className="badge badge-warning">Identifiants manquants</span>
             : site.has_schema
-              ? <Link href="/schema" className="btn-link">Lu — ouvrir</Link>
-              : <Link href="/schema" className="btn-link">À lire — ouvrir</Link>
+              ? <Link href={`/sites/${site.id}/reglages#schema`} className="btn-link">Lu — ouvrir</Link>
+              : <Link href={`/sites/${site.id}/reglages#schema`} className="btn-link">À lire — ouvrir</Link>
         }
       />
     </>
@@ -526,7 +526,7 @@ function freshnessTitle(freshness: InventoryFreshness): string {
  * What the engine knows of this site, and how to go and look at it.
  *
  * The link stays reachable in every case, including when the count could not be
- * read: /sites/[id]/existing says "never analysed" better than a card can, and
+ * read: /sites/[id]/pages says "never analysed" better than a card can, and
  * removing the only way in would make an unreadable counter look like a broken
  * site.
  */
@@ -548,7 +548,7 @@ function KnownPages({ siteId, facts }: { siteId: string; facts: SiteFacts | null
           </span>
         </>
       )}
-      <Link href={`/sites/${siteId}/existing`} className="btn-link">Voir</Link>
+      <Link href={`/sites/${siteId}/pages`} className="btn-link">Voir</Link>
     </span>
   )
 }

@@ -6,17 +6,18 @@
 //
 // `runValidationGate` refuse deliberement de lire process.env : la seule
 // fonction par laquelle passe toute publication ne doit pas dependre d'un
-// ambiant qu'un test ne peut atteindre qu'en polluant le processus. Sa valeur
-// par defaut, DUPLICATE_ENFORCEMENT, vaut donc 'observe' — et l'en-tete de
-// gate.ts reclame explicitement que `lib/pipeline/index.ts` passe
-// `duplicateMode: duplicateGateMode()`, faute de quoi, mot pour mot,
+// ambiant qu'un test ne peut atteindre qu'en polluant le processus. Elle a donc
+// une valeur par defaut, DUPLICATE_ENFORCEMENT — 'block' depuis le 2026-10-17 —
+// et l'en-tete de gate.ts reclame explicitement que `lib/pipeline/index.ts`
+// passe `duplicateMode: duplicateGateMode()`, faute de quoi, mot pour mot,
 // « l'interrupteur serait ne mort ».
 //
 // Il l'a ete. La ligne manquait, SEO_DUPLICATE_GATE n'avait aucun lecteur, et
-// la basculer en 'block' n'aurait rien change — il aurait fallu editer le code
-// du gate. Rien ne rougissait : le defaut 'observe' est aussi le comportement
-// attendu pendant toute la periode d'observation, donc l'oubli etait
-// indiscernable du fonctionnement normal jusqu'au jour de la bascule.
+// la poser n'aurait rien change — il aurait fallu editer le code du gate. Rien
+// ne rougissait : le defaut du gate etait aussi le comportement attendu, donc
+// l'oubli etait indiscernable du fonctionnement normal jusqu'au jour ou
+// quelqu'un aurait voulu basculer. Depuis que le defaut bloque, c'est le retour
+// a l'observation (SEO_DUPLICATE_GATE=observe) que cette couture garantit.
 //
 // Ce test verrouille la couture, pas le comportement : gate.test.ts prouve deja
 // ce que chaque mode FAIT. Ici on prouve seulement que le mode ARRIVE.
@@ -90,26 +91,26 @@ describe('le mode anti-duplicat atteint le gate', () => {
   })
 
   it('lit SEO_DUPLICATE_GATE, et le fait suivre jusqu au gate', async () => {
-    vi.stubEnv('SEO_DUPLICATE_GATE', 'block')
+    vi.stubEnv('SEO_DUPLICATE_GATE', 'observe')
+    await run()
+
+    expect(seen[0].duplicateMode).toBe('observe')
+  })
+
+  it('bloque quand la variable est absente — le defaut depuis le 2026-10-17', async () => {
+    vi.stubEnv('SEO_DUPLICATE_GATE', '')
     await run()
 
     expect(seen[0].duplicateMode).toBe('block')
   })
 
-  it('retombe sur l observation quand la variable est absente', async () => {
-    vi.stubEnv('SEO_DUPLICATE_GATE', '')
+  it('bloque quand la variable est mal orthographiee', async () => {
+    // Un deploiement qui ecrit 'observ' ne doit pas se remettre a publier des
+    // doublons, ni croire qu'il les observe seulement.
+    vi.stubEnv('SEO_DUPLICATE_GATE', 'observ')
     await run()
 
-    expect(seen[0].duplicateMode).toBe('observe')
-  })
-
-  it('retombe sur l observation quand la variable est mal orthographiee', async () => {
-    // Un deploiement qui ecrit 'blok' ne doit pas se mettre a refuser des pages,
-    // ni croire qu'il en refuse.
-    vi.stubEnv('SEO_DUPLICATE_GATE', 'blok')
-    await run()
-
-    expect(seen[0].duplicateMode).toBe('observe')
+    expect(seen[0].duplicateMode).toBe('block')
   })
 
   it('laisse un appelant forcer le mode sans toucher a l environnement', async () => {
@@ -127,5 +128,38 @@ describe('le mode anti-duplicat atteint le gate', () => {
     await run({ duplicateMode: 'observe' })
 
     expect(seen[0].duplicateMode).toBe('observe')
+  })
+})
+
+// ─── La meme couture, pour l'audit SEO + GEO ─────────────────────────────────
+//
+// Meme piege que le mode : un champ que le pipeline oublie de transmettre ne
+// fait rien rougir, la regle qui le lit se contente de ne pas tourner. Pour
+// INVENTED_NAP c'est exactement le defaut voulu quand le contexte est INCONNU —
+// donc indiscernable d'un oubli, sauf ici.
+
+describe('le contexte de l audit atteint le gate', () => {
+  it('transmet la fiche Google, la ville, l entreprise et le brief', async () => {
+    await run({
+      hasGoogleBusinessProfile: false,
+      city: 'Troyes',
+      campaign: { target_length: 800, enable_images: false, enable_external_links: true, business_name: 'Dupont Plomberie' },
+      planBrief: { required_entities: ['Sainte-Savine', 'Bréviandes'] },
+    })
+
+    expect(seen[0].hasGoogleBusinessProfile).toBe(false)
+    expect(seen[0].city).toBe('Troyes')
+    expect(seen[0].businessName).toBe('Dupont Plomberie')
+    expect(seen[0].requiredEntities).toEqual(['Sainte-Savine', 'Bréviandes'])
+    expect(seen[0].enableExternalLinks).toBe(true)
+    expect(seen[0].siteUrl).toBe('https://exemple.fr')
+    // Contenu attendu sur la page : absent vaut vide, jamais « inconnu ».
+    expect(seen[0].faqItems).toEqual([])
+  })
+
+  it('laisse la fiche Google INCONNUE quand l appelant ne la connait pas', async () => {
+    await run()
+
+    expect(seen[0].hasGoogleBusinessProfile).toBeUndefined()
   })
 })

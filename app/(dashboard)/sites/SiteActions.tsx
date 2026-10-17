@@ -86,7 +86,7 @@ export function DeleteSiteButton({ siteId, siteName }: { siteId: string; siteNam
 // ─── Danger zone ─────────────────────────────────────────────────────────────
 
 /**
- * The bottom of the edit page. Deleting a site takes its campaigns and its
+ * The bottom of the site settings tab. Deleting a site takes its campaigns and its
  * calendar with it, so the confirmation is the site name typed back — a
  * click on a red button is too cheap for something a cron was running on.
  */
@@ -119,12 +119,14 @@ export function DeleteSiteZone({ siteId, siteName }: { siteId: string; siteName:
     <section
       className="panel"
       aria-labelledby="danger-zone-title"
-      style={{ borderColor: 'var(--status-critical)', marginTop: 'var(--space-6)' }}
+      // No top margin of its own: it closes the settings tab, whose sections
+      // are spaced by the tab's own gap.
+      style={{ borderColor: 'var(--status-critical)' }}
     >
       <div className="panel__header">
         <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', minWidth: 0 }}>
           <TriangleAlert size={15} color="var(--status-critical)" aria-hidden="true" />
-          <h2 id="danger-zone-title" className="card-title">Zone dangereuse</h2>
+          <h3 id="danger-zone-title" className="card-title">Zone dangereuse</h3>
         </div>
       </div>
 

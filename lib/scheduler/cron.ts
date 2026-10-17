@@ -6,7 +6,7 @@
 
 import cron from 'node-cron'
 import { createServiceClient } from '@/lib/supabase'
-import { generateSeoPage } from '@/lib/ai/page-types'
+import { generateSeoPage, type GeneratedSeoPage, type PageTypeGenerateOptions } from '@/lib/ai/page-types'
 import { createGeneration, getPlanItemBrief, listDueCampaigns, listPendingPublishGenerations, updateCampaignSchedule, updateGeneration } from '@/lib/db'
 import { loadSiteInventory, nearestExistingEntries } from '@/lib/existing/inventory'
 import { runGbpPostNow } from '@/lib/gbp/posts/run'
@@ -32,6 +32,7 @@ import {
   runPrePublishGate,
   type PipelineReport,
 } from '@/lib/pipeline'
+import { isRegenerable } from '@/lib/pipeline/regeneration'
 import { publishPage } from '@/lib/publishing/publish'
 import type { PublishOutcome } from '@/lib/publishing/outcome'
 import { checkCycleCompletion } from './cycle-manager'
@@ -73,12 +74,19 @@ interface JobConfig {
 }
 
 const JOB_CONFIGS: Record<string, JobConfig> = {
-  // The editorial timeout is generous on purpose: a page built with RAG context
-  // legitimately takes minutes, and giving up on a live generation is precisely
-  // what used to produce duplicates.
-  editorial: { maxAttempts: 3, timeoutMs: 300000, concurrency: 2 },
+  // The editorial and campaign timeouts are generous on purpose: giving up on a
+  // live generation is precisely what used to produce duplicates.
+  //
+  // 15 minutes, because one run is now up to THREE generations. Since
+  // 2026-10-17 `runCampaignNow` regenerates a page the gate refused, twice at
+  // most (MAX_REGENERATIONS), before parking it for a human. One generation with
+  // RAG context and gpt-5.5 takes 1 to 3 minutes, plus a few seconds of pipeline:
+  // three attempts fit in ~10 minutes, and 15 leaves room for a slow provider
+  // without the scheduler walking away from a run that is about to succeed.
+  // STALE_GENERATING_MINUTES below must stay above this figure.
+  editorial: { maxAttempts: 3, timeoutMs: 900000, concurrency: 2 },
   publish: { maxAttempts: 1, timeoutMs: 60000, concurrency: 3 },
-  campaign: { maxAttempts: 1, timeoutMs: 180000, concurrency: 1 },
+  campaign: { maxAttempts: 1, timeoutMs: 900000, concurrency: 1 },
   gscSync: { maxAttempts: 1, timeoutMs: 300000, concurrency: 1 },
   gbpSync: { maxAttempts: 1, timeoutMs: 300000, concurrency: 1 },
 }
@@ -103,10 +111,16 @@ const PUBLISH_PAGE_SIZE = 10
 
 /**
  * A slot left in `generating` for this long no longer has anyone waiting for it.
- * Six times the editorial timeout (5 min), so a slow but live generation is never
- * declared dead underneath itself.
+ *
+ * It must stay ABOVE the longest a legitimate run can last, or the reaper puts a
+ * live slot back in the pool and a second run starts writing the same page. That
+ * run is now up to three generations (see JOB_CONFIGS.editorial, 15 min) — and a
+ * timeout only stops the scheduler from waiting, not the work, so the bound that
+ * matters is the work itself: three non-streaming model calls, each capped by
+ * the SDK's 10-minute HTTP timeout, i.e. ~30 minutes in the worst case. Forty
+ * clears both, where the former 30 sat exactly on the second.
  */
-const STALE_GENERATING_MINUTES = 30
+const STALE_GENERATING_MINUTES = 40
 
 /**
  * A push left in `publishing` this long has no process behind it any more.
@@ -1360,14 +1374,41 @@ export interface RunCampaignResult {
   city: string
   publishedUrl?: string
   /**
-   * Present when the post-generation pipeline refused the page.
+   * Present when the post-generation pipeline refused the page — after its
+   * regenerations, when the refusal comes from the gate (the first reason then
+   * opens with « Refusée après N tentatives : »).
    *
    * Deliberately a return value rather than a thrown error: throwing would put
-   * the slot back in the retry budget and pay for a second generation of a page
-   * that needs a human, not another attempt. The page itself is stored and the
-   * generation row carries the same reasons.
+   * the slot back in the retry budget and pay for yet more generations of a page
+   * that has already had its attempts and needs a human. The page itself is
+   * stored and the generation row carries the same reasons.
    */
   rejected?: { reasons: string[]; status: 'rejected' | 'failed' }
+}
+
+/**
+ * How many times a page the gate refused is written again, with the refusal
+ * reasons as its correction list, before it is parked for a human: 2, i.e.
+ * three attempts in all. Each one is a full generation (1-3 minutes, the bulk of
+ * a page's token cost), which is what JOB_CONFIGS' 15-minute timeouts budget for.
+ */
+const MAX_REGENERATIONS = 2
+
+/**
+ * No new attempt starts once the run is this old.
+ *
+ * Ten minutes leaves a full generation's worth of margin under the 15-minute
+ * scheduler timeout: a regeneration started later would most likely outlive it,
+ * and a timed-out run leaves its slot in `generating` for the reaper instead of
+ * closing it with its verdict.
+ */
+const REGENERATION_DEADLINE_MS = 10 * 60_000
+
+/** The refusal reasons, the first one saying how many attempts were spent. */
+function withAttemptCount(reasons: readonly string[], attempts: number): string[] {
+  const prefix = `Refusée après ${attempts} tentative${attempts > 1 ? 's' : ''} : `
+  if (reasons.length === 0) return [prefix.trimEnd()]
+  return [`${prefix}${reasons[0]}`, ...reasons.slice(1)]
 }
 
 /**
@@ -1537,8 +1578,11 @@ export async function runCampaignNow(
       ? await getGoogleContext(campaign.site_id).catch(() => null)
       : null
 
-    // Generate the page
-    const generated = await generateSeoPage({
+    // What every attempt at this page is generated from. Built ONCE: a
+    // regeneration differs from the first attempt by its `revisionFeedback` and
+    // by nothing else — same reserved slug, same neighbours, same brief, same
+    // Google context — so the page it produces is the same page, corrected.
+    const generationOptions: PageTypeGenerateOptions = {
       pageType,
       city,
       department: campaign.department || 'Aube',
@@ -1569,21 +1613,25 @@ export async function runCampaignNow(
       // dead weight on the scheduled path — the one path that matters.
       siteId: campaign.site_id,
       campaignId: campaign.id,
-    })
+    }
 
-    if (generated.ragStats) {
-      log('INFO', 'campaign', 'RAG context used for generation', {
-        generationId,
-        sources: generated.ragStats.sourcesUsed,
-        keywords: generated.ragStats.keywordsIncluded,
-        links: generated.ragStats.linksSuggested,
-        buildMs: generated.ragStats.buildTimeMs,
-      })
-    } else {
-      log('WARN', 'campaign', 'Generated without RAG context', {
-        generationId,
-        siteId: campaign.site_id,
-      })
+    const logGeneration = (candidate: GeneratedSeoPage, attempt: number): void => {
+      if (candidate.ragStats) {
+        log('INFO', 'campaign', 'RAG context used for generation', {
+          generationId,
+          attempt,
+          sources: candidate.ragStats.sourcesUsed,
+          keywords: candidate.ragStats.keywordsIncluded,
+          links: candidate.ragStats.linksSuggested,
+          buildMs: candidate.ragStats.buildTimeMs,
+        })
+      } else {
+        log('WARN', 'campaign', 'Generated without RAG context', {
+          generationId,
+          attempt,
+          siteId: campaign.site_id,
+        })
+      }
     }
 
     // ─── Post-generation pipeline ─────────────────────────────────────────
@@ -1596,31 +1644,118 @@ export async function runCampaignNow(
     //
     // The `catch` is the last line of defence for the rule that governs this
     // whole file: an unexpected failure must never lose a page that has already
-    // been generated and paid for. If the pipeline itself breaks, the raw page
-    // is stored and published exactly as it was before the pipeline existed.
-    const report = await runPostGenerationPipeline({
-      page: generated,
+    // been generated and paid for. If the pipeline itself breaks on the FIRST
+    // attempt, the raw page is stored and published exactly as it was before
+    // the pipeline existed.
+    const judge = (candidate: GeneratedSeoPage, attempt: number) => runPostGenerationPipeline({
+      page: candidate,
       generationId,
       pageType,
       siteId: campaign.site_id,
       siteUrl: campaign.site?.url || '',
       campaign,
       planBrief: override?.planBrief,
+      city,
+      // Whether a phone number and a street address may appear at all: without
+      // a profile, the generator was told to write none, and the audit holds it
+      // to that (INVENTED_NAP).
+      hasGoogleBusinessProfile: Boolean(googleContext?.gbp),
       // Handed down rather than re-read: it was loaded at the top of this
       // function to reserve the address, and the pipeline needs exactly the
-      // same rows for the internal mesh.
+      // same rows for the internal mesh. The SAME object for every attempt,
+      // which is also what lets the pipeline buy the duplicate neighbours once.
       inventory,
       intent: 'create',
     }).catch(error => {
       log('ERROR', 'campaign', 'Post-generation pipeline crashed — page kept as generated', {
         generationId,
         campaignId: campaign.id,
+        attempt,
       }, error instanceof Error ? error : new Error(String(error)))
       return null
     })
 
+    let generated = await generateSeoPage(generationOptions)
+    logGeneration(generated, 1)
+    let report = await judge(generated, 1)
+    if (report) logPipelineReport('campaign', report, { generationId, campaignId: campaign.id, attempt: 1 })
+    let attempts = 1
+
+    // ─── Regeneration with feedback ───────────────────────────────────────
+    //
+    // The owner's decision of 2026-10-17: a page that does not pass every SEO
+    // and GEO rule is not parked, it is REWRITTEN. The model gets the blocking
+    // reasons of the attempt it just made — each one an instruction (see
+    // lib/pipeline/seo-audit.ts) — and writes the page again, at the same
+    // reserved address, on the same keyword, judged by the same pipeline against
+    // the same inventory. Only a page refused 1 + MAX_REGENERATIONS times goes to
+    // the rejection path below and waits for a human.
+    //
+    // Three ways out of the loop besides success, none of which loses a page:
+    //   - the regeneration itself throws (provider down, unusable JSON): the last
+    //     refused version is kept and rejected, as before this loop existed;
+    //   - its pipeline crashes: the refused predecessor is kept rather than the
+    //     newcomer published UNCHECKED — the fail-open above protects a first
+    //     attempt that has nothing else, not a correction of a refused page;
+    //   - the run is past REGENERATION_DEADLINE_MS: a new attempt would most
+    //     likely outlive the scheduler's timeout and leave the slot to the reaper.
+    while (report && !report.publishable && attempts <= MAX_REGENERATIONS) {
+      if (!isRegenerable(report.reasons)) {
+        log('WARN', 'campaign', 'Page refusée pour une raison que la réécriture ne corrige pas — pas de régénération', {
+          generationId,
+          campaignId: campaign.id,
+          reasons: report.reasons,
+        })
+        break
+      }
+
+      if (Date.now() - startTime > REGENERATION_DEADLINE_MS) {
+        log('WARN', 'campaign', 'Page refusée — plus de temps pour une nouvelle régénération', {
+          generationId,
+          campaignId: campaign.id,
+          attempts,
+          elapsedMs: Date.now() - startTime,
+        })
+        break
+      }
+
+      const revisionFeedback = report.reasons
+      log('WARN', 'campaign', `Page refusée — régénération ${attempts}/${MAX_REGENERATIONS}`, {
+        generationId,
+        campaignId: campaign.id,
+        reasons: revisionFeedback,
+      })
+
+      let candidate: GeneratedSeoPage
+      try {
+        candidate = await generateSeoPage({ ...generationOptions, revisionFeedback })
+      } catch (error) {
+        log('ERROR', 'campaign', `Régénération ${attempts}/${MAX_REGENERATIONS} impossible — la dernière version refusée est conservée`, {
+          generationId,
+          campaignId: campaign.id,
+        }, error instanceof Error ? error : new Error(String(error)))
+        break
+      }
+
+      attempts++
+      logGeneration(candidate, attempts)
+
+      const candidateReport = await judge(candidate, attempts)
+      if (!candidateReport) {
+        log('ERROR', 'campaign', 'Régénération non vérifiable — la dernière version refusée est conservée', {
+          generationId,
+          campaignId: campaign.id,
+          attempts,
+        })
+        break
+      }
+
+      logPipelineReport('campaign', candidateReport, { generationId, campaignId: campaign.id, attempt: attempts })
+      generated = candidate
+      report = candidateReport
+    }
+
     const page = report?.page ?? generated
-    if (report) logPipelineReport('campaign', report, { generationId, campaignId: campaign.id })
 
     // What the generator itself flagged, said out loud. The gate decides what
     // blocks (see BLOCKING_ANOMALY_FIELDS); this line exists so a model that
@@ -1640,6 +1775,11 @@ export async function runCampaignNow(
     // Written whether or not it blocked: an observation that found nothing is
     // still proof that the check ran, and a rejection rate computed on rows that
     // only exist when they blocked would read 100 % for ever.
+    //
+    // The FINAL attempt's verdict, and only that one — it describes the page
+    // that is stored. Filing an earlier attempt's would also leave
+    // `refusal_kind = 'duplicat'` behind (persistDuplicateVerdict sets it and
+    // never clears it) on a row whose corrected page shipped clean.
     if (report?.duplicateVerdict) {
       await persistDuplicateVerdict(generationId, report.duplicateVerdict)
     }
@@ -1671,16 +1811,19 @@ export async function runCampaignNow(
       status: 'generated',
     })
 
-    // Refused: the content is already stored above, so nothing is lost — the row
-    // only changes status. It is moved OUT of `generated` on purpose: that is
-    // the status the deferred publishing job reads, and leaving it there would
-    // publish, fifteen minutes later, exactly what was just refused.
+    // Refused, every attempt spent: the content of the LAST attempt is already
+    // stored above, so nothing is lost — the row only changes status. It is
+    // moved OUT of `generated` on purpose: that is the status the deferred
+    // publishing job reads, and leaving it there would publish, fifteen minutes
+    // later, exactly what was just refused.
     if (report && !report.publishable) {
-      const outcome = await markGenerationRejected(generationId, report.reasons).catch(error => {
+      const reasons = withAttemptCount(report.reasons, attempts)
+
+      const outcome = await markGenerationRejected(generationId, reasons).catch(error => {
         log('ERROR', 'campaign', 'Page refused but the rejection could not be recorded', {
           generationId,
           campaignId: campaign.id,
-          reasons: report.reasons,
+          reasons,
         }, error instanceof Error ? error : new Error(String(error)))
         return null
       })
@@ -1697,14 +1840,14 @@ export async function runCampaignNow(
         job_id: campaign.id,
         generation_id: generationId,
         status: outcome?.status ?? 'rejected',
-        error_message: report.reasons.join(' | ').slice(0, 2000),
+        error_message: reasons.join(' | ').slice(0, 2000),
         duration_ms: Date.now() - startTime,
       })
 
       return {
         generationId,
         city,
-        rejected: { reasons: report.reasons, status: outcome?.status ?? 'rejected' },
+        rejected: { reasons, status: outcome?.status ?? 'rejected' },
       }
     }
 
