@@ -1,10 +1,11 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
-import { ArrowRight, CalendarCheck, CheckCircle2, CircleCheck, Globe2, Loader2, ScanSearch, Target } from 'lucide-react'
+import { ArrowRight, CalendarCheck, CheckCircle2, Globe2, Loader2, ScanSearch, Target } from 'lucide-react'
 import { useRouter } from 'next/navigation'
-import { FieldError, FormField, Notice, PageHeader, StatusBadge } from '@/components/ui'
-import { PAGE_TYPE_LABELS, pageTypeLabel } from '@/lib/types'
+import { FormField, Notice, PageHeader } from '@/components/ui'
+import { PlanBriefList, type AddressVerdict } from '@/components/PlanBriefList'
+import { PAGE_TYPE_LABELS } from '@/lib/types'
 import type { AnalysisRun, Campaign, CyclePlan, PageType, PlanItemBrief, Site, SiteType } from '@/lib/types'
 import type { InventoryResponse } from '@/app/api/sites/[id]/inventory/types'
 // LA normalisation qui a ÉCRIT les chemins de `takenPaths` (voir
@@ -128,6 +129,8 @@ export default function NewStrategyWorkflowPage() {
   const [loading, setLoading] = useState('')
   const [error, setError] = useState('')
   const [inventory, setInventory] = useState<InventoryCheck>({ state: 'loading' })
+  /** Le brief ouvert dans le panneau de l'étape du plan. */
+  const [selectedId, setSelectedId] = useState<string | null>(null)
 
   useEffect(() => {
     fetch('/api/sites').then((res) => res.json()).then((data) => {
@@ -299,7 +302,11 @@ export default function NewStrategyWorkflowPage() {
       if (!res.ok) throw new Error(data.error || 'Generation du plan impossible')
       setCampaign(data.campaign)
       setPlan(data.plan)
-      setItems(data.plan.plan_data || [])
+      const briefs: PlanItemBrief[] = data.plan.plan_data || []
+      setItems(briefs)
+      // Le premier brief s'ouvre de lui-même : un panneau vide à côté d'une
+      // liste pleine demanderait un clic pour montrer ce que l'étape sert à lire.
+      setSelectedId(briefs[0]?.id ?? null)
       setStep(3)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Erreur plan')
@@ -317,6 +324,23 @@ export default function NewStrategyWorkflowPage() {
     })
     const data = await res.json()
     if (!res.ok) throw new Error(data.error || 'Sauvegarde impossible')
+  }
+
+  /**
+   * « Enregistrer » dans le panneau : le même PATCH que la confirmation fait
+   * en premier, sans la confirmation. Un plan corrigé puis quitté avant le
+   * lancement retrouve ainsi ses corrections à la réouverture.
+   */
+  const savePlanOnly = async () => {
+    setError('')
+    setLoading('save')
+    try {
+      await savePlan()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Erreur sauvegarde')
+    } finally {
+      setLoading('')
+    }
   }
 
   const confirmPlan = async () => {
@@ -509,65 +533,18 @@ export default function NewStrategyWorkflowPage() {
             />
           )}
 
-          <div className="scroll-x">
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th>Date</th>
-                  <th>Action</th>
-                  <th>Type</th>
-                  <th>Intention</th>
-                  <th>Titre</th>
-                  <th>Slug</th>
-                  <th>Requête cible</th>
-                  <th>Trame</th>
-                </tr>
-              </thead>
-              <tbody>
-                {items.map((item) => {
-                  const action = item.action
-                  const verdict = slugVerdicts.get(item.id)
-
-                  return (
-                    <tr key={item.id}>
-                      <td style={{ whiteSpace: 'nowrap' }}>{item.scheduled_date}</td>
-                      <td><ActionBadge kind={action?.kind ?? 'create'} /></td>
-                      <td><span className="chip">{pageTypeLabel(item.page_type)}</span></td>
-                      <td>{item.search_intent || '—'}</td>
-                      <td><input value={item.proposed_title} onChange={(event) => updatePlanItem(item.id, { proposed_title: event.target.value })} className="input" style={{ minWidth: 220 }} /></td>
-                      <td style={{ minWidth: 240 }}>
-                        {/* On ne choisit PAS l'adresse d'une page qui existe
-                            déjà : une ligne de mise à jour rend son chemin
-                            cible en lecture seule. */}
-                        {action?.kind === 'refresh' ? (
-                          <>
-                            <div className="mono meta">{action.targetPath}</div>
-                            <div className="meta">Adresse existante — elle n’est pas modifiable ici.</div>
-                          </>
-                        ) : (
-                          <>
-                            <input
-                              value={item.proposed_slug}
-                              onChange={(event) => updatePlanItem(item.id, { proposed_slug: event.target.value })}
-                              className="input mono"
-                              style={{ minWidth: 220 }}
-                              aria-invalid={blocks(verdict) || undefined}
-                              aria-describedby={`slug-hint-${item.id}`}
-                            />
-                            <div id={`slug-hint-${item.id}`}>
-                              <SlugHint verdict={verdict} />
-                            </div>
-                          </>
-                        )}
-                      </td>
-                      <td><input value={item.target_keyword} onChange={(event) => updatePlanItem(item.id, { target_keyword: event.target.value })} className="input" style={{ minWidth: 180 }} /></td>
-                      <td className="meta" style={{ minWidth: 220 }}>{item.outline.slice(0, 3).join(' / ')}</td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
-          </div>
+          {/* Le verdict de chaque adresse vient de `slugVerdicts`, recalculé à
+              la frappe depuis l'inventaire ; la liste ne fait que l'afficher. */}
+          <PlanBriefList
+            items={items}
+            selectedId={selectedId}
+            onSelect={setSelectedId}
+            verdictFor={(item) => addressVerdict(slugVerdicts.get(item.id))}
+            editable
+            onChange={updatePlanItem}
+            onSave={savePlanOnly}
+            saving={loading === 'save'}
+          />
 
           {/* La garde est posée à l'endroit exact où l'humain peut la
               contourner. Laisser passer ici annulerait toute la réservation
@@ -603,59 +580,47 @@ export default function NewStrategyWorkflowPage() {
 }
 
 /**
- * Ce que ce brief fait au site qui existe déjà.
- *
- * `StatusBadge` porte déjà 'create' et 'refresh' dans le vocabulaire partagé —
- * on le lit, on n'écrit pas un second dictionnaire de deux entrées ici. Un plan
- * antérieur à ce lot ne porte aucun verdict : il s'affiche en « Nouvelle page »,
- * ce qu'il était, sans qu'on lui invente une décision rétroactive.
- */
-function ActionBadge({ kind }: { kind: 'create' | 'refresh' | 'skip' }) {
-  if (kind === 'skip') return <span className="badge badge-muted">Écartée</span>
-  return <StatusBadge status={kind} />
-}
-
-/**
- * Trois états de champ, jamais deux — et le vert n'apparaît que sur une
- * vérification qui a réellement eu lieu.
+ * Le verdict d'une adresse, dans les mots que la liste affiche — et le vert
+ * n'apparaît que sur une vérification qui a réellement eu lieu.
  *
  * Le message de collision dit ce que la donnée PROUVE : `takenPaths` mélange les
  * pages en ligne et les adresses réservées par des générations qui n'ont rien
  * publié. Écrire « cette page existe déjà sur le site » serait faux une fois sur
- * deux.
+ * deux. `blocking` reprend `blocks()` : c'est la même garde que celle du bouton
+ * de lancement, marquée sur le champ.
  */
-function SlugHint({ verdict }: { verdict: SlugVerdict | undefined }) {
+function addressVerdict(verdict: SlugVerdict | undefined): AddressVerdict {
   switch (verdict) {
     case 'taken':
-      return (
-        <FieldError>
-          Cette URL est déjà prise sur ce site (page en ligne ou adresse réservée par une génération).
-          Changez-la, ou laissez le moteur mettre cette page à jour plutôt que d’en créer une nouvelle.
-        </FieldError>
-      )
+      return {
+        tone: 'critical',
+        inline: 'adresse déjà prise',
+        blocking: true,
+        detail: 'Cette URL est déjà prise sur ce site (page en ligne ou adresse réservée par une génération). '
+          + 'Changez-la, ou laissez le moteur mettre cette page à jour plutôt que d’en créer une nouvelle.',
+      }
     case 'duplicate-in-plan':
-      return <FieldError>Deux briefs de ce plan visent la même URL.</FieldError>
+      return { tone: 'critical', inline: 'en double dans le plan', blocking: true, detail: 'Deux briefs de ce plan visent la même URL.' }
     case 'empty':
-      return <FieldError>Une adresse est nécessaire : le moteur ne sait pas où écrire cette page.</FieldError>
+      return {
+        tone: 'critical',
+        inline: 'adresse manquante',
+        detail: 'Une adresse est nécessaire : le moteur ne sait pas où écrire cette page.',
+      }
     case 'free':
-      // Un glyphe ET un mot : la couleur n'est jamais le seul porteur du verdict.
-      return (
-        <p className="meta" style={{ margin: 'var(--space-1) 0 0', display: 'flex', alignItems: 'center', gap: 4 }}>
-          <CircleCheck size={11} color="var(--status-good)" aria-hidden="true" /> Adresse libre.
-        </p>
-      )
+      return { tone: 'good', inline: 'adresse libre', detail: 'Adresse libre sur le site.' }
     case 'checking':
-      return <p className="meta" style={{ margin: 'var(--space-1) 0 0' }}>Vérification…</p>
+      return { tone: 'muted', inline: 'vérification…', detail: 'Vérification…' }
     default:
       // Régime aveugle, ou inventaire illisible. Surtout PAS le badge vert : une
       // ignorance affichée comme une garantie est le seul mensonge que cet
       // écran puisse encore dire.
-      return (
-        <p className="meta" style={{ margin: 'var(--space-1) 0 0' }}>
-          Le moteur ne sait pas quelles adresses sont prises sur ce site. Celle-ci sera vérifiée directement
-          sur le site avant l’écriture.
-        </p>
-      )
+      return {
+        tone: 'muted',
+        inline: 'non vérifiée',
+        detail: 'Le moteur ne sait pas quelles adresses sont prises sur ce site. '
+          + 'Celle-ci sera vérifiée directement sur le site avant l’écriture.',
+      }
   }
 }
 
