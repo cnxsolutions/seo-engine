@@ -81,3 +81,28 @@ export async function POST(req: NextRequest, context: { params: Promise<{ id: st
     )
   }
 }
+
+/**
+ * Same effect as `POST { action: 'disconnect' }`, kept because the site page
+ * now drives the connection's life cycle with verbs rather than an action
+ * field. Only the stored tokens go: the Google account itself keeps the grant
+ * until the owner revokes it from their Google settings, and the synced GBP /
+ * GSC data stays in the base (it is history, not a credential).
+ */
+export async function DELETE(_req: NextRequest, context: { params: Promise<{ id: string }> }) {
+  try {
+    const { id } = await context.params
+    const connection = await getGoogleConnection(id)
+    if (!connection) {
+      return NextResponse.json({ error: 'Aucune connexion Google pour ce site' }, { status: 404 })
+    }
+
+    await deleteGoogleConnection(id)
+    return NextResponse.json({ success: true })
+  } catch (error) {
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : 'Erreur Google API' },
+      { status: 500 }
+    )
+  }
+}

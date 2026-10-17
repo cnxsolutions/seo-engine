@@ -176,6 +176,76 @@ export async function updateSite(id: string, values: Partial<Site>) {
   if (error) throw new Error(error.message)
 }
 
+/**
+ * One site, credentials left in the database.
+ *
+ * The edit route needs the current row to decide what a patch means — is the
+ * site WordPress, did the address change, is there a branch to promote — and
+ * nothing in that decision needs a secret. Reading `getSiteWithCredentials()`
+ * there would work, and would put the full row one careless spread away from
+ * the response body.
+ */
+export async function getSiteByIdSafe(id: string) {
+  const supabase = requireSupabase()
+  const { data, error } = await supabase.from('sites').select(SITE_SAFE_COLUMNS).eq('id', id).maybeSingle()
+  if (error) throw new Error(error.message)
+  return (data ?? null) as SafeSite | null
+}
+
+/**
+ * `updateSite()` that hands back the row it wrote — projected, because the
+ * caller is an HTTP route that serialises it. `null` means no row had this id.
+ */
+export async function updateSiteSafe(id: string, values: Partial<Site>) {
+  const supabase = requireSupabase()
+  const { data, error } = await supabase
+    .from('sites')
+    .update(values)
+    .eq('id', id)
+    .select(SITE_SAFE_COLUMNS)
+    .maybeSingle()
+  if (error) throw new Error(error.message)
+  return (data ?? null) as SafeSite | null
+}
+
+/**
+ * Generations the engine is working on RIGHT NOW for a site or a campaign.
+ *
+ * A row in `generating` has a worker writing to it; a row in `publishing` has a
+ * publisher half-way through the client's WordPress or GitHub. Deleting the
+ * parent under either leaves the worker to finish against `site_id = NULL`
+ * (the foreign key sets it, it does not cascade) and, for a publication, a
+ * page on the client's site that no record points to any more. The delete
+ * routes ask this question first and refuse while the answer is not zero.
+ */
+export async function countInFlightGenerations(scope: { site_id: string } | { campaign_id: string }) {
+  const supabase = requireSupabase()
+  const [column, value] = 'site_id' in scope ? ['site_id', scope.site_id] : ['campaign_id', scope.campaign_id]
+  const { count, error } = await supabase
+    .from('generations')
+    .select('id', { count: 'exact', head: true })
+    .eq(column, value)
+    .in('status', ['generating', 'publishing'])
+  if (error) throw new Error(error.message)
+  return count ?? 0
+}
+
+/**
+ * Delete a site. The database does the rest: campaigns, calendar entries,
+ * cycle plans, Google connection, site pages and backlinks cascade;
+ * generations and articles keep their rows with `site_id` set to NULL, so the
+ * history of what was published survives the site it was published to.
+ *
+ * Returns the identity of what was removed, or `null` when nothing matched —
+ * the route turns that into a 404 rather than a success nobody can verify.
+ */
+export async function deleteSite(id: string) {
+  const supabase = requireSupabase()
+  const { data, error } = await supabase.from('sites').delete().eq('id', id).select('id,name').maybeSingle()
+  if (error) throw new Error(error.message)
+  return (data ?? null) as Pick<Site, 'id' | 'name'> | null
+}
+
 export async function listCampaigns() {
   const supabase = requireSupabase()
   const { data, error } = await supabase
@@ -560,6 +630,23 @@ export async function updateCampaign(id: string, values: Partial<Campaign>) {
   const supabase = requireSupabase()
   const { error } = await supabase.from('campaigns').update(values).eq('id', id)
   if (error) throw new Error(error.message)
+}
+
+/**
+ * Delete a campaign. Cycle plans and calendar entries cascade; generations keep
+ * their rows with `campaign_id` set to NULL (same reasoning as `deleteSite()`).
+ * Returns what was removed, or `null` when no row had this id.
+ */
+export async function deleteCampaign(id: string) {
+  const supabase = requireSupabase()
+  const { data, error } = await supabase
+    .from('campaigns')
+    .delete()
+    .eq('id', id)
+    .select('id,business_name')
+    .maybeSingle()
+  if (error) throw new Error(error.message)
+  return (data ?? null) as Pick<Campaign, 'id' | 'business_name'> | null
 }
 
 // ── Dashboard Stats ───────────────────────────────────────────────────

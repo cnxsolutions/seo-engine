@@ -14,7 +14,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import {
-  ArrowRight, CalendarDays, Code2, FileText, Globe, Globe2, Plus, Target, TriangleAlert,
+  ArrowRight, CalendarDays, Code2, FileText, Globe, Globe2, Pencil, Plus, Target, TriangleAlert,
   type LucideIcon,
 } from 'lucide-react'
 import Link from 'next/link'
@@ -24,6 +24,7 @@ import { listSites } from '@/lib/db'
 import { createServiceClient } from '@/lib/supabase'
 import { freshnessOf, type BlindReason, type InventoryFreshness } from '@/src/core/domain/existing/inventory'
 import { AnalyzeRepoButton } from './AnalyzeRepoButton'
+import { DeleteSiteButton } from './SiteActions'
 
 export const dynamic = 'force-dynamic'
 
@@ -208,11 +209,12 @@ function nextStep(site: SiteRow, facts: SiteFacts | null): NextStep | null {
   // (migration 017). Reading the second as the first sent the operator to the
   // creation form for a site that was complete — and created it twice.
   //
-  // No link on the first: a site cannot be edited after creation, and the
-  // creation form is exactly where the duplicate came from.
+  // The link goes to the EDIT page, never to the creation form, which is
+  // exactly where the duplicate came from.
   if (site.type === 'wordpress' && !site.has_credentials) {
     return {
-      label: 'Identifiants WordPress absents',
+      label: 'Compléter les identifiants WordPress',
+      href: `/sites/${site.id}/edit`,
       why: 'Sans utilisateur ni mot de passe d’application, ni la lecture du schéma ni la publication ne sont possibles.',
     }
   }
@@ -393,6 +395,16 @@ function SiteCard({ site, facts }: { site: SiteRow; facts: SiteFacts | null }) {
         {site.type === 'nextjs' && site.github_repo && (
           <AnalyzeRepoButton siteId={site.id} hasProfile={described} />
         )}
+
+        {/* Lifecycle, not workflow: the footer below says what to do NEXT for
+            this site; these two say what can be done TO it. Kept apart so a
+            red « Supprimer » never sits where the eye looks for the next step. */}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 'var(--space-2)', flexWrap: 'wrap' }}>
+          <Link href={`/sites/${site.id}/edit`} className="btn-ghost btn-sm" title="Modifier ce site">
+            <Pencil size={13} /> Modifier
+          </Link>
+          <DeleteSiteButton siteId={site.id} siteName={site.name} />
+        </div>
       </div>
 
       <div className="panel__footer">
@@ -412,7 +424,7 @@ function SiteCard({ site, facts }: { site: SiteRow; facts: SiteFacts | null }) {
           <span>
             {site.is_active
               ? 'Compteurs indisponibles : la suite du parcours ne peut pas être déduite pour ce site.'
-              : 'Site désactivé : réactivez-le en base pour le remettre dans le parcours.'}
+              : 'Site désactivé : réactivez-le depuis « Modifier » pour le remettre dans le parcours.'}
           </span>
         )}
       </div>
