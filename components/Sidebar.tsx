@@ -1,120 +1,103 @@
 'use client'
 
 import Link from 'next/link'
-import { usePathname } from 'next/navigation'
+import { usePathname, useSearchParams } from 'next/navigation'
 import { useEffect, useState } from 'react'
 import {
-  ArrowRight,
+  BarChart3,
   Calendar,
-  Check,
   ChevronRight,
+  Globe,
   LayoutDashboard,
-  Lock,
+  Send,
+  Wand2,
   Zap,
   type LucideIcon,
 } from 'lucide-react'
-import type { WorkflowState, WorkflowStep, WorkflowStepId } from '@/app/api/workflow/state'
 
 // ─── Navigation model ────────────────────────────────────────────────────────
 //
-// One entry, one destination. "Campagnes" used to sit under GÉRER and lead to
-// /strategy — the very page "3. Stratégie" already opened — so the operator had
-// to guess which of the two was the real one. There is now a single entry.
+// The rail used to carry a GLOBAL five-step path, computed across every site by
+// /api/workflow. « Connecter Google » there was true of one site and false of
+// the next, and the same actions sat on three screens. The path now lives on
+// each site's own page (/sites/[id]); the rail only says WHERE to go: the two
+// overview screens, the sites themselves, and the cross-site tools.
 //
-// The five steps carry no icon on purpose: a numbered rail reads as a path,
-// five more glyphs read as five more links. The tools below keep their icons,
-// which is what tells the two groups apart at a glance.
+// This component never reads the database: the layout (a server component)
+// hands it the site list and the environment, and it re-reads the public
+// `/api/sites` route on navigation because App Router keeps a layout mounted
+// across client navigations — the list computed when the tab opened would
+// still miss the site the operator just created.
 
-const STEPS: Array<{ id: WorkflowStepId; href: string; label: string }> = [
-  { id: 'sites', href: '/sites', label: 'Sites' },
-  { id: 'schema', href: '/schema', label: 'Schéma CMS' },
-  { id: 'strategy', href: '/strategy', label: 'Stratégie' },
-  { id: 'generate', href: '/generate', label: 'Générer' },
-  { id: 'publish', href: '/publish', label: 'Publier' },
-]
+export interface SidebarSite {
+  id: string
+  name: string
+}
 
-const OVERVIEW = [{ href: '/dashboard', icon: LayoutDashboard, label: 'Tableau de bord' }]
-
-/**
- * "Analytics" is deliberately absent.
- *
- * `/analytics` is now a 307 to `/dashboard?tab=performance`: the two pages were
- * merged into one page with two tabs. Keeping the entry would have put two menu
- * rows on the SAME page — the very duplication "Campagnes" / "3. Stratégie" was
- * removed for — and the active state would never light up, since the pathname
- * ends up being `/dashboard`. The route file survives for old bookmarks only.
- *
- * `/settings` is absent for a harder reason: the page no longer exists. Every
- * field it pretended to hold lives per-campaign or in an environment variable,
- * so it was deleted; leaving the entry would point the menu at a 404.
- */
-const TRACKING = [
-  { href: '/calendar', icon: Calendar, label: 'Calendrier' },
-]
-
-// ─── Warnings ────────────────────────────────────────────────────────────────
-
-interface StepWarning {
+export interface SidebarEnvironment {
+  /** « Production » or « Développement » — decided server-side from NODE_ENV. */
   label: string
-  title: string
+  /** The host the request came in on, read from the request headers. */
+  host: string | null
 }
 
-/**
- * A warning is DATA, unlike the "à faire" pill below, which this component
- * derives from `isCurrent`.
- *
- * The sidebar reads `/api/workflow` and nothing else — it has no way to know
- * whether a site's inventory is fresh, and it must never go and find out: the
- * rules live in app/api/workflow/state.ts, pure and testable without Supabase.
- *
- * Read off the payload rather than off `WorkflowStep`, and validated at runtime,
- * because the field is served by a route this file does not own. Until that
- * route sends one, no badge appears; the day it does, nothing here changes.
- *
- * What it must NEVER do is turn into `state: 'blocked'`. A blocked rung renders
- * as a non-clickable `<div aria-disabled="true">`, so a crawl that never ran
- * would stop the product from producing at all — and an unknown is something to
- * signal, not something to forbid.
- */
-function warningOf(step: WorkflowStep | undefined): StepWarning | null {
-  if (!step || !('warning' in step)) return null
-
-  const raw = step.warning
-  if (typeof raw !== 'object' || raw === null) return null
-
-  const { label, title } = raw as { label?: unknown; title?: unknown }
-  if (typeof label !== 'string' || !label.trim()) return null
-
-  return { label, title: typeof title === 'string' ? title : label }
+interface ToolLinkModel {
+  href: string
+  icon: LucideIcon
+  label: string
 }
 
-// ─── Workflow state ──────────────────────────────────────────────────────────
+const OVERVIEW: ToolLinkModel[] = [
+  { href: '/dashboard', icon: LayoutDashboard, label: 'Tableau de bord' },
+  { href: '/sites', icon: Globe, label: 'Sites' },
+]
 
 /**
- * Re-read on every navigation, because the layout is not.
+ * The cross-site screens. Each one is also reachable from the site page, from
+ * the section it belongs to, with the site pre-selected; here they are the
+ * un-scoped entrances, kept so nothing becomes unreachable.
  *
- * App Router keeps a shared layout mounted across client navigations, so a
- * state computed server-side up there would still describe the situation as it
- * was when the tab was opened — and the moment the founder reported as broken
- * is exactly the one right after saving a site.
+ * « Analytics » points straight at the performance tab of the dashboard, not at
+ * `/analytics`: that route is a 307 to the very same tab, and a link through it
+ * would never light up, the pathname ending up as `/dashboard`.
  *
- * `focus` covers the other half: analysing a repository finishes in the
- * background while the operator looks elsewhere.
+ * `/schema` and `/strategy` are deliberately absent: both are reached from the
+ * site page (Connexion and Stratégie sections) with the right site in hand,
+ * and listing them here would restore the duplicated entrances this rail just
+ * lost.
  */
-function useWorkflowState(pathname: string) {
-  const [state, setState] = useState<WorkflowState | null>(null)
+const TOOLS: ToolLinkModel[] = [
+  { href: '/calendar', icon: Calendar, label: 'Calendrier' },
+  { href: '/generate', icon: Wand2, label: 'Générer' },
+  { href: '/publish', icon: Send, label: 'Publier' },
+  { href: '/dashboard?tab=performance', icon: BarChart3, label: 'Analytics' },
+]
+
+// ─── Site list ───────────────────────────────────────────────────────────────
+
+/**
+ * Starts from what the server rendered, then re-reads on every navigation and
+ * on window focus — the moment the list goes stale is right after saving a
+ * site, and a failed read keeps the last good list rather than blanking it.
+ */
+function useSiteList(initial: SidebarSite[], pathname: string): SidebarSite[] {
+  const [sites, setSites] = useState(initial)
 
   useEffect(() => {
     const controller = new AbortController()
 
     const load = () => {
-      fetch('/api/workflow', { cache: 'no-store', signal: controller.signal })
+      fetch('/api/sites', { cache: 'no-store', signal: controller.signal })
         .then((response) => (response.ok ? response.json() : null))
         .then((data) => {
-          if (data && Array.isArray(data.steps)) setState(data as WorkflowState)
+          if (!data || !Array.isArray(data.sites)) return
+          setSites(
+            (data.sites as Array<{ id: string; name: string; is_active: boolean }>)
+              .filter((site) => site.is_active)
+              .map((site) => ({ id: site.id, name: site.name }))
+              .sort((a, b) => a.name.localeCompare(b.name, 'fr'))
+          )
         })
-        // A failed read must never lock the navigation: `state` stays as it was
-        // (null on a first load), and every step renders as a plain link.
         .catch(() => undefined)
     }
 
@@ -128,19 +111,30 @@ function useWorkflowState(pathname: string) {
     // just has to run again once the operator has moved.
   }, [pathname])
 
-  return state
+  return sites
 }
 
-export function Sidebar() {
+// ─── Component ───────────────────────────────────────────────────────────────
+
+export function Sidebar({ sites: initialSites, environment }: { sites: SidebarSite[]; environment: SidebarEnvironment }) {
   const pathname = usePathname()
-  const workflow = useWorkflowState(pathname)
+  const searchParams = useSearchParams()
+  const sites = useSiteList(initialSites, pathname)
 
-  const isActive = (href: string) => pathname === href || pathname.startsWith(`${href}/`)
+  const performanceTab = pathname === '/dashboard' && searchParams.get('tab') === 'performance'
 
-  const stepOf = (id: WorkflowStepId): WorkflowStep | undefined =>
-    workflow?.steps.find((step) => step.id === id)
+  /**
+   * One row lights up at a time. « Sites » owns the list and the creation form;
+   * a site's own pages (hub, edit, Google, inventory) light up its own entry.
+   */
+  const isActive = (href: string): boolean => {
+    if (href === '/dashboard') return pathname === '/dashboard' && !performanceTab
+    if (href === '/dashboard?tab=performance') return performanceTab
+    if (href === '/sites') return pathname === '/sites' || pathname === '/sites/new'
+    return pathname === href || pathname.startsWith(`${href}/`)
+  }
 
-  const allDone = workflow ? workflow.steps.every((step) => step.state === 'done') : false
+  const activeSiteId = sites.find((site) => pathname === `/sites/${site.id}` || pathname.startsWith(`/sites/${site.id}/`))?.id
 
   return (
     <aside className="sidebar">
@@ -159,52 +153,54 @@ export function Sidebar() {
         </div>
       </div>
 
-      <nav style={{ flex: 1, padding: '0.5rem 0', overflowY: 'auto' }}>
+      <nav aria-label="Navigation principale" style={{ flex: 1, padding: '0.5rem 0', overflowY: 'auto' }}>
         <div style={{ height: 8 }} />
         {OVERVIEW.map((item) => (
           <ToolLink key={item.href} {...item} active={isActive(item.href)} />
         ))}
 
-        <div className="nav-section-label">PARCOURS</div>
-        <div style={{ position: 'relative' }}>
-          {STEPS.map((step, index) => (
-            <StepRow
-              key={step.id}
-              href={step.href}
-              label={step.label}
-              number={index + 1}
-              step={stepOf(step.id)}
-              isCurrent={workflow?.currentStepId === step.id}
-              isLast={index === STEPS.length - 1}
-              active={isActive(step.href)}
-            />
-          ))}
-        </div>
+        <div className="nav-section-label">Vos sites</div>
+        {sites.length === 0 ? (
+          <Link href="/sites/new" className="nav-item nav-item--site">
+            <span className="nav-item__dot" aria-hidden="true" />
+            <span style={{ flex: 1 }} className="meta">Aucun site actif — en ajouter un</span>
+          </Link>
+        ) : (
+          <ul className="nav-sites">
+            {sites.map((site) => {
+              const active = site.id === activeSiteId
+              return (
+                <li key={site.id}>
+                  <Link
+                    href={`/sites/${site.id}`}
+                    className={`nav-item nav-item--site ${active ? 'active' : ''}`}
+                    aria-current={pathname === `/sites/${site.id}` ? 'page' : undefined}
+                    title={site.name}
+                  >
+                    <span className="nav-item__dot" aria-hidden="true" />
+                    <span className="truncate" style={{ flex: 1, minWidth: 0 }}>{site.name}</span>
+                    {active && <ChevronRight size={14} style={{ opacity: 0.5, flexShrink: 0 }} />}
+                  </Link>
+                </li>
+              )
+            })}
+          </ul>
+        )}
 
-        <div className="nav-section-label">SUIVI</div>
-        {TRACKING.map((item) => (
+        <div className="nav-section-label">Outils</div>
+        {TOOLS.map((item) => (
           <ToolLink key={item.href} {...item} active={isActive(item.href)} />
         ))}
       </nav>
 
-      <div style={{ padding: '0.75rem', borderTop: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-        {workflow?.nextAction && <NextActionCard action={workflow.nextAction} />}
-        {allDone && <AllDoneCard />}
-
-        <div className="team-badge">
-          <div style={{
-            width: 32, height: 32, borderRadius: 'var(--radius-md)',
-            background: 'var(--surface-inset)',
-            border: '1px solid var(--line)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            fontSize: 'var(--fs-xs)', fontWeight: 700, color: 'var(--ink-secondary)',
-          }}>
-            SE
-          </div>
-          <div style={{ flex: 1 }}>
-            <div style={{ fontSize: 'var(--fs-sm)', fontWeight: 600, color: 'var(--ink-primary)' }}>Admin</div>
-            <div className="meta">Mode local</div>
-          </div>
+      {/* Which deployment this tab is talking to. It replaces a hard-coded
+          « Admin / Mode local » that read the same in production, where
+          publishing is for real. */}
+      <div className="sidebar-env">
+        <span className={`sidebar-env__dot ${environment.label === 'Production' ? 'sidebar-env__dot--prod' : ''}`} aria-hidden="true" />
+        <div style={{ minWidth: 0 }}>
+          <div className="sidebar-env__label">{environment.label}</div>
+          {environment.host && <div className="meta truncate" title={environment.host}>{environment.host}</div>}
         </div>
       </div>
     </aside>
@@ -215,243 +211,12 @@ export function Sidebar() {
 
 function ToolLink({
   href, icon: Icon, label, active,
-}: {
-  href: string
-  icon: LucideIcon
-  label: string
-  active: boolean
-}) {
+}: ToolLinkModel & { active: boolean }) {
   return (
-    <Link href={href} className={`nav-item ${active ? 'active' : ''}`}>
+    <Link href={href} className={`nav-item ${active ? 'active' : ''}`} aria-current={active ? 'page' : undefined}>
       <Icon size={17} strokeWidth={active ? 2.2 : 1.8} />
       <span style={{ flex: 1 }}>{label}</span>
       {active && <ChevronRight size={14} style={{ opacity: 0.5 }} />}
-    </Link>
-  )
-}
-
-const ROW_LAYOUT = {
-  display: 'flex',
-  alignItems: 'flex-start',
-  gap: '0.75rem',
-  padding: '0.625rem 1.25rem',
-  margin: '0.1rem 0.75rem',
-  borderRadius: 8,
-  fontSize: '0.85rem',
-  fontWeight: 500,
-  position: 'relative',
-} as const
-
-/**
- * One rung of the path.
- *
- * A blocked step is rendered as text rather than a link, and always with the
- * sentence that says what would unblock it. `nav-item` is deliberately not
- * reused there: its hover state would promise a click that never happens.
- */
-function StepRow({
-  href, label, number, step, isCurrent, isLast, active,
-}: {
-  href: string
-  label: string
-  number: number
-  /** Undefined while the state is loading, or after a failed read. */
-  step?: WorkflowStep
-  isCurrent: boolean
-  isLast: boolean
-  active: boolean
-}) {
-  const state = step?.state
-  const done = state === 'done'
-  const blocked = state === 'blocked'
-  const note = blocked ? step?.reason : isCurrent ? step?.detail : undefined
-  const warning = warningOf(step)
-
-  const body = (
-    <>
-      <StepBadge number={number} done={done} blocked={blocked} current={isCurrent} />
-      <span style={{ flex: 1, minWidth: 0 }}>
-        <span style={{ display: 'block', lineHeight: 1.45 }}>{label}</span>
-        {note && (
-          <span style={{
-            display: 'block',
-            marginTop: 2,
-            fontSize: 'var(--fs-xs)',
-            fontWeight: 500,
-            lineHeight: 'var(--lh-snug)',
-            color: 'var(--ink-muted)',
-          }}>
-            {note}
-          </span>
-        )}
-      </span>
-      {active && !blocked && <ChevronRight size={14} style={{ opacity: 0.5, marginTop: 3 }} />}
-      {/* Same slot as the "à faire" pill, and the two can show together: one
-          says where the operator stands, the other what the engine cannot see. */}
-      {warning && (
-        <span
-          title={warning.title}
-          style={{
-            marginTop: 2,
-            padding: '0.1rem 0.4rem',
-            borderRadius: 'var(--radius-pill)',
-            background: 'var(--status-warning-wash)',
-            color: 'var(--status-warning-text)',
-            fontSize: 'var(--fs-2xs)',
-            fontWeight: 700,
-            whiteSpace: 'nowrap',
-          }}
-        >
-          {warning.label}
-        </span>
-      )}
-      {!active && isCurrent && (
-        <span style={{
-          marginTop: 2,
-          padding: '0.1rem 0.4rem',
-          borderRadius: 'var(--radius-pill)',
-          background: 'var(--accent-wash)',
-          color: 'var(--accent-text)',
-          fontSize: 'var(--fs-2xs)',
-          fontWeight: 700,
-          whiteSpace: 'nowrap',
-        }}>
-          à faire
-        </span>
-      )}
-    </>
-  )
-
-  return (
-    <div style={{ position: 'relative' }}>
-      {!isLast && (
-        <span
-          aria-hidden
-          style={{
-            position: 'absolute',
-            left: 41,
-            top: 32,
-            bottom: -12,
-            width: 2,
-            borderRadius: 1,
-            background: done ? 'var(--status-good)' : 'var(--line)',
-            opacity: done ? 0.45 : 1,
-          }}
-        />
-      )}
-
-      {blocked ? (
-        <div
-          aria-disabled="true"
-          title={step?.reason}
-          style={{ ...ROW_LAYOUT, color: 'var(--ink-muted)', cursor: 'not-allowed' }}
-        >
-          {body}
-        </div>
-      ) : (
-        <Link
-          href={href}
-          className={`nav-item ${active ? 'active' : ''}`}
-          style={{ alignItems: 'flex-start', position: 'relative' }}
-        >
-          {body}
-        </Link>
-      )}
-    </div>
-  )
-}
-
-function StepBadge({
-  number, done, blocked, current,
-}: {
-  number: number
-  done: boolean
-  blocked: boolean
-  current: boolean
-}) {
-  const palette = done
-    ? { background: 'var(--status-good-wash)', color: 'var(--status-good-text)', border: '1px solid var(--status-good-wash)' }
-    : blocked
-      ? { background: 'var(--surface-inset)', color: 'var(--ink-muted)', border: '1px solid var(--line)' }
-      : current
-        ? { background: 'var(--accent)', color: 'var(--accent-on)', border: '1px solid var(--accent)' }
-        : { background: 'var(--surface-rail)', color: 'var(--ink-muted)', border: '1px solid var(--line)' }
-
-  return (
-    <span
-      style={{
-        ...palette,
-        position: 'relative',
-        flexShrink: 0,
-        width: 20,
-        height: 20,
-        borderRadius: 9999,
-        display: 'inline-flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        fontSize: '0.66rem',
-        fontWeight: 700,
-        lineHeight: 1,
-      }}
-    >
-      {done ? <Check size={12} strokeWidth={3} /> : blocked ? <Lock size={10} strokeWidth={2.4} /> : number}
-    </span>
-  )
-}
-
-// ─── Call to action ──────────────────────────────────────────────────────────
-
-function NextActionCard({ action }: { action: NonNullable<WorkflowState['nextAction']> }) {
-  return (
-    <Link
-      href={action.href}
-      style={{
-        display: 'block',
-        padding: 'var(--space-3)',
-        borderRadius: 'var(--radius-lg)',
-        background: 'var(--accent-wash)',
-        border: '1px solid var(--accent-ring)',
-        textDecoration: 'none',
-      }}
-    >
-      <div className="eyebrow" style={{ color: 'var(--accent-text)', marginBottom: 4 }}>
-        PROCHAINE ÉTAPE
-      </div>
-      <div style={{
-        display: 'flex', alignItems: 'center', gap: 6,
-        fontSize: 'var(--fs-sm)', fontWeight: 700, color: 'var(--ink-primary)', lineHeight: 'var(--lh-snug)',
-      }}>
-        <span style={{ flex: 1 }}>{action.label}</span>
-        <ArrowRight size={13} color="var(--accent-text)" style={{ flexShrink: 0 }} />
-      </div>
-      <div style={{ marginTop: 4, fontSize: 'var(--fs-xs)', color: 'var(--ink-secondary)', lineHeight: 'var(--lh-snug)' }}>
-        {action.reason}
-      </div>
-    </Link>
-  )
-}
-
-function AllDoneCard() {
-  return (
-    <Link
-      // Straight to the tab, not through the /analytics redirect: one hop less,
-      // and the destination stays true if the shim is ever deleted.
-      href="/dashboard?tab=performance"
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: 'var(--space-2)',
-        padding: 'var(--space-2) var(--space-3)',
-        borderRadius: 'var(--radius-lg)',
-        background: 'var(--status-good-wash)',
-        border: '1px solid var(--status-good-wash)',
-        textDecoration: 'none',
-      }}
-    >
-      <Check size={14} color="var(--status-good-text)" strokeWidth={3} style={{ flexShrink: 0 }} />
-      <span style={{ fontSize: 'var(--fs-xs)', color: 'var(--ink-secondary)', lineHeight: 'var(--lh-snug)' }}>
-        Parcours complet — suivez les résultats
-      </span>
     </Link>
   )
 }

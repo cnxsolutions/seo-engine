@@ -133,10 +133,16 @@ export default function NewStrategyWorkflowPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null)
 
   useEffect(() => {
+    // `?site=` pre-selects the site the operator came from (the site page's
+    // « Créer une stratégie »). Checked against the loaded list: an unknown id
+    // leaves the selector empty rather than pointing the campaign at nothing.
+    const requested = new URLSearchParams(window.location.search).get('site')
+
     fetch('/api/sites').then((res) => res.json()).then((data) => {
-      const loadedSites = data.sites ?? []
+      const loadedSites: Site[] = data.sites ?? []
       setSites(loadedSites)
       setCreateSiteMode(loadedSites.length === 0)
+      if (requested && loadedSites.some((site) => site.id === requested)) setSelectedSiteId(requested)
     }).catch(() => null)
   }, [])
 

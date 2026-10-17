@@ -233,15 +233,59 @@ code, pre, kbd, samp, .mono {
   max-width: var(--content-max);
 }
 
-.team-badge {
+/* The per-site entries of the rail. A dot instead of an icon: five more
+   glyphs would read as five more tools, and the dot is what separates the
+   list of sites from the list of screens at a glance. */
+.nav-sites {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.nav-item--site {
+  font-weight: 500;
+}
+
+.nav-item__dot {
+  flex-shrink: 0;
+  width: 7px;
+  height: 7px;
+  margin: 0 5px;
+  border-radius: 50%;
+  background: var(--ink-faint);
+}
+
+.nav-item.active .nav-item__dot {
+  background: var(--accent);
+}
+
+/* The deployment this tab talks to, pinned at the foot of the rail. */
+.sidebar-env {
   display: flex;
   align-items: center;
   gap: var(--space-3);
-  padding: var(--space-2) var(--space-3);
-  background: var(--surface-card);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-md);
-  margin: 0 var(--space-3);
+  padding: var(--space-3) var(--space-5);
+  border-top: 1px solid var(--line);
+  font-size: var(--fs-xs);
+}
+
+.sidebar-env__label {
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--ink-primary);
+}
+
+.sidebar-env__dot {
+  flex-shrink: 0;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--status-warning);
+}
+
+/* Production is the one place a click publishes for real: green, settled. */
+.sidebar-env__dot--prod {
+  background: var(--status-good);
 }
 
 /* ═══ Typography ═════════════════════════════════════════════════════════ */
@@ -1365,4 +1409,370 @@ textarea.input {
   text-transform: uppercase;
   letter-spacing: var(--ls-eyebrow);
   color: var(--ink-faint);
+}
+
+/* ═══ Site hub — /sites/[id] ═════════════════════════════════════════════
+   One page per site, five sections in a fixed order. Everything stacks on a
+   phone: the step bar wraps, the fact grid drops to one column. */
+
+.hub {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+
+.hub-warning {
+  display: flex;
+  gap: var(--space-2);
+  align-items: flex-start;
+  margin: 0;
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-md);
+  background: var(--status-warning-wash);
+  color: var(--status-warning-text);
+  font-size: var(--fs-sm);
+  line-height: var(--lh-snug);
+}
+
+/* ── Step bar ── */
+
+.hub-steps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.hub-step {
+  flex: 1 1 180px;
+  min-width: 0;
+}
+
+.hub-step__link {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  height: 100%;
+  padding: var(--space-3) var(--space-4);
+  background: var(--surface-card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  color: inherit;
+  text-decoration: none;
+  transition: border-color var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease);
+}
+
+.hub-step__link:hover {
+  border-color: var(--line-strong);
+  background: var(--surface-hover);
+}
+
+/* The step the operator is on: a 2px accent border, the same signal its
+   section repeats below, so the eye can jump from one to the other. */
+.hub-step--current .hub-step__link {
+  border: 2px solid var(--accent);
+  padding: calc(var(--space-3) - 1px) calc(var(--space-4) - 1px);
+}
+
+.hub-step__num {
+  flex: 0 0 24px;
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--surface-inset);
+  color: var(--ink-secondary);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  line-height: 1;
+}
+
+/* The TEXT steps of the status ramps as fills: they are the ones measured
+   against the page ink in both themes, so inverse ink stays legible on them
+   where the raw hues (#0ca30c, #fab219) would not carry white. */
+.hub-step--done .hub-step__num { background: var(--status-good-text); color: var(--ink-inverse); }
+.hub-step--current .hub-step__num { background: var(--accent); color: var(--accent-on); }
+/* Attention wears the warning hue and the COUNT of things waiting, never a
+   red: pages awaiting a decision are work, not a failure. */
+.hub-step--attention .hub-step__num { background: var(--status-warning-text); color: var(--ink-inverse); }
+
+.hub-step__text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.hub-step__label {
+  font-size: var(--fs-md);
+  font-weight: 500;
+  color: var(--ink-primary);
+}
+
+.hub-step__detail {
+  font-size: var(--fs-xs);
+  color: var(--ink-muted);
+  line-height: var(--lh-snug);
+}
+
+/* ── Sections ── */
+
+.hub-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-5) var(--space-5);
+  background: var(--surface-card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-xs);
+  /* An anchor from the step bar lands with the heading visible, not glued
+     to the top edge. */
+  scroll-margin-top: var(--space-5);
+}
+
+.hub-section--current {
+  border: 2px solid var(--accent);
+  padding: calc(var(--space-5) - 1px);
+}
+
+.hub-section__head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
+.hub-section__title {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+  font-size: var(--fs-lg);
+  font-weight: 600;
+  color: var(--ink-primary);
+}
+
+.hub-section__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+}
+
+/* ── Facts ── */
+
+.hub-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-3);
+}
+
+.hub-fact {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  padding: var(--space-3) var(--space-4);
+  background: var(--surface-inset);
+  border-radius: var(--radius-md);
+}
+
+.hub-fact__body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1 1 200px;
+  min-width: 0;
+}
+
+.hub-fact__label {
+  font-size: var(--fs-md);
+  font-weight: 500;
+  color: var(--ink-primary);
+}
+
+.hub-fact__text {
+  font-size: var(--fs-sm);
+  line-height: var(--lh-snug);
+  color: var(--ink-secondary);
+  overflow-wrap: anywhere;
+}
+
+.hub-fact__text--good { color: var(--status-good-text); }
+.hub-fact__text--warn { color: var(--status-warning-text); }
+
+.hub-fact__action {
+  flex-shrink: 0;
+}
+
+.hub-fact__links {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
+.hub-stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.hub-empty {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+}
+
+.hub-empty p {
+  flex: 1 1 320px;
+  margin: 0;
+  font-size: var(--fs-md);
+  line-height: var(--lh-normal);
+  color: var(--ink-secondary);
+}
+
+/* ── Campaign ── */
+
+.hub-campaign {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.hub-campaign + .hub-campaign {
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--line);
+}
+
+.hub-campaign__head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
+.hub-campaign__name {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  font-size: var(--fs-md);
+  font-weight: 600;
+  color: var(--ink-primary);
+}
+
+.hub-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3) var(--space-6);
+  margin: 0;
+  font-size: var(--fs-md);
+  line-height: var(--lh-normal);
+}
+
+.hub-facts > div {
+  flex: 1 1 160px;
+  min-width: 0;
+}
+
+.hub-facts dt {
+  color: var(--ink-muted);
+  font-size: var(--fs-sm);
+}
+
+.hub-facts dd {
+  margin: 0;
+  color: var(--ink-primary);
+  overflow-wrap: anywhere;
+}
+
+/* ── Calendar rows ── */
+
+.hub-slots {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.hub-slot {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  padding: var(--space-2) 0;
+  border-bottom: 1px solid var(--line);
+  font-size: var(--fs-md);
+}
+
+.hub-slot:last-child {
+  border-bottom: 0;
+}
+
+.hub-slot__date {
+  flex: 0 0 5.5rem;
+  font-weight: 500;
+  color: var(--ink-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.hub-slot__title {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--ink-primary);
+  overflow-wrap: anywhere;
+}
+
+/* ── Counters ── */
+
+.hub-counters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4) var(--space-6);
+  align-items: center;
+}
+
+.hub-counter {
+  flex: 1 1 140px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.hub-counter__value {
+  font-size: var(--fs-2xl);
+  font-weight: 600;
+  line-height: 1.1;
+  color: var(--ink-primary);
+}
+
+.hub-counter__value--good { color: var(--status-good-text); }
+.hub-counter__value--attention { color: var(--status-warning-text); }
+
+.hub-counter__label {
+  font-size: var(--fs-sm);
+  color: var(--ink-muted);
+}
+
+.hub-counters__note {
+  flex: 1 1 220px;
+  margin: 0;
+  font-size: var(--fs-sm);
+  line-height: var(--lh-normal);
+  color: var(--ink-muted);
+}
+
+@media (max-width: 720px) {
+  .hub-grid { grid-template-columns: minmax(0, 1fr); }
+  .hub-slot { flex-wrap: wrap; gap: var(--space-2) var(--space-3); }
+  .hub-slot__date { flex-basis: 4rem; }
+  .hub-slot__title { flex-basis: 100%; order: 3; }
 }
