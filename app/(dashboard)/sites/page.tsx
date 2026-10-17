@@ -190,9 +190,9 @@ interface NextStep {
 /**
  * The one thing to do next for THIS site.
  *
- * Same ladder as the sidebar's workflow (app/api/workflow/state.ts) but scoped
- * to a single site, because "connect Google" is meaningless as an aggregate: it
- * is true of one site and false of the next.
+ * The card's one-line version of the site page's step bar (sites/[id]/steps.ts):
+ * same ladder, scoped to a single site, because "connect Google" is meaningless
+ * as an aggregate — it is true of one site and false of the next.
  */
 function nextStep(site: SiteRow, facts: SiteFacts | null): NextStep | null {
   if (!site.is_active) return null
@@ -252,15 +252,18 @@ function nextStep(site: SiteRow, facts: SiteFacts | null): NextStep | null {
   if ((facts.crawledCount ?? 0) === 0) {
     return {
       label: 'Analyser le site',
-      href: '/strategy/new',
+      href: `/strategy/new?site=${site.id}`,
       why: 'Le moteur ne connaît aucune page de ce site : il générera sans savoir ce qui est déjà en ligne, et peut doubler une page qui vous positionne.',
     }
   }
 
+  // From here on the destination is the site's own page, at the section the
+  // step belongs to: it shows the campaign, the cycle and the next slots of
+  // THIS site, where /strategy and /calendar open on every site at once.
   if (facts.campaigns === 0) {
     return {
       label: 'Créer une stratégie',
-      href: '/strategy/new',
+      href: `/strategy/new?site=${site.id}`,
       why: 'Une campagne fixe les mots-clés, les communes et le rythme de publication.',
     }
   }
@@ -268,14 +271,14 @@ function nextStep(site: SiteRow, facts: SiteFacts | null): NextStep | null {
   if (facts.plannedSlots === 0) {
     return {
       label: 'Planifier un cycle',
-      href: '/strategy',
+      href: `/sites/${site.id}#strategie`,
       why: 'Aucun créneau n’attend : ce site ne produira rien tant qu’un cycle n’est pas lancé.',
     }
   }
 
   return {
     label: 'Voir le calendrier',
-    href: '/calendar',
+    href: `/sites/${site.id}#calendrier`,
     why: `${facts.plannedSlots} créneau${facts.plannedSlots > 1 ? 'x' : ''} en attente de génération.`,
   }
 }
@@ -346,7 +349,11 @@ function SiteCard({ site, facts }: { site: SiteRow; facts: SiteFacts | null }) {
         <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)', minWidth: 0 }}>
           <IconBox icon={connector.icon} color={connector.color} boxSize={32} size={16} />
           <div style={{ minWidth: 0 }}>
-            <div className="card-title truncate">{site.name}</div>
+            {/* The title is the way into the site's own page — the five-step
+                path, scoped to this site, lives there and nowhere else. */}
+            <Link href={`/sites/${site.id}`} className="card-title truncate" style={{ display: 'block', textDecoration: 'none' }}>
+              {site.name}
+            </Link>
             <a
               href={site.url}
               target="_blank"

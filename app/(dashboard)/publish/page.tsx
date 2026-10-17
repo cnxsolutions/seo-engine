@@ -127,6 +127,17 @@ export default function PublishPage() {
     load()
   }, [load])
 
+  // `?site=` pre-selects a site. The site page (Publication section) and the
+  // Google page both link here with one, and landing on the whole queue would
+  // undo the scoping the operator just had. Read once, in an effect rather
+  // than `useSearchParams()` — see the note on `Tabs` above for why this page
+  // avoids that hook. The first load, unscoped, is a few rows wasted; a wrong
+  // id scopes to an empty feed, which the switcher makes obvious.
+  useEffect(() => {
+    const requested = new URLSearchParams(window.location.search).get('site')
+    if (requested) setSiteId(requested)
+  }, [])
+
   // Le régime de connaissance du SEUL site sélectionné, lu une fois par
   // sélection — jamais dans `load()`, qui se rejoue à chaque filtre et à chaque
   // tour de scrutin : la fraîcheur d'un inventaire ne bouge pas toutes les

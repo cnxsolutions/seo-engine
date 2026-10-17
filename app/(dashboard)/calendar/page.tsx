@@ -240,6 +240,16 @@ export default function CalendarPage() {
       .catch(() => setCampaigns([]))
   }, [])
 
+  // `?site=` pre-selects a site: the site page links here from its Calendrier
+  // section, and landing on « Tous les sites » would undo the scoping the
+  // operator just had. Read once, in an effect rather than `useSearchParams()`,
+  // which would demand a Suspense boundary around a page that is client-side
+  // from its first line. A site that no longer exists simply filters nothing.
+  useEffect(() => {
+    const requested = new URLSearchParams(window.location.search).get('site')
+    if (requested) setSiteId(requested)
+  }, [])
+
   const load = useCallback(async () => {
     if (!cursor) return
     setLoading(true)
