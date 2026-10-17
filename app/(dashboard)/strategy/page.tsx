@@ -31,6 +31,7 @@ import {
 import Link from 'next/link'
 import { Button, EmptyState, Notice, PageHeader, StatusBadge, formatDay, formatMetric, shortenUrl } from '@/components/ui'
 import { Modal } from '@/components/charts'
+import { PlanBriefList, type AddressVerdict } from '@/components/PlanBriefList'
 import { DeleteCampaignDialog } from './DeleteCampaignDialog'
 import {
   PAGE_TYPE_LABELS,
@@ -612,6 +613,9 @@ function PlanModal({
   const { campaign, plan, items, provenance } = state
   const [days, setDays] = useState(plan.cycle_duration_days || 14)
   const [confirming, setConfirming] = useState(false)
+  /** Le brief ouvert dans le panneau ; le premier dès l'ouverture, pour que le
+   *  panneau montre d'emblée ce que la modale sert à relire. */
+  const [selectedId, setSelectedId] = useState<string | null>(items[0]?.id ?? null)
 
   const words = useMemo(() => items.reduce((sum, item) => sum + (item.estimated_word_count || 0), 0), [items])
 
@@ -710,171 +714,47 @@ function PlanModal({
       }
     >
       {/* The body pads its own regions rather than sitting in a `.panel__body`:
-          the plan table is a `.scroll-x` that must reach the panel edges. */}
+          the provenance and the list are two regions with their own rhythm. */}
       <div style={{ padding: 'var(--space-5) var(--space-5) 0' }}>
         <ProvenancePanel provenance={provenance} items={items} />
       </div>
 
-      {/* TROIS GROUPES, ORDRE FIXE. Un tableau unique cachait la seule chose que
-          l'opérateur doit voir avant de dépenser : combien de ces lignes vont
-          toucher à une page qui existe déjà, et lesquelles ne partiront pas. */}
-      <PlanSection
-        title="Nouvelles pages"
-        count={groups.create.length}
-        lede="Aucune page existante ne couvre ces sujets. L’adresse de chacune a été vérifiée au moment du plan."
-        show
-      >
-        <table className="data-table">
-          <thead>
-            <tr>
-              <th>Date</th>
-              <th>Type</th>
-              <th>Requête cible</th>
-              <th>Intention</th>
-              <th>Titre proposé</th>
-              <th style={{ textAlign: 'right' }}>Longueur</th>
-            </tr>
-          </thead>
-          <tbody>
-            {groups.create.map((item, index) => {
-              const measured = (item.internal_link_targets ?? [])
-                .map((target) => measuredByUrl.get(target))
-                .find(Boolean)
-
-              return (
-                <tr key={item.id || index}>
-                  <td style={{ whiteSpace: 'nowrap' }}>{formatDay(item.scheduled_date)}</td>
-                  <td><span className="chip">{pageTypeLabel(item.page_type)}</span></td>
-                  <td>
-                    <div className="cell-strong">{item.target_keyword}</div>
-                    <div className="meta">
-                      {item.target_city}
-                      {measured && (
-                        <span
-                          className="badge badge-success"
-                          style={{ marginLeft: 'var(--space-2)' }}
-                          title={`Search Console : "${measured.query}" en position ${measured.position.toFixed(1)}, ${measured.impressions} impressions sur ${measured.pageUrl}`}
-                        >
-                          mesuré
-                        </span>
-                      )}
-                    </div>
-                  </td>
-                  <td>{item.search_intent || '—'}</td>
-                  <td style={{ maxWidth: 280 }}>
-                    <div className="truncate" title={item.proposed_title}>{item.proposed_title}</div>
-                    <div
-                      style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', flexWrap: 'wrap', marginTop: 2 }}
-                    >
-                      <span className="meta truncate mono" title={item.proposed_slug}>/{item.proposed_slug}</span>
-                      <SlugState action={item.action} />
-                    </div>
-                  </td>
-                  <td className="cell-num">~{formatMetric(item.estimated_word_count, 'number')} mots</td>
-                </tr>
-              )
-            })}
-          </tbody>
-        </table>
-      </PlanSection>
-
-      <PlanSection
-        title="Pages à rafraîchir"
-        count={groups.refresh.length}
-        lede="Une page couvre déjà ce sujet. Le moteur propose de la mettre à jour plutôt que d’en ajouter une. Rien ne sera remplacé sans votre accord au moment de la publication."
-        show={hasVerdicts}
-        emptyText={
-          provenance.gsc === null
-            ? 'Aucune mise à jour proposée. Search Console n’est pas connectée : le moteur ne voit pas quelles pages sont déjà positionnées, il ne peut juger que sur les titres et les adresses.'
-            : 'Aucune mise à jour proposée : aucun sujet de ce cycle ne recoupe une page déjà en ligne.'
-        }
-      >
-        <table className="data-table">
-          <thead>
-            <tr>
-              <th>Date</th>
-              <th>Page visée</th>
-              <th>Portée</th>
-              <th>Pourquoi</th>
-              <th>Titre proposé</th>
-            </tr>
-          </thead>
-          <tbody>
-            {groups.refresh.map(({ item, action }, index) => (
-              <tr key={item.id || index}>
-                <td style={{ whiteSpace: 'nowrap' }}>{formatDay(item.scheduled_date)}</td>
-                <td>
-                  <span className="chip mono">{action.targetPath}</span>
-                </td>
-                <td><span className="badge badge-info">{REFRESH_SCOPE_LABELS[action.scope]}</span></td>
-                {/* Les phrases du domaine, RECOPIÉES TELLES QUELLES : elles
-                    portent déjà les chiffres qui ont décidé, et les reformuler
-                    couperait le seul lien entre la décision et sa mesure. */}
-                <td style={{ maxWidth: 340 }}>
-                  {action.evidence.length > 0 ? (
-                    <ul className="meta" style={{ margin: 0, paddingLeft: '1.1rem' }}>
-                      {action.evidence.map((line, i) => <li key={i}>{line}</li>)}
-                    </ul>
-                  ) : (
-                    <span className="meta">Aucun motif enregistré.</span>
-                  )}
-                </td>
-                <td style={{ maxWidth: 260 }}>
-                  <div className="truncate" title={item.proposed_title}>{item.proposed_title}</div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </PlanSection>
-
-      <PlanSection
-        title="Écartées"
-        count={groups.skip.length}
-        lede="Ces sujets n’ont pas été retenus, et voici pourquoi. Une ligne écartée sans motif serait une décision invisible."
-        show={hasVerdicts}
-        emptyText="Aucun sujet écarté : les créneaux de ce cycle produiront tous quelque chose."
-      >
-        <table className="data-table">
-          <thead>
-            <tr>
-              <th>Date</th>
-              <th>Requête</th>
-              <th>Motifs</th>
-            </tr>
-          </thead>
-          <tbody>
-            {groups.skip.map(({ item, action }, index) => (
-              <tr key={item.id || index}>
-                <td style={{ whiteSpace: 'nowrap' }}>{formatDay(item.scheduled_date)}</td>
-                <td>
-                  <div className="cell-strong">{item.target_keyword}</div>
-                  <div className="meta">{item.target_city}</div>
-                </td>
-                <td style={{ maxWidth: 420 }}>
-                  {action.reasons.length > 0 ? (
-                    <ul className="meta" style={{ margin: 0, paddingLeft: '1.1rem' }}>
-                      {action.reasons.map((reason, i) => <li key={i}>{reason}</li>)}
-                    </ul>
-                  ) : (
-                    <span className="meta">Aucun motif enregistré.</span>
-                  )}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </PlanSection>
+      {/* UNE SEULE LISTE, datée, où chaque ligne porte son verdict — nouvelle
+          page, mise à jour, écarté. Les trois tableaux séparés disaient bien
+          COMBIEN de lignes touchaient à l'existant, mais coupaient les titres
+          et cachaient les adresses ; les comptes vivent dans le sous-titre, et
+          ce que les sections vides disaient d'utile vit dans `PlanLede`. */}
+      <div style={{ padding: 'var(--space-5)', display: 'grid', gap: 'var(--space-4)' }}>
+        <PlanLede groups={groups} hasVerdicts={hasVerdicts} gscConnected={provenance.gsc !== null} />
+        <PlanBriefList
+          items={items}
+          selectedId={selectedId}
+          onSelect={setSelectedId}
+          verdictFor={storedAddressVerdict}
+          keywordNote={(item) => {
+            // A brief is backed by Search Console when it links to a page the
+            // data showed ranking 5-20. That is a join on two real values, not
+            // a guess at intent.
+            const measured = (item.internal_link_targets ?? [])
+              .map((target) => measuredByUrl.get(target))
+              .find(Boolean)
+            if (!measured) return null
+            return (
+              <span
+                className="badge badge-success"
+                title={`Search Console : "${measured.query}" en position ${measured.position.toFixed(1)}, ${measured.impressions} impressions sur ${measured.pageUrl}`}
+              >
+                mesuré
+              </span>
+            )
+          }}
+        />
+      </div>
     </Modal>
   )
 }
 
 // ─── Les trois groupes d'un plan ─────────────────────────────────────────────
-
-const REFRESH_SCOPE_LABELS: Record<'metadata' | 'content', string> = {
-  metadata: 'Titre et description',
-  content: 'Contenu complet',
-}
 
 type RefreshAction = Extract<PlanItemAction, { kind: 'refresh' }>
 type SkipAction = Extract<PlanItemAction, { kind: 'skip' }>
@@ -907,68 +787,72 @@ function groupByAction(items: PlanPreviewItem[]): PlanGroups {
 }
 
 /**
- * Un groupe du plan, ou la phrase qui explique qu'il est vide.
+ * Ce que la liste ne dit pas d'elle-même : les ABSENCES.
  *
- * `show` distingue « ce plan n'a rien à mettre à jour » de « ce plan ne sait
- * rien de ce qu'il fait à l'existant » : sur un plan relu depuis la base, les
- * deux sections de verdict ne s'affichent pas du tout, parce qu'un « 0 mise à
- * jour » y serait une mesure jamais faite.
+ * Une ligne de mise à jour ou un sujet écarté se voient dans la liste ; leur
+ * absence, non. Or « aucune mise à jour » a deux sens opposés — rien ne
+ * recoupe l'existant, ou Search Console n'est pas connectée et le moteur n'a
+ * pas pu regarder. Sur un plan relu depuis la base, qui ne porte aucun verdict,
+ * on ne dit rien de tel : un « 0 mise à jour » y serait une mesure jamais faite.
  */
-function PlanSection({
-  title, count, lede, show, emptyText, children,
-}: {
-  title: string
-  count: number
-  lede: string
-  show: boolean
-  emptyText?: string
-  children: ReactNode
-}) {
-  if (!show) return null
+function PlanLede({ groups, hasVerdicts, gscConnected }: { groups: PlanGroups; hasVerdicts: boolean; gscConnected: boolean }) {
+  if (!hasVerdicts) {
+    return (
+      <p className="meta" style={{ margin: 0 }}>
+        Ce plan ne porte aucun verdict sur les pages existantes : tous ses briefs s’affichent comme de nouvelles
+        pages, ce qu’ils étaient au moment de sa création.
+      </p>
+    )
+  }
+
+  const lines: string[] = []
+  if (groups.refresh.length === 0) {
+    lines.push(
+      gscConnected
+        ? 'Aucune mise à jour proposée : aucun sujet de ce cycle ne recoupe une page déjà en ligne.'
+        : 'Aucune mise à jour proposée. Search Console n’est pas connectée : le moteur ne voit pas quelles pages sont déjà positionnées, il ne peut juger que sur les titres et les adresses.',
+    )
+  }
+  if (groups.skip.length === 0) {
+    lines.push('Aucun sujet écarté : les créneaux de ce cycle produiront tous quelque chose.')
+  }
+  if (lines.length === 0) return null
 
   return (
-    <section style={{ padding: 'var(--space-5) var(--space-5) 0' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', flexWrap: 'wrap' }}>
-        <h3 className="card-title">{title}</h3>
-        <span className="badge badge-muted">{count}</span>
-      </div>
-      <p className="meta" style={{ margin: 'var(--space-1) 0 var(--space-3)' }}>{lede}</p>
-      {count === 0
-        ? <p className="meta" style={{ margin: 0 }}>{emptyText}</p>
-        : <div className="scroll-x">{children}</div>}
-    </section>
+    <div style={{ display: 'grid', gap: 'var(--space-1)' }}>
+      {lines.map((line) => <p key={line} className="meta" style={{ margin: 0 }}>{line}</p>)}
+    </div>
   )
 }
 
 /**
- * Ce que la résolution d'adresse a RÉELLEMENT pu prouver.
+ * Ce que la résolution d'adresse a RÉELLEMENT pu prouver, au moment du plan.
  *
- * Trois états et pas deux : le badge vert n'apparaît que sur une vérification
- * qui a eu lieu. En régime aveugle, `takenPaths` ne contient que les adresses
- * posées par ce plan-ci, et écrire « adresse vérifiée libre » ferait passer une
- * ignorance pour une garantie. Un plan sans verdict n'affiche RIEN.
+ * Trois états et pas deux : le vert n'apparaît que sur une vérification qui a
+ * eu lieu. En régime aveugle, `takenPaths` ne contient que les adresses posées
+ * par ce plan-ci, et écrire « adresse vérifiée libre » ferait passer une
+ * ignorance pour une garantie. Un plan sans verdict n'affiche RIEN — `null`,
+ * pas un verdict inventé pour un plan relu depuis la base.
  */
-function SlugState({ action }: { action: PlanItemAction | undefined }) {
+function storedAddressVerdict(item: PlanPreviewItem): AddressVerdict | null {
+  const action = item.action
   if (action?.kind !== 'create') return null
 
   const slug: SlugResolutionDto = action.slug
 
   if (slug.status === 'free') {
-    return <span className="badge badge-success">adresse vérifiée libre</span>
+    return { tone: 'good', inline: 'adresse vérifiée libre', detail: 'Adresse vérifiée libre au moment du plan.' }
   }
 
   if (slug.status === 'disambiguated') {
-    return (
-      <span
-        className="badge badge-info"
-        title={`L’adresse proposée était déjà prise (/${slug.from}). Le moteur a ajouté « ${slug.token} » pour la distinguer.`}
-      >
-        adresse ajustée
-      </span>
-    )
+    return {
+      tone: 'info',
+      inline: 'adresse ajustée',
+      detail: `L’adresse proposée était déjà prise (/${slug.from}). Le moteur a ajouté « ${slug.token} » pour la distinguer.`,
+    }
   }
 
-  return <span className="badge badge-muted" title={slug.reason}>adresse non vérifiée</span>
+  return { tone: 'muted', inline: 'adresse non vérifiée', detail: slug.reason }
 }
 
 // ─── Provenance panel ────────────────────────────────────────────────────────

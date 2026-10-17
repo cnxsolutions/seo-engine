@@ -904,6 +904,209 @@ textarea.input {
 .meter--critical { background: var(--status-critical-wash); }
 .meter--critical .meter__fill { background: var(--status-critical); }
 
+/* ═══ Plan du cycle : liste + panneau ════════════════════════════════════
+   components/PlanBriefList.tsx. Deux colonnes qui s'empilent SANS media
+   query : la liste réclame 480px et prend tout le surplus (flex-grow 999),
+   le panneau en réclame 340 ; quand les deux ne tiennent plus côte à côte —
+   un téléphone, ou une modale étroite — le panneau passe dessous et prend
+   toute la largeur. Un point de rupture en pixels ignorerait que la même
+   liste vit dans une modale de 1000px et dans une page de 1080px. */
+
+.plan-brief-layout {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-6);
+  align-items: flex-start;
+}
+
+.plan-brief-list {
+  flex: 999 1 480px;
+  min-width: 0;
+}
+
+.plan-brief-list__head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  padding: 0 var(--space-1) var(--space-2);
+}
+
+.plan-brief-list__rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--space-3);
+}
+
+/* La ligne est un <button> : on efface ce que le navigateur lui donne, et on
+   lui rend la carte. */
+.plan-brief {
+  display: flex;
+  gap: var(--space-4);
+  align-items: flex-start;
+  width: 100%;
+  padding: var(--space-4) var(--space-5);
+  font: inherit;
+  text-align: left;
+  color: var(--ink-primary);
+  background: var(--surface-card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  cursor: pointer;
+  transition: border-color var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease);
+}
+
+.plan-brief:hover {
+  border-color: var(--line-strong);
+  background: var(--surface-hover);
+}
+
+.plan-brief:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* 2px d'accent sans déplacer la ligne : le second pixel est un ombrage
+   intérieur, pas une bordure qui changerait de largeur à la sélection. */
+.plan-brief[aria-current='true'] {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+.plan-brief--skipped {
+  background: var(--surface-inset);
+  border-style: dashed;
+  color: var(--ink-muted);
+}
+
+.plan-brief__date {
+  flex: 0 0 4.5rem;
+  display: grid;
+  gap: 2px;
+}
+
+.plan-brief__day {
+  font-size: var(--fs-lg);
+  font-weight: 600;
+  line-height: var(--lh-tight);
+  white-space: nowrap;
+}
+
+.plan-brief__body {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: grid;
+  gap: var(--space-2);
+}
+
+.plan-brief__tags {
+  display: flex;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.plan-brief__title {
+  font-size: var(--fs-lg);
+  font-weight: 500;
+  line-height: var(--lh-snug);
+  overflow-wrap: anywhere;
+}
+
+.plan-brief--skipped .plan-brief__title,
+.plan-brief-detail__struck {
+  text-decoration: line-through;
+  color: var(--ink-muted);
+}
+
+.plan-brief__slug {
+  font-size: var(--fs-sm);
+  color: var(--ink-secondary);
+  overflow-wrap: anywhere;
+}
+
+.plan-brief__verdict {
+  font-family: var(--font-sans);
+}
+
+.plan-brief__open {
+  flex: 0 0 auto;
+  align-self: center;
+  font-size: var(--fs-sm);
+  color: var(--ink-muted);
+  white-space: nowrap;
+}
+
+.plan-brief[aria-current='true'] .plan-brief__open {
+  color: var(--accent-text);
+  font-weight: 600;
+}
+
+/* Le verdict d'une adresse : une couleur ET un mot, jamais la couleur seule. */
+.verdict--good     { color: var(--status-good-text); }
+.verdict--info     { color: var(--accent-text); }
+.verdict--warning  { color: var(--status-warning-text); }
+.verdict--critical { color: var(--status-critical-text); }
+.verdict--muted    { color: var(--ink-muted); }
+
+/* Collé en haut pendant que la liste défile : le brief ouvert reste sous les
+   yeux. Une fois passé sous la liste (écran étroit), il est le dernier
+   élément de son conteneur et `sticky` n'a plus rien à faire. */
+.plan-brief-detail {
+  flex: 1 1 340px;
+  min-width: 0;
+  position: sticky;
+  top: var(--space-4);
+  display: grid;
+  gap: var(--space-4);
+  padding: var(--space-5);
+  background: var(--surface-card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-xs);
+}
+
+.plan-brief-detail__head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.plan-brief-detail__value {
+  font-size: var(--fs-md);
+  line-height: var(--lh-normal);
+  color: var(--ink-primary);
+  overflow-wrap: anywhere;
+}
+
+.plan-brief-detail__list {
+  margin: 0;
+  padding-left: 1.25rem;
+  display: grid;
+  gap: var(--space-1);
+}
+
+.plan-brief-detail__actions {
+  display: grid;
+  gap: var(--space-2);
+  justify-items: start;
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--line);
+}
+
+/* Sur un téléphone, la date et le « Ouvrir › » mangeraient la moitié de la
+   ligne : la date se tasse, l'invite disparaît — `aria-current` et la bordure
+   disent déjà laquelle est ouverte. */
+@media (max-width: 560px) {
+  .plan-brief { gap: var(--space-3); padding: var(--space-3) var(--space-4); }
+  .plan-brief__date { flex-basis: 3.5rem; }
+  .plan-brief__open { display: none; }
+}
+
 /* ═══ Feedback ═══════════════════════════════════════════════════════════ */
 
 @keyframes spin { to { transform: rotate(360deg); } }

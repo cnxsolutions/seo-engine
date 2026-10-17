@@ -1361,6 +1361,13 @@ export function formatDayLong(iso: string): string {
   return DAY_LONG.format(new Date(`${iso.slice(0, 10)}T12:00:00Z`))
 }
 
+const WEEKDAY = new Intl.DateTimeFormat('fr-FR', { weekday: 'long' })
+
+/** « lundi » — même règle du midi UTC que `formatDay`, pour la même raison. */
+export function formatWeekday(iso: string): string {
+  return WEEKDAY.format(new Date(`${iso.slice(0, 10)}T12:00:00Z`))
+}
+
 /** `https://www.site.fr/taxi-troyes` → `/taxi-troyes`, so a table column stays readable. */
 export function shortenUrl(url: string): string {
   try {
