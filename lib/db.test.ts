@@ -67,12 +67,19 @@ function queryDouble(): Record<string, unknown> {
     return builder
   }
 
-  for (const method of ['select', 'eq', 'neq', 'not', 'in', 'is', 'lte', 'order', 'limit']) {
+  for (const method of ['select', 'update', 'delete', 'eq', 'neq', 'not', 'in', 'is', 'lte', 'order', 'limit']) {
     builder[method] = record(method)
   }
 
   builder.then = (resolve: (value: { data: unknown[]; error: null }) => unknown) =>
     resolve({ data: nextRows, error: null })
+
+  // `.maybeSingle()` termine la chaine : il rend la premiere ligne ou null, pas
+  // le constructeur — comme chez Supabase, ou plus rien ne s'enchaine apres.
+  builder.maybeSingle = () => {
+    calls.push({ method: 'maybeSingle', args: [] })
+    return Promise.resolve({ data: nextRows[0] ?? null, error: null })
+  }
 
   return builder
 }
@@ -86,7 +93,15 @@ vi.mock('@/lib/supabase', () => ({
   }),
 }))
 
-const { listDueCampaigns, listPendingPublishGenerations } = await import('./db')
+const {
+  countInFlightGenerations,
+  deleteCampaign,
+  deleteSite,
+  getSiteByIdSafe,
+  listDueCampaigns,
+  listPendingPublishGenerations,
+  updateSiteSafe,
+} = await import('./db')
 
 // ─── Lecture des appels ──────────────────────────────────────────────────────
 
@@ -179,5 +194,103 @@ describe('listDueCampaigns', () => {
 
     expect(calls.find((call) => call.method === 'select')?.args[0]).toContain('cycle_plans(id)')
     expect(equalities()).toContainEqual(['is_active', true])
+  })
+})
+
+// ─── Le cycle de vie d'un site et d'une campagne ─────────────────────────────
+//
+// Les routes PATCH et DELETE de /api/sites/[id] et /api/campaigns/[id] rendent
+// au navigateur ce que ces fonctions lisent. Deux choses ne se voient pas dans
+// le code des routes et se casseraient en silence : la projection (un `*`
+// remettrait le mot de passe WordPress sur le fil) et la question posee avant
+// de supprimer (sans elle, un site part pendant qu'un travailleur publie dessus).
+
+const SECRET_COLUMNS = ['wp_app_password', 'github_token']
+
+function projection(): string {
+  return String(calls.find((call) => call.method === 'select')?.args[0] ?? '')
+}
+
+describe('lecture et ecriture d\'un site destine au navigateur', () => {
+  it('getSiteByIdSafe ne demande jamais les secrets', async () => {
+    await getSiteByIdSafe('s1')
+
+    expect(tables).toEqual(['sites'])
+    expect(equalities()).toContainEqual(['id', 's1'])
+    for (const column of SECRET_COLUMNS) expect(projection()).not.toContain(column)
+    expect(projection()).not.toBe('*')
+  })
+
+  it('updateSiteSafe rend la ligne ecrite, projetee sans les secrets', async () => {
+    nextRows = [{ id: 's1', name: 'AFS' }]
+
+    const site = await updateSiteSafe('s1', { name: 'AFS' })
+
+    expect(site).toEqual({ id: 's1', name: 'AFS' })
+    expect(calls.find((call) => call.method === 'update')?.args[0]).toEqual({ name: 'AFS' })
+    expect(equalities()).toContainEqual(['id', 's1'])
+    for (const column of SECRET_COLUMNS) expect(projection()).not.toContain(column)
+  })
+
+  it('updateSiteSafe rend null quand aucune ligne ne porte cet id', async () => {
+    expect(await updateSiteSafe('absent', { name: 'x' })).toBeNull()
+  })
+})
+
+describe('countInFlightGenerations', () => {
+  it('ne compte que ce que le moteur a encore en main', async () => {
+    await countInFlightGenerations({ site_id: 's1' })
+
+    expect(tables).toEqual(['generations'])
+    expect(equalities()).toContainEqual(['site_id', 's1'])
+
+    // 'generating' : un travailleur ecrit dedans. 'publishing' : un publieur
+    // est a mi-chemin chez le client. 'pending' ou 'generated' n'ont personne
+    // dessus et ne doivent pas bloquer une suppression.
+    const statuses = calls.find((call) => call.method === 'in')?.args
+    expect(statuses?.[0]).toBe('status')
+    expect([...(statuses?.[1] as string[])].sort()).toEqual(['generating', 'publishing'])
+  })
+
+  it('sait poser la meme question pour une campagne', async () => {
+    await countInFlightGenerations({ campaign_id: 'c1' })
+
+    expect(equalities()).toContainEqual(['campaign_id', 'c1'])
+    expect(equalities().map(([column]) => column)).not.toContain('site_id')
+  })
+
+  it('vaut zero quand la base ne rend pas de compte', async () => {
+    expect(await countInFlightGenerations({ site_id: 's1' })).toBe(0)
+  })
+})
+
+describe('suppressions', () => {
+  it('deleteSite cible une seule ligne et ne rend que son identite', async () => {
+    nextRows = [{ id: 's1', name: 'AFS' }]
+
+    const deleted = await deleteSite('s1')
+
+    expect(tables).toEqual(['sites'])
+    expect(calls.map((call) => call.method)).toContain('delete')
+    expect(equalities()).toEqual([['id', 's1']])
+    expect(projection()).toBe('id,name')
+    expect(deleted).toEqual({ id: 's1', name: 'AFS' })
+  })
+
+  it('deleteCampaign fait de meme avec le nom de l\'activite', async () => {
+    nextRows = [{ id: 'c1', business_name: 'Taxi Troyes' }]
+
+    const deleted = await deleteCampaign('c1')
+
+    expect(tables).toEqual(['campaigns'])
+    expect(calls.map((call) => call.method)).toContain('delete')
+    expect(equalities()).toEqual([['id', 'c1']])
+    expect(projection()).toBe('id,business_name')
+    expect(deleted).toEqual({ id: 'c1', business_name: 'Taxi Troyes' })
+  })
+
+  it('une suppression sans ligne rend null plutot qu\'un succes', async () => {
+    expect(await deleteSite('absent')).toBeNull()
+    expect(await deleteCampaign('absent')).toBeNull()
   })
 })

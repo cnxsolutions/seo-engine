@@ -37,6 +37,7 @@ import {
   type GoogleSyncState,
 } from '@/lib/google/sync'
 import { createServiceClient } from '@/lib/supabase'
+import { DisconnectGoogleButton } from './DisconnectGoogleButton'
 
 export const dynamic = 'force-dynamic'
 
@@ -255,6 +256,37 @@ export default async function SiteGooglePage({
           canWrite={state.scopes.some((scope) => scope.includes('business.manage'))}
           posts={postStats}
         />
+
+        {/* The connection itself, as a thing that can be redone or undone.
+            « Reconnecter » already existed, but only inside the write-scope
+            notice above — reachable solely when a scope was missing. Here both
+            verbs sit together, whatever the state of the sync. */}
+        <section className="panel">
+          <div className="panel__header">
+            <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', minWidth: 0 }}>
+              <Link2 size={15} color="var(--ink-secondary)" />
+              <h2 className="card-title">Compte Google relié</h2>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+              <Link href={`/api/google/auth?site_id=${id}`} className="btn-secondary">
+                <RefreshCw size={14} /> Reconnecter Google
+              </Link>
+              <DisconnectGoogleButton siteId={id} />
+            </div>
+          </div>
+          <div className="panel__body" style={{ display: 'grid', gap: 'var(--space-4)' }}>
+            <DetailRow label="Compte" value={state.email ?? 'inconnu'} />
+            <DetailRow
+              label="Autorisations"
+              value={`${state.scopes.length} accordée${state.scopes.length > 1 ? 's' : ''}`}
+            />
+          </div>
+          <div className="panel__footer">
+            Déconnecter conserve les données déjà synchronisées, mais plus aucune synchronisation ne tournera tant
+            que Google n&apos;est pas reconnecté. Reconnecter permet de changer de compte ou d&apos;accorder une
+            autorisation manquante.
+          </div>
+        </section>
       </div>
     </div>
   )

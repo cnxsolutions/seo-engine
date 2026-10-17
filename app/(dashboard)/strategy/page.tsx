@@ -25,12 +25,13 @@
 
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import {
-  CalendarDays, CheckCircle2, Eye, Info, Loader2, Plus, RefreshCw, Search, Target, TriangleAlert,
+  CalendarDays, CheckCircle2, Eye, Info, Loader2, Pencil, Plus, RefreshCw, Search, Target, Trash2, TriangleAlert,
   type LucideIcon,
 } from 'lucide-react'
 import Link from 'next/link'
 import { Button, EmptyState, Notice, PageHeader, StatusBadge, formatDay, formatMetric, shortenUrl } from '@/components/ui'
 import { Modal } from '@/components/charts'
+import { DeleteCampaignDialog } from './DeleteCampaignDialog'
 import {
   PAGE_TYPE_LABELS,
   type Campaign,
@@ -280,12 +281,17 @@ export default function StrategyPage() {
   const [plans, setPlans] = useState<Record<string, CyclePlan | null>>({})
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [notice, setNotice] = useState<{ tone: 'good' | 'critical'; message: string } | null>(null)
+  // `title` et `calendar` sont optionnels : la bannière « Cycle lancé » garde
+  // son lien vers le calendrier, et une suppression réussie n'en a pas besoin —
+  // il n'y a plus rien à y voir pour cette campagne.
+  const [notice, setNotice] = useState<{ tone: 'good' | 'critical'; message: string; title?: string; calendar?: boolean } | null>(null)
 
   const [planning, setPlanning] = useState<string | null>(null)
   const [opening, setOpening] = useState<string | null>(null)
   const [elapsed, setElapsed] = useState(0)
   const [modal, setModal] = useState<ModalState | null>(null)
+  /** La campagne dont la suppression attend confirmation. */
+  const [deleting, setDeleting] = useState<Campaign | null>(null)
 
   /** Read-only: never creates a plan, never touches the calendar. */
   const loadPlan = useCallback(async (campaignId: string): Promise<CyclePlan | null> => {
@@ -406,6 +412,8 @@ export default function StrategyPage() {
       setModal(null)
       setNotice({
         tone: 'good',
+        title: 'Cycle lancé',
+        calendar: true,
         message: `Cycle lancé : ${state.items.length} pages sur ${state.plan.cycle_duration_days} jours.`,
       })
       await loadPlan(state.campaign.id).catch(() => null)
@@ -428,10 +436,10 @@ export default function StrategyPage() {
       {notice && (
         <Notice
           tone={notice.tone}
-          title={notice.tone === 'good' ? 'Cycle lancé' : 'Action impossible'}
+          title={notice.title ?? (notice.tone === 'good' ? 'Terminé' : 'Action impossible')}
           body={notice.message}
           onDismiss={() => setNotice(null)}
-          action={notice.tone === 'good' ? { label: 'Voir le calendrier', href: '/calendar' } : undefined}
+          action={notice.calendar ? { label: 'Voir le calendrier', href: '/calendar' } : undefined}
         />
       )}
 
@@ -468,9 +476,25 @@ export default function StrategyPage() {
               elapsed={elapsed}
               onOpen={() => openPlan(campaign)}
               onGenerate={() => generatePlan(campaign)}
+              onDelete={() => setDeleting(campaign)}
             />
           ))}
         </div>
+      )}
+
+      {deleting && (
+        <DeleteCampaignDialog
+          campaign={deleting}
+          onClose={() => setDeleting(null)}
+          onDeleted={async () => {
+            const name = deleting.name
+            setDeleting(null)
+            setNotice({ tone: 'good', title: 'Campagne supprimée', message: `« ${name} » a été supprimée. Les pages déjà générées sont conservées.` })
+            // Relecture complète plutôt qu'un filtre local : c'est la base qui
+            // dit ce qui reste, et la liste doit le refléter telle quelle.
+            await load()
+          }}
+        />
       )}
 
       {modal && (
@@ -491,7 +515,7 @@ export default function StrategyPage() {
 // ─── Campaign row ────────────────────────────────────────────────────────────
 
 function CampaignRow({
-  campaign, plan, planning, opening, elapsed, onOpen, onGenerate,
+  campaign, plan, planning, opening, elapsed, onOpen, onGenerate, onDelete,
 }: {
   campaign: Campaign
   plan: CyclePlan | null | undefined
@@ -500,6 +524,7 @@ function CampaignRow({
   elapsed: number
   onOpen: () => void
   onGenerate: () => void
+  onDelete: () => void
 }) {
   const status = plan ? PLAN_STATUS_LABELS[plan.status] ?? { label: plan.status, badge: 'badge badge-muted' } : null
   const draft = plan?.status === 'draft'
@@ -542,6 +567,31 @@ function CampaignRow({
             {planning
               ? `${planPhase(elapsed)} — ${elapsed}s`
               : plan ? 'Régénérer un plan' : 'Planifier un cycle'}
+          </Button>
+
+          {/* Les deux actions de cycle de vie, en retrait des actions de plan.
+              Le nom de la campagne est répété dans l'étiquette accessible :
+              une liste de « Supprimer » identiques ne dit pas lequel est
+              lequel. « Supprimer » reste un bouton gris ici — le rouge est
+              réservé au bouton qui confirme, dans le dialogue. */}
+          <Button
+            variant="ghost"
+            icon={Pencil}
+            href={`/strategy/${campaign.id}/edit`}
+            title={`Modifier « ${campaign.name} »`}
+            ariaLabel={`Modifier la campagne ${campaign.name}`}
+          >
+            Modifier
+          </Button>
+          <Button
+            variant="ghost"
+            icon={Trash2}
+            onClick={onDelete}
+            disabled={planning}
+            title={`Supprimer « ${campaign.name} »`}
+            ariaLabel={`Supprimer la campagne ${campaign.name}`}
+          >
+            Supprimer
           </Button>
         </div>
       </div>
