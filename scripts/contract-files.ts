@@ -43,6 +43,7 @@ async function main() {
     adapterFolder: `${profile.srcPrefix ?? 'src/'}components/seo-engine`,
     pageFolder: profile.pageFolder ?? 'src/app',
     srcPrefix: profile.srcPrefix ?? 'src/',
+    appRoot: profile.appRoot ?? '',
     chrome: profile.chrome ?? EMPTY_CHROME,
     componentProps: profile.componentProps ?? {},
     layoutShell: profile.layoutShell,

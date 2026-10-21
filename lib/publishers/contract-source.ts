@@ -35,8 +35,15 @@ export interface AdapterOptions {
   adapterFolder: string
   /** Where generated pages are committed, e.g. `src/app/(seo)`. */
   pageFolder: string
-  /** `src/` when the repo keeps its sources there, empty otherwise. */
+  /** `src/` when the repo keeps its sources there, empty otherwise — appRoot included. */
   srcPrefix: string
+  /**
+   * Folder of the Next.js application, `''` at the repository root.
+   *
+   * The manifest goes beside the application's next.config: on a monorepo the
+   * repository root belongs to every workspace, not to the site.
+   */
+  appRoot?: string
   /** The shell the analysis read out of the site's existing pages. */
   chrome: PageChrome
   /** Prop signatures read from the site's own component sources. */
@@ -95,10 +102,10 @@ export function buildContractFiles(opts: AdapterOptions): ContractFile[] {
       content: renderGeneratedRoutes([], './routes'),
     },
     {
-      path: MANIFEST_PATH,
+      path: `${opts.appRoot ?? ''}${MANIFEST_PATH}`,
       language: 'json',
       why:
-        'Le manifeste, a la racine. Sa presence est ce qui dit au moteur que ce depot ' +
+        'Le manifeste, a la racine de l’application. Sa presence est ce qui dit au moteur que ce depot ' +
         'implemente le contrat. Sans lui, la publication retombe sur la charpente ' +
         '(navigation et pied de page uniquement).',
       content: `${JSON.stringify(

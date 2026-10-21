@@ -36,6 +36,9 @@ export function AnalyzeRepoButton({ siteId, hasProfile }: { siteId: string; hasP
       // step is the profile, and a wrong pageFolder is the kind of thing that
       // only shows up as a page committed in the wrong place, days later.
       const parts = [
+        // Named only on a monorepo: it is the first thing to check when the
+        // engine picked the wrong workspace.
+        ...(profile.appRoot ? [`application dans ${profile.appRoot.replace(/\/$/, '')}`] : []),
         `router ${profile.router}`,
         `pages dans ${profile.pageFolder}`,
         profile.sitemapPath ? `sitemap ${profile.sitemapPath}` : 'aucun sitemap détecté',

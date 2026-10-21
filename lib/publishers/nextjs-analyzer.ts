@@ -5,9 +5,19 @@ import { CONTRACT_VERSION, MANIFEST_PATH } from './contract'
 import { parseComponentProps, type PropSignature } from './props'
 import { NO_LAYOUT_SHELL, readLayoutShell, type LayoutShell } from './layout-shell'
 import { readRedirectSources } from './redirects'
+import { aliasCandidates, detectAppRoot, pickPageFolder, toAliasImport } from './repo-layout'
 
 export interface RepoProfile {
   router: 'app' | 'pages'
+  /**
+   * Folder of the Next.js application in the repository, trailing slash, `''`
+   * at the root. `nextjs/` on a monorepo carrying a site and an app.
+   *
+   * Optional: profiles stored before monorepos were supported lack it, and they
+   * were all analysed at the root.
+   */
+  appRoot?: string
+  /** Repository path of the sources, appRoot included: `nextjs/src/`, `src/`, `''`. */
   srcPrefix: string
   pageFolder: string
   sitemapPath: string | null
@@ -150,13 +160,22 @@ export async function analyzeNextJsRepo(
   const files = tree.filter(f => f.type === 'blob').map(f => f.path)
 
   // 2. Detect basic structure
-  const hasSrc = files.some(f => f.startsWith('src/'))
-  const srcPrefix = hasSrc ? 'src/' : ''
-  const router = files.some(f => f.includes(`${srcPrefix}app/`)) ? 'app' : 'pages'
+  //
+  // Everything below is relative to the APPLICATION, not the repository: on a
+  // monorepo the site lives under `nextjs/` beside a mobile app, and reading the
+  // root found neither `src/` nor the pages.
+  const appRoot = detectAppRoot(files)
+  const hasSrc = files.some(f => f.startsWith(`${appRoot}src/`))
+  const srcPrefix = `${appRoot}${hasSrc ? 'src/' : ''}`
+  const router = files.some(f => f.startsWith(`${srcPrefix}app/`)) ? 'app' : 'pages'
 
   // 3. Find sitemap
-  const sitemapCandidates = files.filter(f => f.includes('sitemap'))
-  const sitemapPath = sitemapCandidates.find(f => f.endsWith('sitemap.ts') || f.endsWith('sitemap.tsx')) || null
+  //
+  // The App Router's own file first, then any sitemap inside the application —
+  // never one belonging to another workspace of the repository.
+  const sitemapCandidates = files.filter(f => f.startsWith(appRoot) && /sitemap\.tsx?$/.test(f))
+  const sitemapPath = sitemapCandidates.find(f => f === `${srcPrefix}app/sitemap.ts` || f === `${srcPrefix}app/sitemap.tsx`) ||
+    sitemapCandidates[0] || null
   let sitemapFormat: RepoProfile['sitemapFormat'] = null
   let sitemapContent: string | null = null
   if (sitemapPath) {
@@ -175,17 +194,13 @@ export async function analyzeNextJsRepo(
     .map(f => f.replace(appPath, '').replace('/page.tsx', ''))
     .filter(f => !f.includes('[') && !f.includes('api/') && f.includes('-'))
 
-  // Detect route groups (seo), (pages), etc
-  const routeGroups = [...new Set(
-    pageFolders.filter(f => f.startsWith('(')).map(f => f.split('/')[0])
-  )]
-  const seoGroup = routeGroups.find(g => g.includes('seo') || g.includes('page')) || routeGroups[0]
-  // No trailing slash: every consumer appends `/<something>` (see pageFilePath).
-  const pageFolder = seoGroup ? `${appPath}${seoGroup}` : appPath.replace(/\/$/, '')
+  // Route group (seo), (public)… — never one behind a login. No trailing slash:
+  // every consumer appends `/<something>` (see pageFilePath).
+  const pageFolder = pickPageFolder(files, appPath)
 
   // 5. Find a sample SEO page to use as template
   const seoPages = files.filter(f =>
-    f.startsWith(pageFolder) && f.endsWith('page.tsx') && !f.includes('[')
+    f.startsWith(`${pageFolder}/`) && f.endsWith('page.tsx') && !f.includes('[')
   )
   // Several pages, not one.
   //
@@ -232,10 +247,10 @@ export async function analyzeNextJsRepo(
   }
 
   const [contract, componentProps, layoutSource, redirectSources] = await Promise.all([
-    detectContract(repoApi, headers, files, branch),
-    readComponentProps(repoApi, headers, files, chrome, branch),
+    detectContract(repoApi, headers, files, appRoot, srcPrefix, branch),
+    readComponentProps(repoApi, headers, files, chrome, appRoot, branch),
     layoutPath ? fetchFileContent(repoApi, headers, layoutPath, branch) : Promise.resolve(null),
-    readRedirects(repoApi, headers, files, branch),
+    readRedirects(repoApi, headers, files, appRoot, branch),
   ])
 
   return {
@@ -244,6 +259,7 @@ export async function analyzeNextJsRepo(
     layoutShell: layoutPath ? readLayoutShell(layoutSource) : NO_LAYOUT_SHELL,
     redirectSources,
     router,
+    appRoot,
     srcPrefix,
     pageFolder,
     sitemapPath,
@@ -272,6 +288,7 @@ async function readComponentProps(
   headers: Record<string, string>,
   files: string[],
   chrome: PageChrome,
+  appRoot: string,
   branch?: string
 ): Promise<Record<string, PropSignature[]>> {
   const candidates = chrome.layout
@@ -280,7 +297,7 @@ async function readComponentProps(
 
   const entries = await Promise.all(
     candidates.map(async (component) => {
-      const path = resolveImportPath(component.importLine, files)
+      const path = resolveImportPath(component.importLine, files, appRoot)
       if (!path) return null
       const source = await fetchFileContent(repoApi, headers, path, branch)
       const props = parseComponentProps(source, component.name)
@@ -302,11 +319,13 @@ async function readRedirects(
   repoApi: string,
   headers: Record<string, string>,
   files: string[],
+  appRoot: string,
   branch?: string
 ): Promise<string[]> {
   const candidates = [
-    'middleware.ts', 'src/middleware.ts', 'proxy.ts', 'src/proxy.ts', 'next.config.ts', 'next.config.js',
-  ].filter((path) => files.includes(path))
+    'middleware.ts', 'src/middleware.ts', 'proxy.ts', 'src/proxy.ts',
+    'next.config.ts', 'next.config.js', 'next.config.mjs',
+  ].map((path) => `${appRoot}${path}`).filter((path) => files.includes(path))
 
   const sources = await Promise.all(
     candidates.map((path) => fetchFileContent(repoApi, headers, path, branch))
@@ -318,14 +337,17 @@ async function readRedirects(
  * Turn `import X from '@/components/premium/PremiumFAQ'` into a real repo path.
  *
  * The alias is resolved against the tree rather than assumed: `@/` maps to `src/`
- * on most repositories and to the root on others, and only the tree knows which.
+ * on most applications and to the application root on others, and only the tree
+ * knows which.
  */
-function resolveImportPath(importLine: string, files: string[]): string | null {
+function resolveImportPath(importLine: string, files: string[], appRoot: string): string | null {
   const match = importLine.match(/from\s+['"]([^'"]+)['"]/)
   if (!match) return null
 
+  // `@/x`, and the bare `x` of a site importing through `baseUrl`, both resolve
+  // from the application — `nextjs/src/` on a monorepo, not the repository root.
   const specifier = match[1].replace(/^@\//, '')
-  const candidates = ['src/', ''].flatMap((prefix) =>
+  const candidates = [`${appRoot}src/`, appRoot].flatMap((prefix) =>
     ['.tsx', '.ts', '/index.tsx'].map((ext) => `${prefix}${specifier}${ext}`)
   )
   return candidates.find((candidate) => files.includes(candidate)) ?? null
@@ -344,22 +366,27 @@ async function detectContract(
   repoApi: string,
   headers: Record<string, string>,
   files: string[],
+  appRoot: string,
+  srcPrefix: string,
   branch?: string
 ): Promise<ContractStatus> {
   const absent = (reason: string | null): ContractStatus => ({
     present: false, version: null, adapterPath: null, adapterImport: null, variants: [], routesFile: null, reason,
   })
 
-  if (!files.includes(MANIFEST_PATH)) return absent(null)
+  // Beside the application's next.config, where the contract files are
+  // generated — or at the repository root, where earlier sites put it.
+  const manifestPath = [`${appRoot}${MANIFEST_PATH}`, MANIFEST_PATH].find((path) => files.includes(path))
+  if (!manifestPath) return absent(null)
 
-  const raw = await fetchFileContent(repoApi, headers, MANIFEST_PATH, branch)
-  if (!raw) return absent(`${MANIFEST_PATH} illisible`)
+  const raw = await fetchFileContent(repoApi, headers, manifestPath, branch)
+  if (!raw) return absent(`${manifestPath} illisible`)
 
   let manifest: { contractVersion?: number; adapter?: string; variants?: string[]; routesFile?: string }
   try {
     manifest = JSON.parse(raw)
   } catch {
-    return absent(`${MANIFEST_PATH} n'est pas un JSON valide`)
+    return absent(`${manifestPath} n'est pas un JSON valide`)
   }
 
   const version = typeof manifest.contractVersion === 'number' ? manifest.contractVersion : null
@@ -368,12 +395,11 @@ async function detectContract(
   }
 
   const adapterImport = manifest.adapter
-  if (!adapterImport) return absent(`${MANIFEST_PATH} ne declare aucun adaptateur`)
+  if (!adapterImport) return absent(`${manifestPath} ne declare aucun adaptateur`)
 
-  // `@/components/seo-engine/SeoEnginePage` → `src/components/seo-engine/SeoEnginePage.tsx`
-  const relative = adapterImport.replace(/^@\//, 'src/').replace(/^\//, '')
-  const adapterPath = ['.tsx', '.ts', '/index.tsx']
-    .map((ext) => `${relative}${ext}`)
+  // `@/components/seo-engine/SeoEnginePage` → `nextjs/src/components/seo-engine/SeoEnginePage.tsx`
+  const adapterPath = aliasCandidates(adapterImport.replace(/^\//, ''), appRoot)
+    .flatMap((base) => ['.tsx', '.ts', '/index.tsx'].map((ext) => `${base}${ext}`))
     .find((candidate) => files.includes(candidate))
 
   if (!adapterPath) {
@@ -384,7 +410,7 @@ async function detectContract(
     present: true,
     version,
     adapterPath,
-    adapterImport: adapterImport.startsWith('src/') ? `@/${adapterImport.slice(4)}` : adapterImport,
+    adapterImport: toAliasImport(adapterImport, srcPrefix),
     variants: Array.isArray(manifest.variants) ? manifest.variants : [],
     routesFile: typeof manifest.routesFile === 'string' ? manifest.routesFile : null,
     reason: null,
