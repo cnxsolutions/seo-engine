@@ -35,10 +35,12 @@ export async function GET(_req: NextRequest, context: { params: Promise<{ id: st
     )
   }
 
+  const srcPrefix = profile.srcPrefix ?? 'src/'
   const files = buildContractFiles({
-    adapterFolder: `${profile.srcPrefix ?? 'src/'}components/seo-engine`,
+    adapterFolder: `${srcPrefix}components/seo-engine`,
     pageFolder: profile.pageFolder,
-    srcPrefix: profile.srcPrefix ?? 'src/',
+    srcPrefix,
+    appRoot: profile.appRoot ?? '',
     chrome: profile.chrome ?? EMPTY_CHROME,
     componentProps: profile.componentProps ?? {},
     layoutShell: profile.layoutShell,
@@ -51,7 +53,7 @@ export async function GET(_req: NextRequest, context: { params: Promise<{ id: st
     contract: profile.contract ?? { present: false, reason: null },
     // One line the engine cannot write for them: the spread into their registry.
     manualStep:
-      "Ajoute `...GENERATED_ROUTES` dans ROUTES (src/lib/seo/routes.ts) et importe-le depuis './routes.generated'. " +
+      `Ajoute \`...GENERATED_ROUTES\` dans ROUTES (${srcPrefix}lib/seo/routes.ts) et importe-le depuis './routes.generated'. ` +
       'Sans cette ligne, les pages publiées existent mais restent absentes du sitemap.',
   })
 }
