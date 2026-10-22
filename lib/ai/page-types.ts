@@ -547,6 +547,8 @@ PORTEE NATIONALE (prime sur toute consigne d'ancrage local de ce prompt) :
 - N'ajoute aucun lieu au title, au H1, aux sous-titres ni au texte pour paraitre proche. Un lieu n'apparait
   que s'il fait partie du sujet lui-meme.
 - La proximite se remplace par ce qui compte a distance : mise en route, accompagnement, disponibilite.
+- Ne dis jamais que l'activite est "nationale" ni qu'elle "ne depend d'aucune zone" : c'est une consigne de
+  redaction, pas une information pour le lecteur. "Partout en France" suffit, une fois, la ou c'est utile.
 `.trim()
 
 export function buildSystemPrompt(pageType: PageType, extra: string, searchIntent: SearchIntent, national = false): string {

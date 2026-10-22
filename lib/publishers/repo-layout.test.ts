@@ -4,7 +4,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { describe, expect, it } from 'vitest'
-import { aliasCandidates, detectAppRoot, pickPageFolder, toAliasImport } from './repo-layout'
+import { aliasCandidates, detectAppRoot, missingPublicAssets, pickPageFolder, toAliasImport } from './repo-layout'
 
 // Trimmed from cnxsolutions/foodflow: the web part under `nextjs/`, a Flutter
 // app beside it, and an `(auth)` group with more dashed slugs than `(public)`.
@@ -90,5 +90,29 @@ describe('alias @/', () => {
       .toBe('@/components/seo-engine/SeoEnginePage')
     expect(toAliasImport('src/components/X', 'src/')).toBe('@/components/X')
     expect(toAliasImport('@/components/X', 'nextjs/src/')).toBe('@/components/X')
+  })
+})
+
+describe('missingPublicAssets', () => {
+  // Flowyne's stored template, 2026-10-22: every page opened on a broken image.
+  const TEMPLATE = `
+import Image from 'next/image'
+export default function Page() {
+  return (<>
+    <Image src="/images/blog/default.jpg" alt="" fill />
+    <img src='/images/pricing/restaurant-qr.svg' alt="QR" />
+    <img src="//cdn.example.com/a.png" alt="" />
+    <img src="/blog/{{SLUG}}.jpg" alt="" />
+  </>)
+}`
+
+  it('names the local images the repository does not have', () => {
+    const files = ['nextjs/public/images/pricing/restaurant-qr.svg']
+    expect(missingPublicAssets(TEMPLATE, files, 'nextjs/')).toEqual(['/images/blog/default.jpg'])
+  })
+
+  it('looks under the application root, not the repository root', () => {
+    expect(missingPublicAssets(`<img src="/logo.png" />`, ['public/logo.png'], 'nextjs/')).toEqual(['/logo.png'])
+    expect(missingPublicAssets(`<img src="/logo.png" />`, ['public/logo.png'], '')).toEqual([])
   })
 })
