@@ -146,6 +146,13 @@ export interface PublishOutcome {
 
   /** Something points at it: sitemap entry, route registry, internal link. */
   discoverable: boolean
+  /**
+   * Sitemaps that list this page — or will, once the commit is deployed.
+   *
+   * Vouched for by the connector, and resubmitted to Search Console after a
+   * live publication (lib/seo/sitemap-submit.ts).
+   */
+  sitemapUrls?: string[]
 
   /** Public URL of the page, once known. */
   pageUrl?: string

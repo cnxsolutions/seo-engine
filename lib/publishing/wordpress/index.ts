@@ -194,6 +194,7 @@ export const wordPressConnector: Connector = {
         live,
         // wp-sitemap.xml builds itself, but only lists published content.
         discoverable: live,
+        sitemapUrls: live ? await findWordPressSitemaps(client.origin) : [],
         pageUrl: review.link || written.link,
         remoteId: String(written.id),
         mode: `wp-${target.action === 'creer' ? 'creation' : 'maj'}-${dialect}`,
@@ -257,6 +258,29 @@ async function uploadHeroImage(
     )
     return null
   }
+}
+
+/**
+ * The sitemaps this WordPress actually serves: an SEO plugin's index (Yoast,
+ * Rank Math: `sitemap_index.xml`) and core's (`wp-sitemap.xml`), each kept only
+ * if it answers with a sitemap. Both list every published page, so either one
+ * resubmitted to Search Console carries the new page. Never throws.
+ */
+async function findWordPressSitemaps(origin: string): Promise<string[]> {
+  const candidates = [`${origin}/sitemap_index.xml`, `${origin}/wp-sitemap.xml`]
+  const found = await Promise.all(candidates.map(async (url) => {
+    try {
+      const res = await fetch(url, {
+        signal: AbortSignal.timeout(10000),
+        headers: { 'User-Agent': 'SEO-Engine/1 (+verification du sitemap)' },
+      })
+      if (!res.ok) return null
+      return /<(sitemapindex|urlset)\b/.test(await res.text()) ? url : null
+    } catch {
+      return null
+    }
+  }))
+  return found.filter((url): url is string => url !== null)
 }
 
 interface ReadBack {

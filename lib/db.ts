@@ -411,6 +411,30 @@ export async function listPublishedGenerations() {
 }
 
 /**
+ * The engine's pages a visitor can reach on one site: what its own sitemap
+ * lists (lib/seo/engine-sitemap.ts).
+ *
+ * `publish_live` null counts as live: rows written before the column existed
+ * were published straight to production.
+ */
+export async function listLiveEnginePages(siteId: string): Promise<Array<{ url: string; lastmod: string | null }>> {
+  const supabase = requireSupabase()
+  const { data, error } = await supabase
+    .from('generations')
+    .select('published_url, published_at, updated_at')
+    .eq('site_id', siteId)
+    .eq('status', 'published')
+    .not('published_url', 'is', null)
+    .or('publish_live.is.null,publish_live.eq.true')
+
+  if (error) throw new Error(error.message)
+  return (data ?? []).map((row) => ({
+    url: row.published_url as string,
+    lastmod: (row.published_at as string | null) ?? (row.updated_at as string | null) ?? null,
+  }))
+}
+
+/**
  * Generations awaiting the deferred publishing job.
  *
  * The `campaigns!inner` join combined with `campaign.auto_publish = true` is

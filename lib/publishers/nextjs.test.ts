@@ -573,3 +573,49 @@ describe('publishToNextJs — typographie de l article', () => {
     expect(commits[0]).not.toContain('seo-article')
   })
 })
+
+describe('publishToNextJs — sitemap du moteur', () => {
+  const PROFILE = {
+    router: 'app' as const, appRoot: 'nextjs/', srcPrefix: 'nextjs/src/', pageFolder: 'nextjs/src/app/(public)',
+    sitemapPath: null, sitemapFormat: null, layoutPath: null, componentsPath: null, sharedComponents: [],
+    samplePagePath: null, samplePageContent: null, publishTemplate: null,
+  }
+  const options = { githubRepo: 'cnxsolutions/foodflow', githubToken: 'x', page, siteUrl: 'https://www.flowyne.com', repoProfile: PROFILE }
+
+  function repo() {
+    const puts: Array<{ url: string; content: string }> = []
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (init?.method === 'PUT') {
+        puts.push({ url: String(url), content: Buffer.from(JSON.parse(String(init.body)).content, 'base64').toString() })
+        return new Response(JSON.stringify({ content: { html_url: 'x' }, commit: { sha: 'y' } }), { status: 200 })
+      }
+      return new Response('{}', { status: 404 })
+    }))
+    return puts
+  }
+
+  afterEach(() => vi.unstubAllGlobals())
+
+  it('reecrit public/sitemap-seo.xml avec les pages deja en ligne et celle-ci, apres la page', async () => {
+    const puts = repo()
+
+    const result = await publishToNextJs({
+      ...options,
+      engineSitemap: [{ url: 'https://www.flowyne.com/ancienne-page', lastmod: '2026-10-20' }],
+    })
+
+    const sitemap = puts.find((put) => put.url.endsWith('/contents/nextjs/public/sitemap-seo.xml'))
+    expect(puts.indexOf(sitemap!)).toBeGreaterThan(puts.findIndex((put) => put.url.includes('/page.tsx')))
+    expect(sitemap?.content).toContain('<loc>https://www.flowyne.com/ancienne-page</loc>')
+    expect(sitemap?.content).toContain(`<loc>https://www.flowyne.com/${page.slug}</loc>`)
+    expect(result.engineSitemapUrl).toBe('https://www.flowyne.com/sitemap-seo.xml')
+    expect(result.sitemapUpdated).toBe(true)
+  })
+
+  it('n ecrit aucun sitemap quand la liste des pages n a pas pu etre lue', async () => {
+    const puts = repo()
+    const result = await publishToNextJs(options)
+    expect(puts.some((put) => put.url.includes('sitemap-seo.xml'))).toBe(false)
+    expect(result.engineSitemapUrl).toBeUndefined()
+  })
+})
