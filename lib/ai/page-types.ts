@@ -418,8 +418,7 @@ export async function generateSeoPage(opts: PageTypeGenerateOptions): Promise<Ge
     model = 'claude-haiku',
     enableExternalLinks = true,
     externalLinkCount = 3,
-    enableImages = true,
-    imagePerPage = 2,
+    imagePerPage = 1,
     pillarSlug,
     pillarTitle,
     competitorNames = [],
@@ -483,6 +482,7 @@ export async function generateSeoPage(opts: PageTypeGenerateOptions): Promise<Ge
   }
 
   const systemPrompt = buildSystemPrompt(pageType, config.systemPromptExtra, searchIntent, !city.trim())
+  const wantsImage = wantsHeroImage(opts)
   const userPrompt = buildUserPrompt({
     pageType,
     city,
@@ -494,7 +494,7 @@ export async function generateSeoPage(opts: PageTypeGenerateOptions): Promise<Ge
     adjustedLength,
     enableExternalLinks,
     externalLinkCount,
-    enableImages,
+    enableImages: wantsImage,
     imagePerPage,
     minFaq: config.minFaq,
     requiredSections: config.requiredSections,
@@ -640,11 +640,14 @@ export function buildUserPrompt(opts: {
 - Format: {"url": "https://...", "anchor": "texte d'ancrage", "domain": "example.com", "relevance": "pourquoi ce lien est pertinent"}`
     : '- Pas de liens externes.'
 
+  // One photo at most, generated at publication from what the model writes here.
   const imagesBlock = opts.enableImages
     ? `
-- Proposer ${opts.imagePerPage} suggestions d'images avec alt text optimise SEO.
-- Format imageAlts: ["alt text descriptif avec mot-cle"]`
-    : '- Pas d\'images requises.'
+- Une photo realiste sera generee pour l'en-tete de la page, a partir de ta description.
+- "imagePrompt" : EN ANGLAIS, une ou deux phrases qui decrivent la scene de cette photo (lieu, personnes,
+  action) et illustrent le sujet de la page. Aucun texte, logo, marque ni ecran lisible dans la scene.
+- "imageAlts" : UN seul texte alternatif, en francais, qui dit ce que montre la photo.`
+    : '- Pas d\'image : "imagePrompt" vide et "imageAlts" vide.'
 
   const briefBlock = opts.planBrief
     ? `
@@ -771,6 +774,7 @@ REPONDS EN JSON avec cette structure :
   "internalLinksHtml": ["<a href='/url'>ancre</a>"],
   "faqItems": [{"q": "string", "a": "string"}],
   "imageAlts": ["string"],
+  "imagePrompt": "string (anglais : la scene de la photo d'en-tete, vide si pas d'image)",
   "externalLinks": [{"url": "string", "anchor": "string", "domain": "string", "relevance": "string"}],
   "relatedSlugs": ["slugs de pages liees suggerees"],
   "ctaText": "Nous contacter",
@@ -1051,6 +1055,8 @@ export function normalizeResponse(
     internalLinksHtml: Array.isArray(p.internalLinksHtml) ? p.internalLinksHtml : [],
     faqItems,
     imageAlts: Array.isArray(p.imageAlts) ? p.imageAlts : [],
+    generateImage: wantsHeroImage(opts),
+    imagePrompt: wantsHeroImage(opts) ? firstNonEmpty(p.imagePrompt) || undefined : undefined,
     ctaText: firstNonEmpty(p.ctaText) || 'Nous contacter',
     targetLength: adjustedLength,
     // Measured instead of self-reported: a model's own word count is guesswork,
@@ -1077,6 +1083,14 @@ export function normalizeResponse(
       structure: fullRagContext.promptBlocks.structure || undefined,
     } : undefined,
   }
+}
+
+/**
+ * Whether this page gets a hero image: the brief's own choice when it made
+ * one, else the campaign's default (`enableImages`, from `enable_images`).
+ */
+export function wantsHeroImage(opts: Pick<PageTypeGenerateOptions, 'planBrief' | 'enableImages'>): boolean {
+  return opts.planBrief?.generate_image ?? opts.enableImages ?? false
 }
 
 /**

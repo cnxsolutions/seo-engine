@@ -78,6 +78,8 @@ export interface WpClient {
   get<T>(path: string, query?: Record<string, string>): Promise<T>
   /** Authenticated POST returning parsed JSON. WordPress uses POST for updates too. */
   post<T>(path: string, body: unknown): Promise<T>
+  /** Authenticated binary upload, for the media library (`/wp/v2/media`). */
+  upload<T>(path: string, data: Uint8Array, filename: string, mimeType: string): Promise<T>
   /** Unauthenticated GET, for the discovery document. */
   anonymous<T>(path: string): Promise<T>
   /** Follow nothing: tells a redirect from a page. */
@@ -145,6 +147,19 @@ export function createWpClient(options: WpClientOptions): WpClient {
 
     post: <T>(path: string, body: unknown) =>
       call<T>(path, { method: 'POST', body: JSON.stringify(body) }, true),
+
+    // The file itself as the body, named by Content-Disposition: what
+    // `/wp/v2/media` expects, and what overrides the JSON content type above.
+    upload: <T>(path: string, data: Uint8Array, filename: string, mimeType: string) =>
+      call<T>(
+        path,
+        {
+          method: 'POST',
+          body: new Uint8Array(data),
+          headers: { 'Content-Type': mimeType, 'Content-Disposition': `attachment; filename="${filename}"` },
+        },
+        true
+      ),
 
     anonymous: <T>(path: string) => call<T>(path, { method: 'GET' }, false),
 

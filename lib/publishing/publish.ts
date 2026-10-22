@@ -36,6 +36,7 @@ import {
 import { updateGeneration } from '@/lib/db'
 import { connectorFor, missingCredentials, UnknownConnectorError } from './connector'
 import { recordPublication, type RecordReport } from './record'
+import { generateHeroImage, onceHeroImage } from '@/lib/ai/images'
 import { failed, refuse, type PublishOutcome, type PublishRequest } from './outcome'
 import type { PageType } from '@/lib/types'
 
@@ -144,7 +145,14 @@ export async function publishPage(opts: PublishPageOptions): Promise<PublishPage
 
   // ─── 2. The push ───────────────────────────────────────────────────────────
   const connector = connectorFor(site.type)
-  const outcome = await connector.publish({ ...opts, page })
+
+  // The hero image, when the page asked for one at generation (its brief, else
+  // its campaign). After the gate on purpose: a refused page pays for nothing.
+  const heroImage = page.generateImage
+    ? onceHeroImage((format) => generateHeroImage(page, format))
+    : undefined
+
+  const outcome = await connector.publish({ ...opts, page, heroImage })
 
   // ─── 3. Bookkeeping ────────────────────────────────────────────────────────
   //

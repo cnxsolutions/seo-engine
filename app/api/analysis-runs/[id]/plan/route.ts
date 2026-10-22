@@ -109,8 +109,9 @@ async function createCampaignFromAnalysis(body: Record<string, unknown>, analysi
     target_length: Number(body.target_length) || 800,
     enable_external_links: body.enable_external_links !== false,
     external_link_count: Number(body.external_link_count) || 3,
-    enable_images: body.enable_images !== false,
-    image_per_page: Number(body.image_per_page) || 2,
+    // Opt-in: each image is generated, and paid for, at publication.
+    enable_images: body.enable_images === true,
+    image_per_page: 1,
     system_prompt: undefined,
     is_active: true,
     cycle_duration_days: Number(body.cycle_duration_days) || 14,

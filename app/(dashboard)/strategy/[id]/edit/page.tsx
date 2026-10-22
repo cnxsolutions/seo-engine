@@ -103,7 +103,6 @@ interface FormState {
   enable_external_links: boolean
   external_link_count: string
   enable_images: boolean
-  image_per_page: string
 }
 
 /**
@@ -137,8 +136,7 @@ function fromCampaign(campaign: Campaign): FormState {
     cycle_auto_renew: Boolean(campaign.cycle_auto_renew),
     enable_external_links: campaign.enable_external_links ?? true,
     external_link_count: String(campaign.external_link_count ?? 3),
-    enable_images: campaign.enable_images ?? true,
-    image_per_page: String(campaign.image_per_page ?? 2),
+    enable_images: campaign.enable_images === true,
   }
 }
 
@@ -169,9 +167,6 @@ function validate(form: FormState): string | null {
   }
   if (form.enable_external_links && !(Number(form.external_link_count) >= 1)) {
     return 'Indiquez au moins un lien externe par page, ou désactivez les liens externes.'
-  }
-  if (form.enable_images && !(Number(form.image_per_page) >= 1)) {
-    return 'Indiquez au moins une image par page, ou désactivez les images.'
   }
   return null
 }
@@ -208,7 +203,6 @@ function toPayload(form: FormState) {
     enable_external_links: form.enable_external_links,
     external_link_count: Number(form.external_link_count),
     enable_images: form.enable_images,
-    image_per_page: Number(form.image_per_page),
   }
 }
 
@@ -493,14 +487,15 @@ export default function EditCampaignPage() {
                     )}
                   </div>
                   <div style={{ display: 'grid', gap: 'var(--space-2)' }}>
-                    <CheckLabel id="enable-images" name="enable_images" checked={form.enable_images} onChange={handle}>
-                      Insérer des images
+                    <CheckLabel
+                      id="enable-images"
+                      name="enable_images"
+                      checked={form.enable_images}
+                      onChange={handle}
+                      hint="Une photo réaliste générée à la publication, sans texte. Modifiable brief par brief dans la Stratégie."
+                    >
+                      Photo IA en tête de chaque page
                     </CheckLabel>
-                    {form.enable_images && (
-                      <FormField label="Images par page" htmlFor="image-per-page">
-                        <input id="image-per-page" name="image_per_page" type="number" min={1} max={10} value={form.image_per_page} onChange={handle} className="input" style={{ maxWidth: 140 }} />
-                      </FormField>
-                    )}
                   </div>
                 </div>
               </div>

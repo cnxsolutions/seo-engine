@@ -425,3 +425,13 @@ describe('surface du contrat Connector', () => {
     }
   })
 })
+
+describe('image d en-tete', () => {
+  it('ne confie une source d image au connecteur que si la page en a demande une', async () => {
+    await publishPage({ site: NEXTJS_SITE, page: { ...PAGE, generateImage: true }, intent: 'publie', gateAlreadyRan: true })
+    await publishPage({ site: NEXTJS_SITE, page: PAGE, intent: 'publie', gateAlreadyRan: true })
+
+    expect(typeof published[0].heroImage).toBe('function')
+    expect(published[1].heroImage).toBeUndefined()
+  })
+})

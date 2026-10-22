@@ -50,8 +50,9 @@ export async function POST(req: NextRequest) {
       target_length: Number(payload.target_length) || 800,
       enable_external_links: payload.enable_external_links ?? true,
       external_link_count: Number(payload.external_link_count) || 3,
-      enable_images: payload.enable_images ?? true,
-      image_per_page: Number(payload.image_per_page) || 2,
+      // Opt-in: each image is generated, and paid for, at publication.
+      enable_images: payload.enable_images === true,
+      image_per_page: 1,
       system_prompt: payload.system_prompt || null,
       is_active: payload.is_active ?? true,
     })

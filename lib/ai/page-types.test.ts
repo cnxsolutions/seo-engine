@@ -14,6 +14,7 @@ import {
   normalizeResponse,
   resolveSearchIntent,
   type PageTypeGenerateOptions,
+  wantsHeroImage,
 } from './page-types'
 import { frenchLongDate } from './openai'
 import type { PlanItemBrief } from '@/lib/types'
@@ -503,5 +504,30 @@ describe('national scope (no town)', () => {
       'informationnelle',
     )
     expect(page.metaDescription).toBe('Agenda en ligne pour indépendants — Plomberie Martin.')
+  })
+})
+
+describe('hero image decision (brief, else campaign)', () => {
+  it('is off by default, follows the campaign, and the brief overrides it both ways', () => {
+    expect(wantsHeroImage({})).toBe(false)
+    expect(wantsHeroImage({ enableImages: true })).toBe(true)
+    expect(wantsHeroImage({ enableImages: true, planBrief: { generate_image: false } as PlanItemBrief })).toBe(false)
+    expect(wantsHeroImage({ enableImages: false, planBrief: { generate_image: true } as PlanItemBrief })).toBe(true)
+  })
+
+  it('asks the model to describe the photo only when one is planned', () => {
+    expect(buildPrompt({ enableImages: true })).toContain('"imagePrompt" : EN ANGLAIS')
+    expect(buildPrompt({ enableImages: false })).toContain("Pas d'image")
+  })
+
+  it('stores the decision and the scene with the page, and drops a scene nobody asked for', () => {
+    const payload = { htmlContent: '<h1>T</h1><p>x</p>', title: 'Titre', imagePrompt: 'A barber at work.' }
+    const wanted = normalizeResponse(payload, { ...baseOptions, enableImages: true }, 800, 'informationnelle')
+    expect(wanted.generateImage).toBe(true)
+    expect(wanted.imagePrompt).toBe('A barber at work.')
+
+    const unwanted = normalizeResponse(payload, { ...baseOptions, enableImages: false }, 800, 'informationnelle')
+    expect(unwanted.generateImage).toBe(false)
+    expect(unwanted.imagePrompt).toBeUndefined()
   })
 })

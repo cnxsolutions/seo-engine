@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createCyclePlan, getActiveCyclePlan, getCampaignById, getCyclePlanById, getLatestCyclePlan, updateCyclePlan } from '@/lib/db'
 import { startCycle } from '@/lib/scheduler/cycle-manager'
 import { generatePlanPreview } from '@/lib/scheduler/plan-preview'
+import type { PlanItemBrief } from '@/lib/types'
 
 export async function GET(_req: NextRequest, context: { params: Promise<{ id: string }> }) {
   try {
@@ -101,6 +102,25 @@ export async function PATCH(req: NextRequest, context: { params: Promise<{ id: s
     if (action === 'reject') {
       await updateCyclePlan(plan.id, { status: 'cancelled' })
       return NextResponse.json({ success: true, message: 'Plan annulé' })
+    }
+
+    // One brief, one field: whether its page gets a hero image. Narrow on
+    // purpose — the cycle may be running, and rewriting the whole plan from a
+    // screen's copy could undo what changed since that screen loaded. Read at
+    // generation (getPlanItemBrief), so it applies to every page not yet written.
+    if (action === 'image') {
+      const { item_id, generate_image } = body
+      if (typeof item_id !== 'string' || typeof generate_image !== 'boolean') {
+        return NextResponse.json({ error: 'item_id (texte) et generate_image (booléen) requis' }, { status: 400 })
+      }
+      const items = (plan.plan_data ?? []) as PlanItemBrief[]
+      if (!items.some((item) => item.id === item_id)) {
+        return NextResponse.json({ error: 'Brief introuvable dans ce plan' }, { status: 404 })
+      }
+      await updateCyclePlan(plan.id, {
+        plan_data: items.map((item) => (item.id === item_id ? { ...item, generate_image } : item)),
+      })
+      return NextResponse.json({ success: true })
     }
 
     if (action === 'update' && plan_data) {
