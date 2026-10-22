@@ -5,7 +5,7 @@ import { CONTRACT_VERSION, MANIFEST_PATH } from './contract'
 import { parseComponentProps, type PropSignature } from './props'
 import { NO_LAYOUT_SHELL, readLayoutShell, type LayoutShell } from './layout-shell'
 import { readRedirectSources } from './redirects'
-import { aliasCandidates, detectAppRoot, pickPageFolder, toAliasImport } from './repo-layout'
+import { aliasCandidates, detectAppRoot, missingPublicAssets, pickPageFolder, toAliasImport } from './repo-layout'
 
 export interface RepoProfile {
   router: 'app' | 'pages'
@@ -241,7 +241,7 @@ export async function analyzeNextJsRepo(
   let publishTemplate: string | null = null
   let templateError: string | null = null
   if (samplePageContent) {
-    const attempt = await generatePublishTemplate(samplePageContent, sharedComponents, sitemapContent)
+    const attempt = await generatePublishTemplate(samplePageContent, sharedComponents, sitemapContent, files, appRoot)
     publishTemplate = attempt.template
     templateError = attempt.error
   }
@@ -463,7 +463,9 @@ interface TemplateAttempt {
 async function generatePublishTemplate(
   samplePage: string,
   components: string[],
-  sitemapContent: string | null
+  sitemapContent: string | null,
+  files: string[],
+  appRoot: string
 ): Promise<TemplateAttempt> {
   let lastError: string | null = null
 
@@ -475,12 +477,25 @@ async function generatePublishTemplate(
       continue
     }
 
-    const problem = validateTemplate(raw)
+    const problem = validateTemplate(raw) ?? missingAssetsProblem(raw, files, appRoot)
     if (!problem) return { template: raw, error: null }
     lastError = problem
   }
 
   return { template: null, error: lastError }
+}
+
+/**
+ * A template that compiles can still publish a broken page: an image path the
+ * repository does not have renders as a broken image on every page built from
+ * it. Said in the words the model gets back on its retry.
+ */
+function missingAssetsProblem(template: string, files: string[], appRoot: string): string | null {
+  const missing = missingPublicAssets(template, files, appRoot)
+  if (missing.length === 0) return null
+  return `le gabarit reference ${missing.join(', ')}, absent(s) de ${appRoot}public/ : chaque page publiee ` +
+    `afficherait une image cassee. N'utilise aucune image locale qui n'existe pas dans le depot ; ` +
+    `sans image disponible, retire le bloc image.`
 }
 
 async function requestTemplate(
@@ -516,6 +531,8 @@ Genere un template TSX avec des placeholders. Le template doit:
    N'essaie jamais de deriver le nom du titre ou du slug toi-meme : un identifiant JavaScript ne
    peut contenir ni espace, ni tiret, ni accent.
 5. Etre un fichier page.tsx complet et valide
+6. N'utiliser une image locale (src="/...") que si la page existante utilise EXACTEMENT ce fichier. Un chemin
+   d'image invente s'affiche casse sur chaque page publiee : sans image reelle, pas de bloc image.
 ${previousError ? `
 ## ECHEC PRECEDENT — CORRIGE-LE
 Ton gabarit precedent a ete refuse par la validation :

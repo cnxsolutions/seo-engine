@@ -122,3 +122,23 @@ export function toAliasImport(repoPath: string, srcPrefix: string): string {
   if (srcPrefix && repoPath.startsWith(srcPrefix)) return `@/${repoPath.slice(srcPrefix.length)}`
   return repoPath
 }
+
+/**
+ * Local files a page source points at that the repository does not have.
+ *
+ * Next.js serves `/x.jpg` from `<app>/public/x.jpg`. A template a model writes
+ * from one example page invents the paths it cannot see: Flowyne's carried
+ * `/images/blog/default.jpg`, a file that never existed, and every page built
+ * from it opened on a broken image. Protocol-relative URLs (`//cdn…`) and
+ * template placeholders are not local files and are left alone.
+ */
+const LOCAL_ASSET = /["'`](\/(?!\/)[^"'`\s?#{}]+\.(?:png|jpe?g|webp|gif|svg|avif|ico))["'`]/gi
+
+export function missingPublicAssets(source: string, files: readonly string[], appRoot: string): string[] {
+  const present = new Set(files)
+  const missing = new Set<string>()
+  for (const match of source.matchAll(LOCAL_ASSET)) {
+    if (!present.has(`${appRoot}public${match[1]}`)) missing.add(match[1])
+  }
+  return [...missing]
+}
