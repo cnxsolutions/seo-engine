@@ -736,3 +736,20 @@ describe('un seul H1', () => {
     expect(body.content).toContain('<p class="reponse-directe">Réponse.</p>')
   })
 })
+
+describe('sitemaps a renvoyer', () => {
+  it('cite le sitemap que WordPress sert vraiment, pour une page en ligne', async () => {
+    wp([
+      { match: /pages\?|posts\?/, body: [] },
+      { match: /wp-json\/$|wp-json$/, body: { namespaces: ['wp/v2'] } },
+      { match: /sitemap_index\.xml$/, status: 404, text: 'introuvable' },
+      { match: /wp-sitemap\.xml$/, text: '<?xml version="1.0"?><sitemapindex></sitemapindex>' },
+      { match: /pages$/, body: { id: 55, link: `${SITE_URL}/taxi-gare/`, status: 'publish' } },
+      { match: /pages\/55/, body: { id: 55, link: `${SITE_URL}/taxi-gare/`, status: 'publish', content: { raw: '<p>x</p><script type="application/ld+json">{}</script>' } } },
+    ])
+
+    const outcome = await wordPressConnector.publish({ site: SITE, page: PAGE, intent: 'publie' })
+
+    expect(outcome.sitemapUrls).toEqual([`${SITE_URL}/wp-sitemap.xml`])
+  })
+})

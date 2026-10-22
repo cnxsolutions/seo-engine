@@ -49,6 +49,14 @@ vi.mock('@/lib/db', () => ({
   }),
 }))
 
+const sitemapCalls: Array<{ siteId: string; sitemaps: readonly string[] }> = []
+vi.mock('@/lib/seo/sitemap-submit', () => ({
+  resubmitSitemaps: vi.fn(async (opts: { siteId: string; sitemaps: readonly string[] }) => {
+    sitemapCalls.push(opts)
+    return { submitted: [...opts.sitemaps], problems: [] }
+  }),
+}))
+
 vi.mock('@/lib/seo/indexing', () => ({
   submitForIndexing: vi.fn(async ({ pageUrl }: { pageUrl: string }) => {
     indexedUrls.push(pageUrl)
@@ -150,6 +158,7 @@ beforeEach(() => {
   vectorIndexed.length = 0
   rejected.length = 0
   published.length = 0
+  sitemapCalls.length = 0
   gateVerdict = { publishable: true, reasons: [] }
   gateRuns = 0
   nextJsAnswer = outcome({ pageUrl: 'https://taxidriver10.fr/taxi-gare-troyes', mode: 'contrat' })
@@ -433,5 +442,24 @@ describe('image d en-tete', () => {
 
     expect(typeof published[0].heroImage).toBe('function')
     expect(published[1].heroImage).toBeUndefined()
+  })
+})
+
+describe('Search Console', () => {
+  it('renvoie les sitemaps que le connecteur cite, et le note sur la publication', async () => {
+    nextJsAnswer = outcome({ pageUrl: 'https://taxidriver10.fr/taxi-gare-troyes', sitemapUrls: ['https://taxidriver10.fr/sitemap-seo.xml'] })
+
+    await publishPage({ site: NEXTJS_SITE, page: PAGE, intent: 'publie', generationId: 'gen-1' })
+
+    expect(sitemapCalls).toEqual([{ siteId: 'site-1', sitemaps: ['https://taxidriver10.fr/sitemap-seo.xml'] }])
+    expect(updated.at(-1)?.publish_notes).toContain('Search Console : sitemap renvoye (https://taxidriver10.fr/sitemap-seo.xml)')
+  })
+
+  it('ne renvoie rien pour une page qui n est pas en ligne', async () => {
+    nextJsAnswer = outcome({ live: false, pageUrl: 'https://taxidriver10.fr/x', sitemapUrls: ['https://taxidriver10.fr/sitemap-seo.xml'] })
+
+    await publishPage({ site: NEXTJS_SITE, page: PAGE, intent: 'publie', generationId: 'gen-1' })
+
+    expect(sitemapCalls).toHaveLength(0)
   })
 })

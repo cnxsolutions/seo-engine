@@ -13,6 +13,7 @@
 //   mode  — computed since yesterday at nextjs.ts, read by nobody until now.
 
 import { publishToNextJs } from '@/lib/publishers/nextjs'
+import { listLiveEnginePages } from '@/lib/db'
 import type { Connector } from './connector'
 import type { PublishOutcome, PublishRequest } from './outcome'
 import type { RepoProfile } from '@/lib/publishers/nextjs-analyzer'
@@ -47,6 +48,14 @@ export const nextJsConnector: Connector = {
     const { site, page, pageType } = request
     const branch = site.github_branch || undefined
 
+    // The engine's pages already online, for its own sitemap. Unreadable, no
+    // sitemap is written at all: one that forgot the older pages would tell
+    // Search Console they are gone.
+    const engineSitemap = await listLiveEnginePages(site.id).catch((error) => {
+      console.warn(`[publish] pages du moteur illisibles, sitemap non reecrit : ${error instanceof Error ? error.message : error}`)
+      return undefined
+    })
+
     const result = await publishToNextJs({
       githubRepo: site.github_repo || '',
       githubToken: site.github_token || '',
@@ -62,6 +71,7 @@ export const nextJsConnector: Connector = {
       // validation humaine se heurter au marqueur de fichier ecrit a la main.
       replaces: request.replaces,
       heroImage: request.heroImage,
+      engineSitemap,
     })
 
     if (!result.success) {
@@ -110,6 +120,7 @@ export const nextJsConnector: Connector = {
       written: true,
       live,
       discoverable: result.sitemapUpdated === true,
+      sitemapUrls: result.engineSitemapUrl ? [result.engineSitemapUrl] : [],
       pageUrl: result.pageUrl,
       artifactUrl: result.fileUrl,
       remoteId: result.commitSha,

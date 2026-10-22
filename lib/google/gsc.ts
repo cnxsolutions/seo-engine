@@ -138,6 +138,19 @@ async function queryAllRows(
 // ─── Sitemap submission ──────────────────────────────────────────────────────
 
 /**
+ * The sitemaps already registered on a Search Console property, as URLs.
+ *
+ * What the owner submitted by hand: resubmitting them after a publication is
+ * how a page that only appears there gets noticed.
+ */
+export async function listSitemaps(googleFetch: GoogleFetch, siteUrl: string): Promise<string[]> {
+  const res = await googleFetch(`${GSC_API}/sites/${encodeURIComponent(siteUrl)}/sitemaps`)
+  if (!res.ok) return []
+  const data = (await res.json()) as { sitemap?: Array<{ path?: string }> }
+  return (data.sitemap ?? []).map((entry) => entry.path ?? '').filter(Boolean)
+}
+
+/**
  * Declares a sitemap to Search Console.
  *
  * This replaces the `https://www.google.com/ping?sitemap=` call still made from

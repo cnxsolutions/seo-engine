@@ -10,6 +10,7 @@ import { isRedirectSource } from './redirects'
 import { HERO_IMAGE_SIZE, heroImageAlt, withHeroFigure, type HeroImageSource } from '@/lib/ai/images'
 import { takeLeadingH1 } from '@/lib/seo/h1'
 import { hasTypographyPlugin, withArticleStyles } from './article-styles'
+import { ENGINE_SITEMAP_FILE, engineSitemapUrl, renderEngineSitemap, type SitemapEntry } from '@/lib/seo/engine-sitemap'
 
 export interface NextJsPublishOptions {
   githubRepo: string
@@ -57,6 +58,11 @@ export interface NextJsPublishOptions {
   replaces?: { path: string }
   /** The page's hero image, generated only if it is not already in the repository. */
   heroImage?: HeroImageSource
+  /**
+   * The engine's pages already online on this site. Given, the publisher
+   * rewrites `public/sitemap-seo.xml` with them and this page (lib/seo/engine-sitemap.ts).
+   */
+  engineSitemap?: SitemapEntry[]
 }
 
 /**
@@ -69,6 +75,44 @@ export interface NextJsPublishOptions {
 function withRef(url: string, branch?: string): string {
   if (!branch) return url
   return `${url}${url.includes('?') ? '&' : '?'}ref=${encodeURIComponent(branch)}`
+}
+
+/**
+ * Rewrite `<app>/public/sitemap-seo.xml` with every engine page of the site.
+ *
+ * True once the file holds the list — including when it already did, which
+ * costs no commit. False when GitHub refused: the page is published all the
+ * same, it is the sitemap that waits for the next publication.
+ */
+async function commitEngineSitemap(opts: {
+  repoApi: string
+  headers: Record<string, string>
+  appRoot: string
+  branch?: string
+  entries: SitemapEntry[]
+}): Promise<boolean> {
+  const path = `${opts.appRoot}public/${ENGINE_SITEMAP_FILE}`
+  const xml = renderEngineSitemap(opts.entries)
+  try {
+    const existing = await readExistingPage(opts.repoApi, opts.headers, path, opts.branch)
+    if (existing?.content === xml) return true
+
+    const res = await fetch(`${opts.repoApi}/contents/${path}`, {
+      method: 'PUT',
+      headers: opts.headers,
+      body: JSON.stringify({
+        message: 'seo-engine: sitemap des pages du moteur',
+        content: Buffer.from(xml).toString('base64'),
+        ...(existing ? { sha: existing.sha } : {}),
+        ...(opts.branch ? { branch: opts.branch } : {}),
+      }),
+    })
+    if (!res.ok) console.warn(`[publish] sitemap du moteur non commite (GitHub ${res.status})`)
+    return res.ok
+  } catch (error) {
+    console.warn(`[publish] sitemap du moteur impossible : ${error instanceof Error ? error.message : error}`)
+    return false
+  }
 }
 
 /**
@@ -183,6 +227,8 @@ export interface NextJsPublishResult {
   promotion?: PromotionOutcome
   /** Public path of the hero image the page shows, when it has one. */
   heroImage?: string
+  /** URL of the engine's sitemap, when this publication wrote it. */
+  engineSitemapUrl?: string
   /**
    * Publishing in the site's shell and publishing a naked article both returned
    * `success: true` and were indistinguishable afterwards. Only one of them is
@@ -333,6 +379,20 @@ export async function publishToNextJs(opts: NextJsPublishOptions): Promise<NextJ
       sitemapUpdated = await addToSitemap(repoApi, headers, profile.sitemapPath, page.slug, branch)
     }
 
+    // The engine's own sitemap, with this page in it: the site's sitemap is
+    // built from ITS routes and lists none of ours (lib/seo/engine-sitemap.ts).
+    // Before the promotion, like the registry above.
+    const pageUrl = `${siteUrl.replace(/\/$/, '')}/${page.slug}`
+    const engineSitemapWritten = opts.engineSitemap
+      ? await commitEngineSitemap({
+          repoApi,
+          headers,
+          appRoot: profile.appRoot ?? '',
+          branch,
+          entries: [...opts.engineSitemap, { url: pageUrl, lastmod: new Date().toISOString() }],
+        })
+      : false
+
     // 5. Carry it to the branch the host actually deploys
     //
     // Last, deliberately: the page file and the route registry must both be on
@@ -349,9 +409,10 @@ export async function publishToNextJs(opts: NextJsPublishOptions): Promise<NextJ
     return {
       success: true,
       fileUrl: pageData.content?.html_url,
-      pageUrl: `${siteUrl.replace(/\/$/, '')}/${page.slug}`,
+      pageUrl,
       commitSha: pageData.commit?.sha,
-      sitemapUpdated,
+      sitemapUpdated: sitemapUpdated || engineSitemapWritten,
+      engineSitemapUrl: engineSitemapWritten ? engineSitemapUrl(siteUrl) : undefined,
       mode,
       promotion,
       heroImage: hero?.src,

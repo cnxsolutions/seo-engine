@@ -29,6 +29,7 @@ import { updateGeneration, upsertSitePages } from '@/lib/db'
 import { countHtmlWords, indexPublishedPage } from '@/lib/pipeline'
 import { censusHeadings } from '@/lib/pipeline/structure'
 import { submitForIndexing } from '@/lib/seo/indexing'
+import { resubmitSitemaps } from '@/lib/seo/sitemap-submit'
 import { normalizeInventoryPath } from '@/src/core/domain/existing/inventory'
 import { stripHtmlToText } from '@/src/core/domain/text/text-utils'
 import type { GeneratedPage } from '@/lib/ai/openai'
@@ -120,6 +121,23 @@ export async function recordPublication(opts: RecordOptions): Promise<RecordRepo
     problems.push(`indexation non soumise : ${message(error)}`)
     return null
   })
+
+  // Search Console: the sitemaps that list the page, sent again — the supported
+  // counterpart of « Demander l'indexation », which has no API. The outcome joins
+  // the publication's notes, where the operator reads it.
+  const sitemaps = await resubmitSitemaps({ siteId: site.id, sitemaps: outcome.sitemapUrls ?? [] }).catch((error) => ({
+    submitted: [] as string[],
+    problems: [message(error)],
+  }))
+  problems.push(...sitemaps.problems.map((problem) => `sitemap : ${problem}`))
+  if (generationId) {
+    const note = sitemaps.submitted.length > 0
+      ? `Search Console : sitemap renvoye (${sitemaps.submitted.join(', ')})`
+      : `Search Console : aucun sitemap renvoye (${sitemaps.problems.join(' ; ') || 'rien a soumettre'})`
+    await updateGeneration(generationId, { publish_notes: [...outcome.notes, note] }).catch((error) => {
+      problems.push(`note Search Console non enregistree : ${message(error)}`)
+    })
+  }
 
   if (generationId) {
     // The vector index is what lets the generator's retrieval see an already
