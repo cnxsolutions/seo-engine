@@ -523,3 +523,53 @@ describe('fillTemplate — un seul H1', () => {
     expect(out).toContain('<h1>Taxi à Troyes</h1>')
   })
 })
+
+describe('publishToNextJs — typographie de l article', () => {
+  // artisan-boisson-teddy.fr and flowyne.com, 2026-10-22: articles wrapped in
+  // `prose` on sites without the Typography plugin read as one block of text.
+  const PROFILE = {
+    router: 'app' as const,
+    appRoot: '',
+    srcPrefix: 'src/',
+    pageFolder: 'src/app',
+    sitemapPath: null,
+    sitemapFormat: null,
+    layoutPath: null,
+    componentsPath: null,
+    sharedComponents: [],
+    samplePagePath: null,
+    samplePageContent: null,
+    publishTemplate: null,
+  }
+  const options = { githubRepo: 'cnxsolutions/renovation-bt', githubToken: 'x', page, siteUrl: 'https://exemple.fr', repoProfile: PROFILE }
+
+  /** A repository whose package.json does or does not install the plugin; returns the committed page. */
+  function repo(packageJson: string) {
+    const commits: string[] = []
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (init?.method === 'PUT') {
+        commits.push(Buffer.from(JSON.parse(String(init.body)).content, 'base64').toString())
+        return new Response(JSON.stringify({ content: { html_url: 'x' }, commit: { sha: 'y' } }), { status: 200 })
+      }
+      if (String(url).includes('/contents/package.json')) {
+        return new Response(JSON.stringify({ sha: 'p', content: Buffer.from(packageJson).toString('base64') }), { status: 200 })
+      }
+      return new Response('{}', { status: 404 })
+    }))
+    return commits
+  }
+
+  afterEach(() => vi.unstubAllGlobals())
+
+  it('donne a l article sa propre typographie sur un site sans le plugin', async () => {
+    const commits = repo('{"devDependencies":{"tailwindcss":"^4"}}')
+    await publishToNextJs(options)
+    expect(commits[0]).toContain('seo-article')
+  })
+
+  it('laisse le site faire sur un site qui a le plugin', async () => {
+    const commits = repo('{"devDependencies":{"tailwindcss":"^4","@tailwindcss/typography":"^0.5.20"}}')
+    await publishToNextJs(options)
+    expect(commits[0]).not.toContain('seo-article')
+  })
+})
