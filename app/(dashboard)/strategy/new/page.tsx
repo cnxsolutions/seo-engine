@@ -15,6 +15,7 @@ import type { InventoryResponse } from '@/app/api/sites/[id]/inventory/types'
 // import : il traverse le bundle client sans rien emporter.
 import { normalizeInventoryPath } from '@/src/core/domain/existing/inventory'
 import { AI_MODEL_OPTIONS, DEFAULT_GENERATION_MODEL } from '@/lib/ai/provider'
+import { CAMPAIGN_SCOPE_OPTIONS, withoutLocalPack, type CampaignScope } from '@/lib/geo/scope'
 
 // The select and the plan table used to read a local label table that said
 // 'Fille' and 'Local Pack' where the calendar and the strategy list said
@@ -110,6 +111,8 @@ export default function NewStrategyWorkflowPage() {
     business_type: '',
     business_name: '',
     keywords: '',
+    // National: no commune, no department, no local pack (lib/geo/scope.ts).
+    scope: 'local' as CampaignScope,
     department: 'Aube',
     communes: '',
     schedule_frequency: 'every_2_days',
@@ -228,7 +231,14 @@ export default function NewStrategyWorkflowPage() {
       : siteForm.github_repo && siteForm.github_token))
     : Boolean(selectedSiteId)
 
-  const canAnalyze = Boolean(contextForm.business_type && contextForm.business_name && contextForm.communes)
+  const national = contextForm.scope === 'national'
+  const canAnalyze = Boolean(contextForm.business_type && contextForm.business_name && (national || contextForm.communes))
+
+  /** Turning national drops local pack: there is no place for that page to be about. */
+  const chooseScope = (scope: CampaignScope) => {
+    setContextForm((prev) => ({ ...prev, scope }))
+    if (scope === 'national') setPageTypes((prev) => withoutLocalPack(prev))
+  }
 
   const updateSiteForm = (event: React.ChangeEvent<HTMLInputElement>) => {
     setSiteForm((prev) => ({ ...prev, [event.target.name]: event.target.value }))
@@ -272,7 +282,7 @@ export default function NewStrategyWorkflowPage() {
           siteUrl: site.url,
           businessType: contextForm.business_type,
           businessName: contextForm.business_name,
-          targetCities: splitList(contextForm.communes),
+          targetCities: national ? [] : splitList(contextForm.communes),
           competitorUrls: splitList(contextForm.competitor_urls).slice(0, 5),
         }),
       })
@@ -298,12 +308,13 @@ export default function NewStrategyWorkflowPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           site_id: site.id,
-          name: contextForm.name || `SEO ${contextForm.business_type} ${splitList(contextForm.communes)[0] || ''}`.trim(),
+          name: contextForm.name || `SEO ${contextForm.business_type} ${national ? '' : splitList(contextForm.communes)[0] || ''}`.trim(),
           business_type: contextForm.business_type,
           business_name: contextForm.business_name,
           keywords: splitList(contextForm.keywords),
-          department: contextForm.department,
-          communes: splitList(contextForm.communes),
+          scope: contextForm.scope,
+          department: national ? '' : contextForm.department,
+          communes: national ? [] : splitList(contextForm.communes),
           schedule_frequency: contextForm.schedule_frequency,
           schedule_time: contextForm.schedule_time,
           ai_model: contextForm.ai_model,
@@ -311,7 +322,7 @@ export default function NewStrategyWorkflowPage() {
           auto_publish: contextForm.auto_publish,
           target_length: Number(contextForm.target_length) || 800,
           cycle_duration_days: Number(contextForm.cycle_duration_days) || 14,
-          page_types: pageTypes,
+          page_types: national ? withoutLocalPack(pageTypes) : pageTypes,
         }),
       })
       const data = await res.json()
@@ -453,11 +464,26 @@ export default function NewStrategyWorkflowPage() {
             <FormField label="Nom de la stratégie"><input name="name" value={contextForm.name} onChange={updateContextForm} className="input" placeholder="SEO Plombier Troyes" /></FormField>
             <FormField label="Nom du business"><input name="business_name" value={contextForm.business_name} onChange={updateContextForm} className="input" /></FormField>
             <FormField label="Type d’activité"><input name="business_type" value={contextForm.business_type} onChange={updateContextForm} className="input" placeholder="plombier, coach, avocat..." /></FormField>
-            <FormField label="Département"><input name="department" value={contextForm.department} onChange={updateContextForm} className="input" /></FormField>
+            {!national && <FormField label="Département"><input name="department" value={contextForm.department} onChange={updateContextForm} className="input" /></FormField>}
           </div>
-          <FormField label="Communes ou zones" hint="séparées par une virgule">
-            <input name="communes" value={contextForm.communes} onChange={updateContextForm} className="input" placeholder="Troyes, Sainte-Savine, La Chapelle-Saint-Luc" />
-          </FormField>
+          <div>
+            <div className="field-label">Portée</div>
+            <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+              {CAMPAIGN_SCOPE_OPTIONS.map((option) => (
+                <button key={option.value} onClick={() => chooseScope(option.value)} className={contextForm.scope === option.value ? 'btn-primary' : 'btn-ghost'}>
+                  {option.label}
+                </button>
+              ))}
+            </div>
+            <p className="meta" style={{ marginTop: 'var(--space-2)' }}>
+              {CAMPAIGN_SCOPE_OPTIONS.find((option) => option.value === contextForm.scope)?.hint}
+            </p>
+          </div>
+          {!national && (
+            <FormField label="Communes ou zones" hint="séparées par une virgule">
+              <input name="communes" value={contextForm.communes} onChange={updateContextForm} className="input" placeholder="Troyes, Sainte-Savine, La Chapelle-Saint-Luc" />
+            </FormField>
+          )}
           <FormField label="Mots-clés de base" hint="séparés par une virgule">
             <input name="keywords" value={contextForm.keywords} onChange={updateContextForm} className="input" placeholder="depannage, urgence, devis" />
           </FormField>
@@ -469,8 +495,15 @@ export default function NewStrategyWorkflowPage() {
             <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
               {PAGE_TYPES.map((type) => {
                 const active = pageTypes.includes(type.value)
+                const unavailable = national && type.value === 'local_pack'
                 return (
-                  <button key={type.value} onClick={() => setPageTypes((prev) => active ? prev.filter((item) => item !== type.value) : [...prev, type.value])} className={active ? 'btn-primary' : 'btn-ghost'}>
+                  <button
+                    key={type.value}
+                    onClick={() => setPageTypes((prev) => active ? prev.filter((item) => item !== type.value) : [...prev, type.value])}
+                    disabled={unavailable}
+                    title={unavailable ? 'Réservé aux campagnes locales' : undefined}
+                    className={active ? 'btn-primary' : 'btn-ghost'}
+                  >
                     {type.label}
                   </button>
                 )

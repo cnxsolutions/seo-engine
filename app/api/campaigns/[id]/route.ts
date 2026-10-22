@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { countInFlightGenerations, deleteCampaign, getCampaignByIdSafe, updateCampaign } from '@/lib/db'
 import { AI_MODEL_OPTIONS, isAnthropicModel, resolveAnthropicModel } from '@/lib/ai/provider'
 import type { Campaign, PageType, PublishStatus, ScheduleFrequency } from '@/lib/types'
+import { isNationalCampaign, isNationalRequest, targetCommunes } from '@/lib/geo/scope'
 
 /**
  * The campaign is serialised as-is, so it is read WITHOUT the site credentials.
@@ -97,7 +98,7 @@ export async function PATCH(req: NextRequest, context: { params: Promise<{ id: s
     const values: Partial<Campaign> = {}
     const has = (field: string) => field in payload
 
-    for (const field of ['business_name', 'business_type', 'department'] as const) {
+    for (const field of ['business_name', 'business_type'] as const) {
       if (!has(field)) continue
       if (typeof payload[field] !== 'string' || !payload[field].trim()) return invalid(field, 'texte requis')
       values[field] = payload[field].trim()
@@ -109,15 +110,30 @@ export async function PATCH(req: NextRequest, context: { params: Promise<{ id: s
       values.keywords = keywords
     }
 
-    if (has('communes')) {
-      const communes = toList(payload.communes)
-      if (!communes) return invalid('communes')
-      // Same floor as the creation: a campaign with no territory would plan
-      // nothing and the scheduler would report a silent, empty cycle.
-      if (communes.length === 0) {
-        return NextResponse.json({ error: 'Au moins une commune ou une zone valide est requise.' }, { status: 400 })
+    // Territory. A national campaign has neither communes nor department
+    // (lib/geo/scope.ts), whatever else the payload carries for them.
+    if (has('scope') && payload.scope !== 'local' && payload.scope !== 'national') {
+      return invalid('scope', '« local » ou « national »')
+    }
+    const listed = has('communes') ? toList(payload.communes) : []
+    if (listed === null) return invalid('communes')
+    if (isNationalRequest(payload.scope, listed)) {
+      values.communes = []
+      values.department = ''
+    } else {
+      if (has('department')) {
+        if (typeof payload.department !== 'string' || !payload.department.trim()) return invalid('department', 'texte requis')
+        values.department = payload.department.trim()
       }
-      values.communes = communes
+      if (has('communes') || payload.scope === 'local') {
+        // Same floor as the creation: a LOCAL campaign with no territory would
+        // plan nothing and the scheduler would report a silent, empty cycle.
+        const communes = targetCommunes(listed)
+        if (communes.length === 0) {
+          return NextResponse.json({ error: 'Au moins une commune réelle est requise — pour une activité sans ville, choisissez la portée nationale.' }, { status: 400 })
+        }
+        values.communes = communes
+      }
     }
 
     if (has('page_types')) {
@@ -125,6 +141,9 @@ export async function PATCH(req: NextRequest, context: { params: Promise<{ id: s
       if (!pageTypes || pageTypes.length === 0) return invalid('page_types', 'au moins un type de page')
       const unknown = pageTypes.find((type) => !PAGE_TYPES.includes(type as PageType))
       if (unknown) return invalid('page_types', `« ${unknown} » n'est pas un type de page`)
+      if (pageTypes.includes('local_pack') && isNationalCampaign({ communes: values.communes ?? existing.communes })) {
+        return invalid('page_types', 'le local pack est la page d’un lieu : une campagne nationale n’en a pas')
+      }
       values.page_types = pageTypes as PageType[]
     }
 

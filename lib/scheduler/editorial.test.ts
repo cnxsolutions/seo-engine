@@ -30,7 +30,7 @@ vi.mock('@/lib/supabase', () => ({
   createServiceClient: () => ({ from: () => queryDouble() }),
 }))
 
-const { listDueEditorialSlots, planItemActionKind, slotsFromPlan } = await import('./editorial')
+const { generateEditorialCalendar, listDueEditorialSlots, planItemActionKind, slotsFromPlan } = await import('./editorial')
 
 beforeEach(() => {
   calls.length = 0
@@ -95,5 +95,42 @@ describe('listDueEditorialSlots', () => {
     // au lieu d'ecarter le creneau, qui part quand meme.
     expect(calls.find((call) => call.method === 'select')?.args[0]).toContain('campaigns!inner')
     expect(calls.filter((call) => call.method === 'eq').map((call) => call.args)).toContainEqual(['campaign.is_active', true])
+  })
+})
+
+// ─── Une campagne nationale n'a pas de ville ─────────────────────────────────
+//
+// Flowyne, une application vendue dans toute la France, avait ete saisie avec
+// « tous » comme commune : chaque creneau visait une ville nommee « tous », et
+// trois d'entre eux etaient des local packs.
+
+describe('generateEditorialCalendar — portee', () => {
+  const base = {
+    id: 'c1',
+    business_type: 'application de reservation',
+    keywords: ['application de reservation', 'agenda en ligne'],
+    schedule_frequency: 'every_3_days',
+    page_types: ['pillar', 'child', 'local_pack', 'alternative', 'comparative'],
+  }
+  const calendar = (overrides: Record<string, unknown>) =>
+    generateEditorialCalendar({
+      campaign: { ...base, ...overrides } as unknown as Parameters<typeof generateEditorialCalendar>[0]['campaign'],
+      startDate: new Date('2026-10-22T00:00:00'),
+      slotCount: 12,
+    })
+
+  it('ne vise aucune ville et ne planifie aucun local pack pour une campagne nationale', () => {
+    for (const communes of [['tous'], []]) {
+      const slots = calendar({ communes, department: 'Aube' })
+      expect(slots).toHaveLength(12)
+      expect(new Set(slots.map((slot) => slot.target_city))).toEqual(new Set(['']))
+      expect(slots.map((slot) => slot.page_type)).not.toContain('local_pack')
+    }
+  })
+
+  it('garde les communes et le local pack d\'une campagne locale', () => {
+    const slots = calendar({ communes: ['Troyes', 'tous'], department: 'Aube' })
+    expect(new Set(slots.map((slot) => slot.target_city))).toEqual(new Set(['Troyes']))
+    expect(slots.map((slot) => slot.page_type)).toContain('local_pack')
   })
 })

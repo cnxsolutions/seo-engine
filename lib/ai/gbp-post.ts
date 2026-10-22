@@ -45,6 +45,7 @@ import {
   type GbpActionType,
 } from '@/lib/publishing/gbp/format'
 import type { Campaign, Site } from '@/lib/types'
+import { campaignDepartment, targetCommunes } from '@/lib/geo/scope'
 import type { GbpPostAngle } from '@/src/core/domain/gbp/rotation'
 
 // ─── Contrat ────────────────────────────────────────────────────────────────
@@ -333,8 +334,10 @@ function describeFacts(context: GoogleContext, campaign: Campaign): string {
     lines.push(...gbp.topReviews.map(review => `  · ${flatten(review)}`))
   }
 
-  if (campaign.communes.length) lines.push(`- Communes desservies : ${campaign.communes.join(', ')}`)
-  if (campaign.department) lines.push(`- Departement : ${campaign.department}`)
+  const communes = targetCommunes(campaign.communes)
+  const department = campaignDepartment(campaign)
+  if (communes.length) lines.push(`- Communes desservies : ${communes.join(', ')}`)
+  if (department) lines.push(`- Departement : ${department}`)
 
   // Le dire franchement plutot que rendre un bloc vide : « aucun fait » est une
   // consigne, un bloc vide est une invitation a combler.

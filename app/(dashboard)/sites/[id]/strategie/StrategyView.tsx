@@ -50,6 +50,7 @@ import {
 } from '@/lib/types'
 import type { CannibalizedQuery } from '@/lib/google/performance'
 import { publicationModeOf, rhythmLabel } from '../campaign-summary'
+import { isNationalCampaign, plannablePageTypes, targetCommunes } from '@/lib/geo/scope'
 import {
   UNKNOWN_PROVENANCE,
   countMeasuredBriefs,
@@ -353,8 +354,10 @@ function CampaignPanel({
         <dl className="hub-facts">
           <div><dt>Activité</dt><dd>{campaign.business_type || '—'}</dd></div>
           <div><dt>Mots-clés</dt><dd>{campaign.keywords?.length ? campaign.keywords.join(', ') : '—'}</dd></div>
-          <div><dt>Communes</dt><dd>{campaign.communes?.length ? campaign.communes.join(', ') : campaign.department || '—'}</dd></div>
-          <div><dt>Types de pages</dt><dd>{(campaign.page_types ?? ['child']).map(pageTypeLabel).join(', ')}</dd></div>
+          {/* What the planner will actually use (lib/geo/scope.ts): « tous » is no
+              town, and a national campaign plans no local pack. */}
+          <div><dt>Zone</dt><dd>{isNationalCampaign(campaign) ? 'Nationale — toute la France' : targetCommunes(campaign.communes).join(', ')}</dd></div>
+          <div><dt>Types de pages</dt><dd>{plannablePageTypes(campaign).map(pageTypeLabel).join(', ')}</dd></div>
           <div>
             <dt>Rythme</dt>
             <dd>

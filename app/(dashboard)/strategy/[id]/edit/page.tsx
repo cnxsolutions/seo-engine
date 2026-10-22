@@ -28,6 +28,7 @@ import { Button, EmptyState, FormField, Notice, PageHeader } from '@/components/
 import { PAGE_TYPE_LABELS } from '@/lib/types'
 import type { Campaign, PageType, PublishStatus, ScheduleFrequency } from '@/lib/types'
 import { AI_MODEL_OPTIONS } from '@/lib/ai/provider'
+import { CAMPAIGN_SCOPE_OPTIONS, campaignScope, targetCommunes, withoutLocalPack, type CampaignScope } from '@/lib/geo/scope'
 import { DeleteCampaignDialog } from '../../DeleteCampaignDialog'
 
 // Même ordre éditorial que /strategy/new : pilier d'abord. Les libellés viennent
@@ -83,6 +84,8 @@ const CYCLE_MAX = 90
 interface FormState {
   business_name: string
   business_type: string
+  /** National: no commune, no department, no local pack (lib/geo/scope.ts). */
+  scope: CampaignScope
   department: string
   keywords: string
   communes: string
@@ -110,13 +113,18 @@ interface FormState {
  * traiterait, pas comme un zéro.
  */
 function fromCampaign(campaign: Campaign): FormState {
+  // A campaign saved with « tous » as its commune reads back as national, and
+  // the marker itself is not shown as if it were a town to edit.
+  const scope = campaignScope(campaign)
+  const pageTypes: PageType[] = campaign.page_types?.length ? campaign.page_types : ['child']
   return {
     business_name: campaign.business_name ?? '',
     business_type: campaign.business_type ?? '',
-    department: campaign.department ?? '',
+    scope,
+    department: scope === 'national' ? '' : campaign.department ?? '',
     keywords: (campaign.keywords ?? []).join('\n'),
-    communes: (campaign.communes ?? []).join('\n'),
-    page_types: campaign.page_types?.length ? campaign.page_types : ['child'],
+    communes: targetCommunes(campaign.communes).join('\n'),
+    page_types: scope === 'national' ? withoutLocalPack(pageTypes, ['child']) : pageTypes,
     schedule_frequency: campaign.schedule_frequency ?? 'daily',
     schedule_days: campaign.schedule_days ?? [],
     schedule_time: campaign.schedule_time ?? '09:00',
@@ -147,7 +155,9 @@ function splitList(value: string): string[] {
 function validate(form: FormState): string | null {
   if (!form.business_name.trim()) return 'Le nom du business est requis.'
   if (!form.business_type.trim()) return 'Le type d’activité est requis.'
-  if (splitList(form.communes).length === 0) return 'Au moins une commune ou une zone est requise.'
+  if (form.scope === 'local' && splitList(form.communes).length === 0) {
+    return 'Au moins une commune est requise — ou choisissez la portée nationale.'
+  }
   if (form.page_types.length === 0) return 'Choisissez au moins un type de page.'
   if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(form.schedule_time)) return 'L’heure doit être au format HH:MM.'
   if (form.schedule_frequency === 'custom' && form.schedule_days.length === 0) {
@@ -168,13 +178,21 @@ function validate(form: FormState): string | null {
 
 /** Le corps du PATCH, dans les noms de colonnes que la route attend. */
 function toPayload(form: FormState) {
+  const national = form.scope === 'national'
   return {
     business_name: form.business_name.trim(),
     business_type: form.business_type.trim(),
-    department: form.department.trim(),
+    scope: form.scope,
+    // The route ignores both for a national campaign; not sending them keeps a
+    // stale department from being validated for nothing. A blank department is
+    // left out too: the route refuses one, and a campaign switched back from
+    // national arrives here with none.
+    ...(national ? {} : {
+      communes: splitList(form.communes),
+      ...(form.department.trim() ? { department: form.department.trim() } : {}),
+    }),
     keywords: splitList(form.keywords),
-    communes: splitList(form.communes),
-    page_types: form.page_types,
+    page_types: national ? withoutLocalPack(form.page_types, ['child']) : form.page_types,
     schedule_frequency: form.schedule_frequency,
     // Les jours ne portent un sens qu'en rythme « Jours choisis » : les envoyer
     // avec un autre rythme laisserait en base une liste que rien ne lit.
@@ -235,6 +253,13 @@ export default function EditCampaignPage() {
     const target = event.target
     const value = target instanceof HTMLInputElement && target.type === 'checkbox' ? target.checked : target.value
     setForm((prev) => (prev ? { ...prev, [target.name]: value } : prev))
+  }
+
+  /** Turning national drops local pack: the route would refuse it, and rightly. */
+  const chooseScope = (scope: CampaignScope) => {
+    setForm((prev) => (prev
+      ? { ...prev, scope, page_types: scope === 'national' ? withoutLocalPack(prev.page_types, ['child']) : prev.page_types }
+      : prev))
   }
 
   const togglePageType = (type: PageType) => {
@@ -334,15 +359,34 @@ export default function EditCampaignPage() {
                   <FormField label="Type d’activité" required htmlFor="business-type">
                     <input id="business-type" name="business_type" value={form.business_type} onChange={handle} className="input" placeholder="plombier, coach, avocat…" />
                   </FormField>
-                  <FormField label="Département" htmlFor="department">
-                    <input id="department" name="department" value={form.department} onChange={handle} className="input" />
-                  </FormField>
+                  {form.scope === 'local' && (
+                    <FormField label="Département" htmlFor="department">
+                      <input id="department" name="department" value={form.department} onChange={handle} className="input" />
+                    </FormField>
+                  )}
                 </div>
 
+                <fieldset style={{ border: 0, padding: 0, margin: 0 }}>
+                  <legend className="field-label">Portée</legend>
+                  <div style={{ display: 'flex', gap: 'var(--space-5)', flexWrap: 'wrap' }}>
+                    {CAMPAIGN_SCOPE_OPTIONS.map((option) => (
+                      <label key={option.value} htmlFor={`scope-${option.value}`} style={{ display: 'flex', gap: 'var(--space-2)', alignItems: 'flex-start', cursor: 'pointer', fontSize: 'var(--fs-sm)', color: 'var(--ink-primary)' }}>
+                        <input id={`scope-${option.value}`} type="radio" name="scope" value={option.value} checked={form.scope === option.value} onChange={() => chooseScope(option.value)} style={{ marginTop: 3 }} />
+                        <span>
+                          {option.label}
+                          <span className="meta" style={{ display: 'block' }}>{option.hint}</span>
+                        </span>
+                      </label>
+                    ))}
+                  </div>
+                </fieldset>
+
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 'var(--space-4)' }}>
-                  <FormField label="Communes ou zones" required htmlFor="communes" hint="une par ligne">
-                    <textarea id="communes" name="communes" value={form.communes} onChange={handle} className="input" rows={6} style={{ resize: 'vertical' }} />
-                  </FormField>
+                  {form.scope === 'local' && (
+                    <FormField label="Communes ou zones" required htmlFor="communes" hint="une par ligne">
+                      <textarea id="communes" name="communes" value={form.communes} onChange={handle} className="input" rows={6} style={{ resize: 'vertical' }} />
+                    </FormField>
+                  )}
                   <FormField label="Mots-clés de base" htmlFor="keywords" hint="un par ligne">
                     <textarea id="keywords" name="keywords" value={form.keywords} onChange={handle} className="input" rows={6} style={{ resize: 'vertical' }} />
                   </FormField>
@@ -353,11 +397,21 @@ export default function EditCampaignPage() {
                 <fieldset style={{ border: 0, padding: 0, margin: 0 }}>
                   <legend className="field-label">Types de pages</legend>
                   <div style={{ display: 'flex', gap: 'var(--space-4)', flexWrap: 'wrap' }}>
-                    {PAGE_TYPE_ORDER.map((type) => (
-                      <CheckLabel key={type} id={`page-type-${type}`} checked={form.page_types.includes(type)} onChange={() => togglePageType(type)}>
-                        {PAGE_TYPE_LABELS[type]}
-                      </CheckLabel>
-                    ))}
+                    {PAGE_TYPE_ORDER.map((type) => {
+                      const unavailable = type === 'local_pack' && form.scope === 'national'
+                      return (
+                        <CheckLabel
+                          key={type}
+                          id={`page-type-${type}`}
+                          checked={form.page_types.includes(type)}
+                          onChange={() => togglePageType(type)}
+                          disabled={unavailable}
+                          hint={unavailable ? 'Réservé aux campagnes locales' : undefined}
+                        >
+                          {PAGE_TYPE_LABELS[type]}
+                        </CheckLabel>
+                      )
+                    })}
                   </div>
                 </fieldset>
               </div>
@@ -530,7 +584,7 @@ export default function EditCampaignPage() {
  * pour qu'un lecteur d'écran lise la conséquence, pas seulement l'intitulé.
  */
 function CheckLabel({
-  id, name, checked, onChange, hint, title, children,
+  id, name, checked, onChange, hint, title, disabled = false, children,
 }: {
   id: string
   name?: string
@@ -538,13 +592,14 @@ function CheckLabel({
   onChange: (event: React.ChangeEvent<HTMLInputElement>) => void
   hint?: string
   title?: string
+  disabled?: boolean
   children: React.ReactNode
 }) {
   const hintId = hint ? `${id}-hint` : undefined
   return (
     <div>
-      <label htmlFor={id} title={title} style={{ display: 'flex', gap: 'var(--space-2)', alignItems: 'flex-start', cursor: 'pointer', fontSize: 'var(--fs-sm)', color: 'var(--ink-primary)' }}>
-        <input id={id} name={name} type="checkbox" checked={checked} onChange={onChange} aria-describedby={hintId} style={{ marginTop: 3 }} />
+      <label htmlFor={id} title={title} style={{ display: 'flex', gap: 'var(--space-2)', alignItems: 'flex-start', cursor: disabled ? 'not-allowed' : 'pointer', fontSize: 'var(--fs-sm)', color: disabled ? 'var(--ink-secondary)' : 'var(--ink-primary)' }}>
+        <input id={id} name={name} type="checkbox" checked={checked} onChange={onChange} disabled={disabled} aria-describedby={hintId} style={{ marginTop: 3 }} />
         <span>{children}</span>
       </label>
       {hint && <p id={hintId} className="meta" style={{ margin: 'var(--space-1) 0 0 calc(13px + var(--space-2))' }}>{hint}</p>}

@@ -9,6 +9,7 @@ import {
 import { buildSerpEvidence, type SerpEvidence } from '@/lib/serp'
 import { loadSiteInventory } from '@/lib/existing/inventory'
 import { generateEditorialCalendar } from '@/lib/scheduler/editorial'
+import { campaignDepartment, isNationalCampaign, resolveTargetCity, targetCommunes } from '@/lib/geo/scope'
 import {
   decideEditorialAction,
   WITHOUT_SEARCH_CONSOLE,
@@ -401,7 +402,7 @@ export function decideForSlot(
 ): PlannedSubject {
   const { campaign, inventory, signals, cityTokens } = context
   const pageType = (slot.page_type || 'child') as PageType
-  const city = slot.target_city || campaign.communes[0] || campaign.department || ''
+  const city = resolveTargetCity(campaign, slot.target_city)
   const seedKeyword = slot.target_keyword || `${campaign.business_type} ${city}`.trim()
 
   const target: EditorialTarget = {
@@ -433,7 +434,7 @@ export function decideForSlot(
 
 /** Les communes de la campagne et son departement : ce qu'on retire d'un mot-cle pour en lire le sujet. */
 function campaignCityNames(campaign: Campaign): string[] {
-  return dedupe([...campaign.communes, campaign.department ?? ''])
+  return dedupe([...targetCommunes(campaign.communes), campaignDepartment(campaign)])
 }
 
 /**
@@ -448,7 +449,7 @@ async function resolveSerpEvidence(opts: GenerateBriefPlanOptions): Promise<Serp
   if (opts.serpEvidence !== undefined) return opts.serpEvidence ?? []
 
   const { campaign } = opts
-  const city = campaign.communes[0] || campaign.department || ''
+  const city = resolveTargetCity(campaign)
   const siteHost = hostOfSite(campaign.site?.url)
 
   const queries = dedupe(
@@ -580,8 +581,7 @@ Campagne:
 - Activite: ${opts.campaign.business_type}
 - Business: ${opts.campaign.business_name}
 - Site: ${opts.campaign.site?.url || ''}
-- Departement: ${opts.campaign.department || 'Aube'}
-- Communes: ${opts.campaign.communes.join(', ')}
+${scopeLines(opts.campaign)}
 - Mots-cles de base: ${opts.campaign.keywords.join(', ')}
 
 Analyse du site:
@@ -666,6 +666,22 @@ Reponds avec ce JSON:
     }
   ]
 }`.trim()
+}
+
+/**
+ * The campaign's territory as the planner reads it — or the absence of one.
+ *
+ * A national campaign is said to be national, in so many words: given a
+ * department and a commune list, the model localises every brief, and given
+ * « tous » the plan put « tous » at the end of every address.
+ */
+function scopeLines(campaign: Campaign): string {
+  if (isNationalCampaign(campaign)) {
+    return `- Portee: NATIONALE — l'entreprise vend dans toute la France, sans ville ni departement cible.
+  Chaque target_city est une chaine vide ; aucun titre, slug ni mot-cle ne contient de ville ; aucun page_type local_pack.`
+  }
+  return `- Departement: ${campaignDepartment(campaign) || 'non precise'}
+- Communes: ${targetCommunes(campaign.communes).join(', ')}`
 }
 
 /**
@@ -1027,15 +1043,18 @@ function fieldsOf(
   item: Partial<PlanItemBrief>,
   campaign: Campaign
 ): BriefFields {
-  const pageType = item.page_type || subject.pageType
-  const city = item.target_city || subject.city
+  // The model may answer a national campaign with a local pack or a town:
+  // neither is the campaign's to have, whatever the brief says (lib/geo/scope.ts).
+  const requested = item.page_type || subject.pageType
+  const pageType = requested === 'local_pack' && isNationalCampaign(campaign) ? subject.pageType : requested
+  const city = resolveTargetCity(campaign, item.target_city || subject.city)
   const targetKeyword = item.target_keyword || subject.seedKeyword
 
   return {
     pageType,
     city,
     targetKeyword,
-    requiredEntities: asStringArray(item.required_entities, [city, campaign.department || 'Aube']),
+    requiredEntities: asStringArray(item.required_entities, [city, campaignDepartment(campaign)].filter(Boolean)),
     searchIntent: item.search_intent || intentFor(pageType),
   }
 }
@@ -1208,10 +1227,12 @@ function intentFor(pageType: PageType) {
 function titleFor(pageType: PageType, businessType: string, city: string) {
   // Read by the visitor when the model returns no title of its own: accented,
   // and no "pres de moi" — a query, not something a page says about itself.
-  if (pageType === 'local_pack') return `${businessType} à ${city} et alentours`
-  if (pageType === 'comparative') return `Quel ${businessType} choisir à ${city} ?`
-  if (pageType === 'alternative') return `Alternative de ${businessType} à ${city}`
-  return `${businessType} à ${city} : guide complet`
+  // No town on a national campaign: « à  : guide complet » is not a title.
+  const where = city ? ` à ${city}` : ''
+  if (pageType === 'local_pack') return `${businessType}${where} et alentours`
+  if (pageType === 'comparative') return `Quel ${businessType} choisir${where} ?`
+  if (pageType === 'alternative') return `Alternative de ${businessType}${where}`
+  return `${businessType}${where} : guide complet`
 }
 
 function defaultOutline(pageType: PageType, businessType: string, city: string) {

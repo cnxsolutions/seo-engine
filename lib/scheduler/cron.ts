@@ -54,6 +54,7 @@ import {
 } from './editorial'
 import type { Campaign, EditorialSlot, PageType, PlanItemBrief, Generation, Site } from '@/lib/types'
 import type { GeneratedPage } from '@/lib/ai/openai'
+import { campaignDepartment, resolveTargetCity, runnablePageType } from '@/lib/geo/scope'
 
 // ─── Scheduler State ───────────────────────────────────────────────────────────────
 
@@ -1339,11 +1340,17 @@ interface RunOverride {
   generationId?: string
 }
 
-/** Resolved the same way by the caller that opens the row and by the run itself. */
+/**
+ * Resolved the same way by the caller that opens the row and by the run itself.
+ *
+ * Through lib/geo/scope.ts: a national campaign runs with no town — never its
+ * department, never « Aube » — and a local pack brief planned before it became
+ * national is written as a child page rather than as the page of a place.
+ */
 function resolveRunTarget(campaign: Campaign, override?: RunOverride): { city: string; pageType: PageType } {
   return {
-    city: override?.targetCity || campaign.communes[0] || campaign.department || 'Aube',
-    pageType: override?.pageType || campaign.page_types?.[0] || 'child',
+    city: resolveTargetCity(campaign, override?.targetCity),
+    pageType: runnablePageType(campaign, override?.pageType || campaign.page_types?.[0] || 'child'),
   }
 }
 
@@ -1585,7 +1592,7 @@ export async function runCampaignNow(
     const generationOptions: PageTypeGenerateOptions = {
       pageType,
       city,
-      department: campaign.department || 'Aube',
+      department: campaignDepartment(campaign),
       businessType: campaign.business_type,
       businessName: campaign.business_name,
       keywords: override?.targetKeyword

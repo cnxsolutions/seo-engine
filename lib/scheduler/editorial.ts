@@ -1,6 +1,7 @@
 import type { Campaign, PageType, PlanItemBrief, ScheduleFrequency, EditorialSlot } from '@/lib/types'
 import { createServiceClient } from '@/lib/supabase'
 import { SITE_SAFE_COLUMNS, type SafeCampaign } from '@/lib/db'
+import { isNationalCampaign, plannablePageTypes, targetCommunes } from '@/lib/geo/scope'
 
 /** A slot whose embedded campaign carries no site credentials. */
 export type SafeEditorialSlot = Omit<EditorialSlot, 'campaign'> & { campaign?: SafeCampaign }
@@ -29,9 +30,12 @@ export function generateEditorialCalendar(opts: GenerateCalendarOptions): Omit<E
   const { campaign, startDate = new Date(), slotCount = 30 } = opts
   const frequency = campaign.schedule_frequency || 'daily'
   const intervalDays = FREQUENCY_DAYS[frequency] || 1
-  const pageTypes: PageType[] = campaign.page_types && campaign.page_types.length > 0 ? campaign.page_types : ['pillar', 'child']
+  // No local pack without a place, and one empty "town" for a national campaign:
+  // the department — then « Aube » — used to stand in for a missing commune,
+  // which is how a nationwide business got pages "in Aube" (lib/geo/scope.ts).
+  const pageTypes: PageType[] = plannablePageTypes(campaign)
   const keywords = campaign.keywords?.length > 0 ? campaign.keywords : [campaign.business_type]
-  const communes = campaign.communes?.length > 0 ? campaign.communes : [campaign.department || 'Aube']
+  const communes = isNationalCampaign(campaign) ? [''] : targetCommunes(campaign.communes)
 
   if (frequency === 'manual' || intervalDays === 0) return []
 
