@@ -75,6 +75,7 @@ import {
 } from '@/src/core/domain/existing/inventory'
 import type { DuplicateVerdict } from '@/src/core/domain/existing/verdict'
 import type { ContentToCheck } from '@/src/adapters/rag/validation/DuplicateDetector'
+import { isNationalMarker, targetCommunes } from '@/lib/geo/scope'
 import {
   measureLength,
   resolveTargetWordCount,
@@ -600,9 +601,9 @@ function toContentToCheck(entry: InventoryEntry): ContentToCheck {
  * written would leave the OTHER page's city in its vector and keep the score low.
  */
 function cityTokensOf(context: PipelineContext): string[] {
-  const tokens = [...(context.campaign?.communes ?? [])]
+  const tokens = targetCommunes(context.campaign?.communes)
   const briefCity = context.planBrief?.target_city
-  if (briefCity) tokens.push(briefCity)
+  if (briefCity && !isNationalMarker(briefCity)) tokens.push(briefCity)
   return tokens
 }
 
@@ -617,7 +618,10 @@ function cityTokensOf(context: PipelineContext): string[] {
  * Unknown city, no city rule.
  */
 function cityOf(context: PipelineContext): string | undefined {
-  return context.city || context.planBrief?.target_city || undefined
+  // « tous » is how a nationwide campaign was entered before it could be one: a
+  // brief planned then still carries it, and it is no town (lib/geo/scope.ts).
+  const city = context.city || context.planBrief?.target_city
+  return city && !isNationalMarker(city) ? city : undefined
 }
 
 /**

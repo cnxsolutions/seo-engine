@@ -51,6 +51,7 @@ import { recordGbpPost, type GbpRefusalKind } from '@/lib/publishing/gbp/record'
 import type { PublishOutcome } from '@/lib/publishing/outcome'
 import { createServiceClient } from '@/lib/supabase'
 import type { Campaign, Site } from '@/lib/types'
+import { targetCommunes } from '@/lib/geo/scope'
 import {
   describeAngles,
   fingerprintSummary,
@@ -926,7 +927,7 @@ function describeAvailability(
   const availability: AngleAvailability = {
     hasRealReviews: hasRealReviews(profile),
     hasUnlinkedPublishedPage,
-    hasServiceArea: campaign.communes.length > 0,
+    hasServiceArea: targetCommunes(campaign.communes).length > 0,
   }
 
   // Renseigne SEULEMENT quand la fiche a ete lue : sans ligne `gbp_profiles`,

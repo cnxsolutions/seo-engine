@@ -359,3 +359,65 @@ describe('buildPrompt — ce que le modele recoit', () => {
     expect(text).not.toContain('GISEMENT PRIORITAIRE')
   })
 })
+
+// ─── Campagne nationale ─────────────────────────────────────────────────────
+//
+// Flowyne telle qu'elle etait saisie : « tous » comme commune, departement par
+// defaut. Le plan sortait /application-reservation-barber-tous et des local
+// packs « … près de moi » pour une application sans etablissement.
+
+describe('campagne nationale — aucune ville dans le plan', () => {
+  const national = { ...campaign, business_type: 'application de reservation', communes: ['tous'], department: 'Aube' } as Campaign
+  const site = inventory([])
+
+  it('ne donne au sujet ni ville ni adresse suffixee', () => {
+    const subject = decideForSlot(
+      slot({ target_keyword: 'application de reservation pour barber', target_city: 'tous', page_type: 'pillar' }),
+      { campaign: national, inventory: site, signals: null, cityTokens: [] },
+    )
+    expect(subject.city).toBe('')
+    expect(subject.seedKeyword).toBe('application de reservation pour barber')
+  })
+
+  it('ignore la ville et le local pack que le modele renverrait quand meme', () => {
+    const subject = decideForSlot(
+      slot({ target_keyword: 'application de reservation pour barber', target_city: '', page_type: 'child' }),
+      { campaign: national, inventory: site, signals: null, cityTokens: [] },
+    )
+    const [brief] = normalizeBriefs({
+      subjects: [subject],
+      rawItems: [{
+        page_type: 'local_pack',
+        target_city: 'tous',
+        target_keyword: 'application de reservation pour barber',
+        proposed_slug: 'application-reservation-barber',
+      }],
+      campaign: national,
+      takenPaths: new Set(),
+      inventory: site,
+      signals: null,
+      existingKeywords: [],
+    })
+
+    expect(brief.page_type).toBe('child')
+    expect(brief.target_city).toBe('')
+    expect(brief.proposed_slug).toBe('application-reservation-barber')
+    expect(brief.required_entities).not.toContain('Aube')
+  })
+
+  it('dit au modele que la campagne est nationale, sans departement ni communes', () => {
+    const text = buildPrompt({
+      campaign: national,
+      analysisRun: null,
+      existingSlugs: [],
+      existingKeywords: [],
+      subjects: [],
+      signals: null,
+      serpEvidence: [],
+    })
+    expect(text).toContain('- Portee: NATIONALE')
+    expect(text).toContain('aucun page_type local_pack')
+    expect(text).not.toContain('- Departement: Aube')
+    expect(text).not.toContain('- Communes: tous')
+  })
+})

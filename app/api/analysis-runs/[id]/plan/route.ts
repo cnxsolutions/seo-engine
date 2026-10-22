@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createCampaign, createCyclePlan, getAnalysisRunById, getCampaignByIdSafe, getLatestCyclePlan } from '@/lib/db'
 import { normalizeCommunes } from '@/lib/geo/locations'
+import { isNationalRequest, plannablePageTypes, targetCommunes } from '@/lib/geo/scope'
+import type { PageType } from '@/lib/types'
 import { generateBriefPlan } from '@/lib/planning/brief-plan'
 import { DEFAULT_GENERATION_MODEL } from '@/lib/ai/provider'
 
@@ -73,9 +75,12 @@ async function createCampaignFromAnalysis(body: Record<string, unknown>, analysi
   const siteId = String(body.site_id || analysisRun.site_id || '')
   if (!siteId) throw new Error('site_id requis pour creer la campagne')
 
-  const department = String(body.department || 'Aube')
-  const communes = normalizeCommunes(splitList(body.communes).length ? splitList(body.communes) : analysisRun.input.targetCities, department)
-  if (communes.length === 0) throw new Error('Au moins une commune ou zone valide est requise.')
+  // National: no commune, no department, no local pack (lib/geo/scope.ts).
+  const listed = splitList(body.communes).length ? splitList(body.communes) : analysisRun.input.targetCities ?? []
+  const national = isNationalRequest(body.scope, listed)
+  const department = national ? '' : String(body.department || 'Aube')
+  const communes = national ? [] : normalizeCommunes(targetCommunes(listed), department)
+  if (!national && communes.length === 0) throw new Error('Au moins une commune réelle est requise — pour une activité sans ville, choisissez la portée nationale.')
 
   const scheduleFrequency = String(body.schedule_frequency || 'every_2_days')
   const keywords = splitList(body.keywords).length
@@ -95,7 +100,10 @@ async function createCampaignFromAnalysis(body: Record<string, unknown>, analysi
     schedule_days: Array.isArray(body.schedule_days) ? body.schedule_days as number[] : [],
     schedule_time: String(body.schedule_time || '09:00'),
     ai_model: String(body.ai_model || DEFAULT_GENERATION_MODEL),
-    page_types: Array.isArray(body.page_types) ? body.page_types as ['pillar', 'child'] : ['pillar', 'child', 'local_pack'],
+    page_types: plannablePageTypes({
+      communes,
+      page_types: Array.isArray(body.page_types) ? body.page_types as PageType[] : ['pillar', 'child', 'local_pack'],
+    }),
     publish_status: (body.publish_status as 'publish' | 'draft' | 'pending') || 'draft',
     auto_publish: Boolean(body.auto_publish),
     target_length: Number(body.target_length) || 800,

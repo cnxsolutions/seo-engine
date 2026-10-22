@@ -188,7 +188,7 @@ export function auditSeoGeo(input: SeoAuditInput): AuditFinding[] {
     ['H2_COUNT', () => checkH2Count(page, add)],
     ['KEYWORD_STUFFING', () => checkKeywordStuffing(input, page, add)],
     ['INTERNAL_LINKS', () => checkInternalLinks(input, add)],
-    ['IMAGE_ALT', () => checkImageAlt(page, add)],
+    ['IMAGE_ALT', () => checkImageAlt(input, page, add)],
     ['SLUG_FORMAT', () => checkSlug(input, page, add)],
     ['PLACEHOLDER', () => checkPlaceholders(input, page, add)],
     ['DUPLICATE_PARAGRAPH', () => checkDuplicateParagraphs(page, add)],
@@ -466,7 +466,7 @@ function checkMetaLength(input: SeoAuditInput, add: Add): void {
   if (length < T.metaMin || length > T.metaMax) {
     add('META_LENGTH', 'seo', 'blocking',
       `Meta description de ${length} caractères, hors de la plage ${T.metaMin}-${T.metaMax} : la réécrire entre `
-      + `${T.metaComfortMin} et ${T.metaComfortMax} caractères avec le mot-clé, la ville, un bénéfice et un appel à l'action.`)
+      + `${T.metaComfortMin} et ${T.metaComfortMax} caractères avec le mot-clé${input.city ? ', la ville' : ''}, un bénéfice et un appel à l'action.`)
   } else if (length < T.metaComfortMin || length > T.metaComfortMax) {
     add('META_LENGTH', 'seo', 'warning',
       `Meta description de ${length} caractères : viser ${T.metaComfortMin} à ${T.metaComfortMax} pour un extrait complet sans troncature.`)
@@ -583,13 +583,13 @@ function checkInternalLinks(input: SeoAuditInput, add: Add): void {
   }
 }
 
-function checkImageAlt(page: PageAnalysis, add: Add): void {
+function checkImageAlt(input: SeoAuditInput, page: PageAnalysis, add: Add): void {
   const images = page.html.match(/<img\b[^>]*>/gi) ?? []
   const missing = images.filter(tag => !(attribute(tag, 'alt') ?? '').trim()).length
   if (missing > 0) {
     add('IMAGE_ALT', 'seo', 'blocking',
       `${missing} image(s) sans texte alternatif : donner à chaque <img> un attribut alt descriptif `
-      + `qui décrit l'image et, quand c'est naturel, le service et la ville.`)
+      + `qui décrit l'image et, quand c'est naturel, le service${input.city ? ' et la ville' : ''}.`)
   }
 }
 
@@ -742,7 +742,7 @@ function checkDirectAnswer(input: SeoAuditInput, page: PageAnalysis, add: Add): 
     add('DIRECT_ANSWER', 'geo', 'blocking',
       `Réponse directe absente ou mal placée — ${problems.join(' ; ')} : ouvrir la page, juste sous le H1 et avant `
       + `tout H2, par un <p class="reponse-directe"> autosuffisant de 40 à 60 mots qui répond à la requête avec le `
-      + `mot-clé et la ville, et le recopier mot pour mot dans directAnswer.`)
+      + `mot-clé${input.city ? ' et la ville' : ''}, et le recopier mot pour mot dans directAnswer.`)
   }
 }
 

@@ -52,6 +52,7 @@ import {
 } from '@/src/core/domain/gbp/rotation'
 import type { GbpEligibility, GbpLinkTarget } from '@/app/api/gbp/posts/feed-types'
 import type { RunGbpPostReport } from './run'
+import { targetCommunes } from '@/lib/geo/scope'
 
 type ServiceClient = ReturnType<typeof createServiceClient>
 
@@ -660,7 +661,7 @@ export function describeAngleAvailability(
     hasUnlinkedPublishedPage,
   }
 
-  if (campaign) availability.hasServiceArea = campaign.communes.length > 0
+  if (campaign) availability.hasServiceArea = targetCommunes(campaign.communes).length > 0
   if (profile) availability.hasDeclaredHours = Boolean(profile.hours)
 
   return availability

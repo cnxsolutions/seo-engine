@@ -431,7 +431,7 @@ export async function generateSeoPage(opts: PageTypeGenerateOptions): Promise<Ge
 
   const config = PAGE_TYPE_CONFIG[pageType]
   const adjustedLength = resolveGenerationLength(planBrief?.estimated_word_count, targetLength, config.targetLengthMultiplier)
-  const mainKeyword = planBrief?.target_keyword || `${businessType} ${city}`
+  const mainKeyword = planBrief?.target_keyword || `${businessType} ${city}`.trim()
   const searchIntent = resolveSearchIntent(planBrief?.search_intent, mainKeyword, pageType)
 
   // Build FULL RAG context if RAG is enabled.
@@ -458,7 +458,7 @@ export async function generateSeoPage(opts: PageTypeGenerateOptions): Promise<Ge
             business_name: businessName,
             keywords,
             department,
-            communes: [city],
+            communes: city ? [city] : [],
             frequency_hours: 24,
             ai_model: model,
             target_length: targetLength,
@@ -482,7 +482,7 @@ export async function generateSeoPage(opts: PageTypeGenerateOptions): Promise<Ge
     }
   }
 
-  const systemPrompt = buildSystemPrompt(pageType, config.systemPromptExtra, searchIntent)
+  const systemPrompt = buildSystemPrompt(pageType, config.systemPromptExtra, searchIntent, !city.trim())
   const userPrompt = buildUserPrompt({
     pageType,
     city,
@@ -534,7 +534,22 @@ export async function generateSeoPage(opts: PageTypeGenerateOptions): Promise<Ge
   return normalizeResponse(parsed, opts, adjustedLength, searchIntent, fullRagContext)
 }
 
-export function buildSystemPrompt(pageType: PageType, extra: string, searchIntent: SearchIntent): string {
+/**
+ * No town to target: the business sells nationwide (lib/geo/scope.ts).
+ *
+ * Placed right after the page type's own instructions because those are written
+ * for local pages — « Ancrage local », « zones desservies » — and this has to
+ * outrank them, not sit somewhere they can win.
+ */
+const NATIONAL_SCOPE_RULES = `
+PORTEE NATIONALE (prime sur toute consigne d'ancrage local de ce prompt) :
+- L'entreprise vend dans toute la France : aucune ville, aucun departement, aucun quartier n'est vise.
+- N'ajoute aucun lieu au title, au H1, aux sous-titres ni au texte pour paraitre proche. Un lieu n'apparait
+  que s'il fait partie du sujet lui-meme.
+- La proximite se remplace par ce qui compte a distance : mise en route, accompagnement, disponibilite.
+`.trim()
+
+export function buildSystemPrompt(pageType: PageType, extra: string, searchIntent: SearchIntent, national = false): string {
   // A writer who knows SEO, not an SEO expert who writes. The persona this
   // replaced — "Google Certified Partner", "RankMath 100/100" — wrote the way it
   // was described: for the score, with the strategy showing through the text.
@@ -543,7 +558,7 @@ Tu maitrises le referencement (SEO, GEO, E-E-A-T, schema.org, maillage interne e
 
 TYPE DE PAGE: ${pageType.toUpperCase()}
 ${extra}
-
+${national ? `\n${NATIONAL_SCOPE_RULES}\n` : ''}
 ${INTENT_DIRECTIVES[searchIntent].trim()}
 
 REGLES ABSOLUES:
@@ -587,7 +602,7 @@ export function buildUserPrompt(opts: {
   /** See `PageTypeGenerateOptions.revisionFeedback`. */
   revisionFeedback?: readonly string[]
 }): string {
-  const mainKeyword = opts.planBrief?.target_keyword || `${opts.businessType} ${opts.city}`
+  const mainKeyword = opts.planBrief?.target_keyword || `${opts.businessType} ${opts.city}`.trim()
   const year = new Date().getFullYear()
   const isoDate = opts.today ?? todayIso()
   const lengthPlan = buildLengthPlan(opts.adjustedLength, opts.requiredSections)
@@ -695,7 +710,9 @@ Genere une page SEO de type "${opts.pageType}" complete et optimisee pour :
 
 - Type d'activite : ${opts.businessType}
 - Business : ${opts.businessName}
-- Ville cible : ${opts.city} (${opts.department})
+${opts.city
+  ? `- Ville cible : ${opts.city}${opts.department ? ` (${opts.department})` : ''}`
+  : '- Zone : toute la France (activite nationale), aucune ville ni region a viser'}
 - Site web : ${opts.siteUrl}
 - Mots-cles (des sujets, a ecrire en francais correct) : ${opts.keywords.join(', ')}
 - Mot-cle focus : "${mainKeyword}"
@@ -733,7 +750,7 @@ REPONDS EN JSON avec cette structure :
   "metaDescription": "string (max 155 chars, mot-cle focus + benefice + CTA + localisation)",
   "slug": "recopie exactement le slug reserve annonce plus bas, sans rien y ajouter",
   "focusKeyword": "${mainKeyword}",
-  "secondaryKeywords": ["MINIMUM 8 mots-cles: 2 variations geo (quartiers/communes voisines), 2 questions longue-traine, 2 'pres de moi/a proximite', 2 variantes service specifique — metadonnees, pas a placer telles quelles dans le texte"],
+  "secondaryKeywords": ["MINIMUM 8 mots-cles: ${opts.city ? "2 variations geo (quartiers/communes voisines), 2 questions longue-traine, 2 'pres de moi/a proximite', 2 variantes service specifique" : '4 questions longue-traine, 4 variantes service specifique, sans aucun lieu'} — metadonnees, pas a placer telles quelles dans le texte"],
   "searchIntent": "${opts.searchIntent}",
   "ogTitle": "string",
   "ogDescription": "string",
@@ -768,7 +785,9 @@ STRATEGIE LONG-TAIL (OBLIGATOIRE):
   * Le sujet du mot-cle focus est decline avec le vocabulaire du metier (synonymes, formulations voisines) plutot que repete a l'identique
   * Au moins 3 sous-titres H2 formules comme les vraies questions des lecteurs
   * Chaque H2-question commence par y repondre directement, en une ou deux phrases, SANS etiquette ("Réponse courte :" est interdit)
-  * L'ancrage dans ${opts.city} passe par des situations et des contraintes reelles, pas par une liste de quartiers, de rues ou de codes postaux
+  * ${opts.city
+      ? `L'ancrage dans ${opts.city} passe par des situations et des contraintes reelles, pas par une liste de quartiers, de rues ou de codes postaux`
+      : "La page s'adresse a toute la France : aucun ancrage local, aucune ville citee pour paraitre proche"}
 - secondaryKeywords DOIT contenir au minimum 8 mots-cles diversifies (metadonnees : ils ne se placent pas tels quels dans le texte)
 
 Contraintes critiques :
@@ -927,7 +946,7 @@ export function normalizeResponse(
   if (!title) {
     anomalies.push({ field: 'title', severity: 'blocking', reason: 'Titre absent de la reponse IA.' })
   }
-  const resolvedTitle = title || `${opts.businessType} ${opts.city}`
+  const resolvedTitle = title || `${opts.businessType} ${opts.city}`.trim()
 
   // Derived, not invented: reusing the title and the business is the only
   // honest fallback. It is still reported so the gate can ask for a rewrite.
@@ -940,7 +959,7 @@ export function normalizeResponse(
     })
   }
   const resolvedMeta = metaDescription
-    || `${resolvedTitle} — ${opts.businessName} a ${opts.city}.`.slice(0, 155)
+    || `${resolvedTitle} — ${opts.businessName}${opts.city ? ` à ${opts.city}` : ''}.`.slice(0, 155)
 
   const directAnswer = firstNonEmpty(p.directAnswer)
   if (!directAnswer) {
@@ -1015,7 +1034,7 @@ export function normalizeResponse(
     metaDescription: resolvedMeta,
     slug,
     focusKeyword: firstNonEmpty(opts.planBrief?.target_keyword, p.focusKeyword)
-      || `${opts.businessType} ${opts.city}`,
+      || `${opts.businessType} ${opts.city}`.trim(),
     secondaryKeywords,
     ogTitle: firstNonEmpty(p.ogTitle, p.title) || resolvedTitle,
     ogDescription: firstNonEmpty(p.ogDescription, p.metaDescription) || resolvedMeta,

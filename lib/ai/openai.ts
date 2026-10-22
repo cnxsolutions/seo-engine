@@ -144,8 +144,9 @@ BLOC DE REPONSE DIRECTE (OBLIGATOIRE, JUSTE APRES LE H1):
 - Il repond COMPLETEMENT a la requete cible : un lecteur qui ne lit que ce paragraphe a sa reponse.
 - AUTOSUFFISANT : aucun renvoi a la suite de la page. Interdits : "voir ci-dessous", "dans cet
   article", "nous verrons", "decouvrez plus bas", "comme explique plus loin", "ci-apres".
-- Aucun pronom sans antecedent : le sujet est nomme. Le mot-cle focus et la ville y figurent, ecrits
-  en francais correct (accents, articles, majuscules) : ce sont ses mots qui comptent, pas sa forme brute.
+- Aucun pronom sans antecedent : le sujet est nomme. Le mot-cle focus — et la ville, si la page en vise
+  une — y figurent, ecrits en francais correct (accents, articles, majuscules) : ce sont ses mots qui
+  comptent, pas sa forme brute.
 - Phrases affirmatives et factuelles. Pas de question, pas d'accroche marketing, pas de CTA,
   pas de "Vous cherchez ... ?", pas de liste a puces, pas de lien.
 - Ce paragraphe est repris MOT POUR MOT dans le champ JSON "directAnswer".

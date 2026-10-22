@@ -472,3 +472,36 @@ describe('frenchLongDate()', () => {
     expect(frenchLongDate('pas une date')).toBe('pas une date')
   })
 })
+
+// A business that sells nationwide has no town: the prompt says « toute la
+// France » instead of « Ville cible :  () », and outranks the page type's own
+// local-anchoring lines.
+describe('national scope (no town)', () => {
+  it('states the whole country instead of an empty town', () => {
+    const prompt = buildPrompt({ city: '', department: '' })
+    expect(prompt).toContain('- Zone : toute la France (activite nationale)')
+    expect(prompt).not.toContain('Ville cible')
+    expect(prompt).toContain("La page s'adresse a toute la France")
+    expect(prompt).not.toContain("2 'pres de moi/a proximite'")
+  })
+
+  it('keeps the town, and drops an empty department, on a local page', () => {
+    expect(buildPrompt()).toContain('- Ville cible : Troyes (Aube)')
+    expect(buildPrompt({ department: '' })).toContain('- Ville cible : Troyes\n')
+  })
+
+  it('adds the national rule to the system prompt only when there is no town', () => {
+    expect(buildSystemPrompt('pillar', 'Ancrage local: la ville', 'informationnelle', true)).toContain('PORTEE NATIONALE')
+    expect(buildSystemPrompt('pillar', 'Ancrage local: la ville', 'informationnelle')).not.toContain('PORTEE NATIONALE')
+  })
+
+  it('never falls back to « a  . » in a meta description', () => {
+    const page = normalizeResponse(
+      { htmlContent: '<h1>Agenda en ligne</h1><p>Texte.</p>', title: 'Agenda en ligne pour indépendants' },
+      { ...baseOptions, city: '', department: '' },
+      800,
+      'informationnelle',
+    )
+    expect(page.metaDescription).toBe('Agenda en ligne pour indépendants — Plomberie Martin.')
+  })
+})

@@ -607,3 +607,16 @@ describe('auditSeoGeo — quality: written for the reader', () => {
     expect(audit({ html: h2 }).map(f => f.code)).not.toContain('FAKE_QUESTION')
   })
 })
+
+describe('auditSeoGeo — a page with no town', () => {
+  // The blocking messages go back to the model as corrections: asking a
+  // national page for « la ville » would make it invent one.
+  it('never asks for the town in a correction when the page targets none', () => {
+    const findings = audit({ city: undefined, metaDescription: 'trop courte', html: htmlWith(INTRO, '') })
+    const messages = findings.map(f => f.message).join('\n')
+    expect(find(findings, 'META_LENGTH')).toBeDefined()
+    expect(find(findings, 'DIRECT_ANSWER')).toBeDefined()
+    expect(messages).not.toMatch(/la ville/)
+    expect(find(audit({ metaDescription: 'trop courte' }), 'META_LENGTH')?.message).toContain('la ville')
+  })
+})
