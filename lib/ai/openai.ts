@@ -67,6 +67,14 @@ export interface GeneratedPage {
   internalLinksHtml: string[]
   faqItems: FaqItem[]
   imageAlts: string[]
+  /**
+   * Whether this page ships with a generated hero image — the brief's choice,
+   * else the campaign's (lib/ai/images.ts). Decided at generation and stored
+   * with the page, so a publication days later still knows.
+   */
+  generateImage?: boolean
+  /** The scene of that photo, described by the model that wrote the page. */
+  imagePrompt?: string
   ctaText: string
   targetLength: number
   estimatedWordCount: number

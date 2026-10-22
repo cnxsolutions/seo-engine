@@ -358,6 +358,7 @@ function CampaignPanel({
               town, and a national campaign plans no local pack. */}
           <div><dt>Zone</dt><dd>{isNationalCampaign(campaign) ? 'Nationale — toute la France' : targetCommunes(campaign.communes).join(', ')}</dd></div>
           <div><dt>Types de pages</dt><dd>{plannablePageTypes(campaign).map(pageTypeLabel).join(', ')}</dd></div>
+          <div><dt>Images</dt><dd>{campaign.enable_images === true ? 'Photo IA sur chaque page, sauf briefs décochés' : 'Aucune, sauf briefs cochés'}</dd></div>
           <div>
             <dt>Rythme</dt>
             <dd>
@@ -466,7 +467,44 @@ function PlanBody({
   onConfirm: (plan: CyclePlan) => Promise<void>
 }) {
   const { provenance } = context
-  const items = useMemo(() => (Array.isArray(plan.plan_data) ? plan.plan_data : []), [plan])
+  // The image choices made on this screen, saved one by one (action « image »)
+  // and shown at once — the plan prop is only reread on the next load.
+  const [imageChoices, setImageChoices] = useState<Record<string, boolean>>({})
+  const [imageSavingId, setImageSavingId] = useState<string | null>(null)
+  const [imageError, setImageError] = useState<string | null>(null)
+  const items = useMemo(
+    () => (Array.isArray(plan.plan_data) ? plan.plan_data : []).map((item) =>
+      item.id in imageChoices ? { ...item, generate_image: imageChoices[item.id] } : item),
+    [plan, imageChoices]
+  )
+
+  const toggleImage = async (itemId: string, value: boolean) => {
+    const previous = imageChoices[itemId]
+    setImageChoices((choices) => ({ ...choices, [itemId]: value }))
+    setImageSavingId(itemId)
+    setImageError(null)
+    try {
+      const res = await fetch(`/api/campaigns/${campaign.id}/plan`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'image', plan_id: plan.id, item_id: itemId, generate_image: value }),
+      })
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        throw new Error(data.error || `Erreur ${res.status}`)
+      }
+    } catch (error) {
+      setImageChoices((choices) => {
+        const next = { ...choices }
+        if (previous === undefined) delete next[itemId]
+        else next[itemId] = previous
+        return next
+      })
+      setImageError(`Choix d’image non enregistré : ${error instanceof Error ? error.message : 'erreur réseau'}`)
+    } finally {
+      setImageSavingId(null)
+    }
+  }
   const [days, setDays] = useState(plan.cycle_duration_days || campaign.cycle_duration_days || 14)
   const [confirming, setConfirming] = useState(false)
   /** Le brief ouvert dans le panneau ; le premier d'emblée, pour que le panneau
@@ -596,11 +634,16 @@ function PlanBody({
       {/* UNE SEULE LISTE, datée, où chaque ligne porte son verdict — nouvelle
           page ou sujet écarté. Les comptes vivent dans la ligne de résumé
           ci-dessus, et ce que les absences disent d'utile vit dans `PlanLede`. */}
+      {imageError && <p className="meta" role="alert" style={{ margin: 0, color: 'var(--status-critical-text)' }}>{imageError}</p>}
+
       <PlanBriefList
         items={items}
         selectedId={selectedId}
         onSelect={setSelectedId}
         verdictFor={storedAddressVerdict}
+        imageDefault={campaign.enable_images === true}
+        onToggleImage={toggleImage}
+        imageSavingId={imageSavingId}
         keywordNote={(item) => {
           const measured = (item.internal_link_targets ?? [])
             .map((target) => measuredByUrl.get(target))

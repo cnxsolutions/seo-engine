@@ -1603,8 +1603,10 @@ export async function runCampaignNow(
       model: campaign.ai_model,
       enableExternalLinks: campaign.enable_external_links ?? true,
       externalLinkCount: campaign.external_link_count ?? 3,
-      enableImages: campaign.enable_images ?? true,
-      imagePerPage: campaign.image_per_page ?? 2,
+      // The campaign's default for a hero image; the brief can override it
+      // (wantsHeroImage, lib/ai/page-types.ts). Opt-in: it costs money.
+      enableImages: campaign.enable_images === true,
+      imagePerPage: 1,
       reservedSlug: reservation.slug,
       inventoryNeighbours,
       inventoryFreshness: inventory.freshness,

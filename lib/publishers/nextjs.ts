@@ -7,6 +7,7 @@ import { promoteToProduction, type PromotionOutcome } from './promote'
 import { syncBranchWithProduction } from './sync-branch'
 import type { PageType } from '@/lib/types'
 import { isRedirectSource } from './redirects'
+import { HERO_IMAGE_SIZE, heroImageAlt, withHeroFigure, type HeroImageSource } from '@/lib/ai/images'
 
 export interface NextJsPublishOptions {
   githubRepo: string
@@ -52,6 +53,8 @@ export interface NextJsPublishOptions {
    * mirror the WordPress shape would be a field nobody could fill.
    */
   replaces?: { path: string }
+  /** The page's hero image, generated only if it is not already in the repository. */
+  heroImage?: HeroImageSource
 }
 
 /**
@@ -64,6 +67,56 @@ export interface NextJsPublishOptions {
 function withRef(url: string, branch?: string): string {
   if (!branch) return url
   return `${url}${url.includes('?') ? '&' : '?'}ref=${encodeURIComponent(branch)}`
+}
+
+/**
+ * Put the page's hero image in the repository, or find it already there.
+ *
+ * `<app>/public/images/seo/<slug>.webp`, which Next.js serves as
+ * `/images/seo/<slug>.webp`. An image already at that path is reused without
+ * generating anything — a retried publication pays once. Null when there is
+ * nothing to show (generation or commit failed): the page then ships without
+ * an image rather than not at all.
+ */
+async function placeHeroImage(opts: {
+  repoApi: string
+  headers: Record<string, string>
+  appRoot: string
+  slug: string
+  branch?: string
+  source: HeroImageSource
+  alt: string
+}): Promise<{ src: string; alt: string; width: number; height: number } | null> {
+  const src = `/images/seo/${opts.slug}.webp`
+  const path = `${opts.appRoot}public${src}`
+  try {
+    const existing = await fetch(withRef(`${opts.repoApi}/contents/${path}`, opts.branch), {
+      headers: opts.headers,
+      cache: 'no-store',
+    })
+    if (existing.ok) return { src, alt: opts.alt, ...HERO_IMAGE_SIZE }
+
+    const image = await opts.source('webp')
+    if (!image) return null
+
+    const res = await fetch(`${opts.repoApi}/contents/${path}`, {
+      method: 'PUT',
+      headers: opts.headers,
+      body: JSON.stringify({
+        message: `seo-engine: image de ${opts.slug}`,
+        content: image.data.toString('base64'),
+        ...(opts.branch ? { branch: opts.branch } : {}),
+      }),
+    })
+    if (!res.ok) {
+      console.warn(`[publish] image de /${opts.slug} non commitee (GitHub ${res.status}) : page publiee sans image`)
+      return null
+    }
+    return { src, alt: image.alt, width: image.width, height: image.height }
+  } catch (error) {
+    console.warn(`[publish] image de /${opts.slug} impossible : ${error instanceof Error ? error.message : error}`)
+    return null
+  }
 }
 
 /**
@@ -126,6 +179,8 @@ export interface NextJsPublishResult {
    * permanently without ever saying so.
    */
   promotion?: PromotionOutcome
+  /** Public path of the hero image the page shows, when it has one. */
+  heroImage?: string
   /**
    * Publishing in the site's shell and publishing a naked article both returned
    * `success: true` and were indistinguishable afterwards. Only one of them is
@@ -171,7 +226,6 @@ export async function publishToNextJs(opts: NextJsPublishOptions): Promise<NextJ
     const profile = repoProfile || await detectProfileLite(repoApi, headers, branch)
 
     // 1. Generate the page.tsx content
-    const { content: pageContent, mode } = selectPageContent(profile, page, siteUrl, pageType)
 
     // 2. Refuse a slug the site sends visitors away from
     //
@@ -216,6 +270,22 @@ export async function publishToNextJs(opts: NextJsPublishOptions): Promise<NextJ
           `Publication annulee pour ne pas ecraser une page redigee a la main — changer le slug.`,
       }
     }
+
+    // The hero image, committed BEFORE the page: the build the page triggers
+    // already has it. Placed after the guards, so a refused slug costs nothing.
+    const hero = opts.heroImage
+      ? await placeHeroImage({
+          repoApi,
+          headers,
+          appRoot: profile.appRoot ?? '',
+          slug: page.slug,
+          branch,
+          source: opts.heroImage,
+          alt: heroImageAlt(page),
+        })
+      : null
+    const shipped = hero ? { ...page, htmlContent: withHeroFigure(page.htmlContent, hero) } : page
+    const { content: pageContent, mode } = selectPageContent(profile, shipped, siteUrl, pageType)
 
     const pagePayload = {
       message: `seo-engine: publish ${page.slug}`,
@@ -278,6 +348,7 @@ export async function publishToNextJs(opts: NextJsPublishOptions): Promise<NextJ
       sitemapUpdated,
       mode,
       promotion,
+      heroImage: hero?.src,
     }
   } catch (error) {
     return {

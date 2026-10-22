@@ -23,6 +23,7 @@
 // three fields and not one boolean.
 
 import type { GeneratedPage } from '@/lib/ai/openai'
+import type { HeroImageSource } from '@/lib/ai/images'
 import type { PageType, RefusalKind, Site } from '@/lib/types'
 
 /** Whether the destination should show the page immediately or hold it back. */
@@ -83,6 +84,14 @@ export interface PublishRequest {
    */
   replaces?: { path: string; remoteId?: number }
   signal?: AbortSignal
+  /**
+   * The page's hero image, generated on demand (lib/ai/images.ts).
+   *
+   * A source and not an image: the connector calls it only once its own guards
+   * have passed, so an occupied slug or a redirected URL costs no generation.
+   * Absent: the page asked for none.
+   */
+  heroImage?: HeroImageSource
 }
 
 /**

@@ -61,6 +61,7 @@ export const nextJsConnector: Connector = {
       // omettre la ligne rendait cette garde inatteignable et laissait la
       // validation humaine se heurter au marqueur de fichier ecrit a la main.
       replaces: request.replaces,
+      heroImage: request.heroImage,
     })
 
     if (!result.success) {
@@ -96,6 +97,9 @@ export const nextJsConnector: Connector = {
         `Commitee sur « ${branch} » mais pas en ligne : ` +
           (result.promotion?.reason ?? 'la branche n a pas ete fusionnee vers la production')
       )
+    }
+    if (request.heroImage) {
+      notes.push(result.heroImage ? `Image d'en-tete : ${result.heroImage}` : 'Image non generee : page publiee sans image')
     }
     if (result.mode === 'secours') {
       notes.push('Page nue : le depot n a fourni ni charpente commune ni layout enveloppant')

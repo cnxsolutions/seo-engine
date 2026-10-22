@@ -416,3 +416,86 @@ describe('pageFilePath', () => {
     expect(pageFilePath('app//', 'taxi-troyes')).toBe('app/taxi-troyes/page.tsx')
   })
 })
+
+describe('publishToNextJs — image d en-tete', () => {
+  const PROFILE = {
+    router: 'app' as const,
+    appRoot: 'nextjs/',
+    srcPrefix: 'nextjs/src/',
+    pageFolder: 'nextjs/src/app/(public)',
+    sitemapPath: null,
+    sitemapFormat: null,
+    layoutPath: null,
+    componentsPath: null,
+    sharedComponents: [],
+    samplePagePath: null,
+    samplePageContent: null,
+    publishTemplate: null,
+  }
+  const options = {
+    githubRepo: 'cnxsolutions/foodflow',
+    githubToken: 'x',
+    page,
+    siteUrl: 'https://www.flowyne.com',
+    repoProfile: PROFILE,
+  }
+  const IMAGE_PATH = `nextjs/public/images/seo/${page.slug}.webp`
+
+  /** A repository with or without the photo already in it; every PUT is recorded. */
+  function repo(imageExists: boolean) {
+    const puts: Array<{ url: string; body: { content: string } }> = []
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (init?.method === 'PUT') {
+        puts.push({ url: String(url), body: JSON.parse(String(init.body)) })
+        return new Response(JSON.stringify({ content: { html_url: 'x' }, commit: { sha: 'y' } }), { status: 200 })
+      }
+      if (String(url).includes('/images/seo/') && imageExists) return new Response(JSON.stringify({ sha: 'img' }), { status: 200 })
+      return new Response('{}', { status: 404 })
+    }))
+    return puts
+  }
+
+  const photo = vi.fn(async () => ({
+    data: Buffer.from('webp-bytes'), format: 'webp' as const, mimeType: 'image/webp' as const,
+    width: 1536, height: 1024, alt: 'Un taxi devant la gare',
+  }))
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    photo.mockClear()
+  })
+
+  it('commite la photo AVANT la page, sous public/ de l application, et la page la montre', async () => {
+    const puts = repo(false)
+
+    const result = await publishToNextJs({ ...options, heroImage: photo })
+
+    expect(result.success).toBe(true)
+    expect(photo).toHaveBeenCalledWith('webp')
+    expect(puts[0].url).toContain(`/contents/${IMAGE_PATH}`)
+    expect(Buffer.from(puts[0].body.content, 'base64').toString()).toBe('webp-bytes')
+    expect(Buffer.from(puts[1].body.content, 'base64').toString()).toContain(`/images/seo/${page.slug}.webp`)
+    expect(result.heroImage).toBe(`/images/seo/${page.slug}.webp`)
+  })
+
+  it('reprend une photo deja presente sans en generer une autre', async () => {
+    const puts = repo(true)
+
+    const result = await publishToNextJs({ ...options, heroImage: photo })
+
+    expect(photo).not.toHaveBeenCalled()
+    expect(puts).toHaveLength(1)
+    expect(result.heroImage).toBe(`/images/seo/${page.slug}.webp`)
+  })
+
+  it('publie la page sans image quand la generation echoue', async () => {
+    const puts = repo(false)
+
+    const result = await publishToNextJs({ ...options, heroImage: async () => null })
+
+    expect(result.success).toBe(true)
+    expect(puts).toHaveLength(1)
+    expect(Buffer.from(puts[0].body.content, 'base64').toString()).not.toContain('/images/seo/')
+    expect(result.heroImage).toBeUndefined()
+  })
+})

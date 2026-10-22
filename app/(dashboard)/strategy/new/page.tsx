@@ -123,6 +123,8 @@ export default function NewStrategyWorkflowPage() {
     cycle_duration_days: '14',
     competitor_urls: '',
     auto_publish: false,
+    // A photo at the head of every page, by default; each brief can say otherwise.
+    enable_images: false,
   })
   const [pageTypes, setPageTypes] = useState<PageType[]>(['pillar', 'child', 'local_pack'])
   const [analysisRun, setAnalysisRun] = useState<AnalysisRun | null>(null)
@@ -246,8 +248,9 @@ export default function NewStrategyWorkflowPage() {
 
   const updateContextForm = (event: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const target = event.target
-    if (target.name === 'auto_publish') {
-      setContextForm((prev) => ({ ...prev, auto_publish: (target as HTMLInputElement).checked }))
+    if (target.name === 'auto_publish' || target.name === 'enable_images') {
+      const checked = (target as HTMLInputElement).checked
+      setContextForm((prev) => ({ ...prev, [target.name]: checked }))
       return
     }
     setContextForm((prev) => ({ ...prev, [target.name]: target.value }))
@@ -320,6 +323,7 @@ export default function NewStrategyWorkflowPage() {
           ai_model: contextForm.ai_model,
           publish_status: contextForm.publish_status,
           auto_publish: contextForm.auto_publish,
+          enable_images: contextForm.enable_images,
           target_length: Number(contextForm.target_length) || 800,
           cycle_duration_days: Number(contextForm.cycle_duration_days) || 14,
           page_types: national ? withoutLocalPack(pageTypes) : pageTypes,
@@ -520,6 +524,10 @@ export default function NewStrategyWorkflowPage() {
             <input type="checkbox" name="auto_publish" checked={contextForm.auto_publish} onChange={updateContextForm} />
             Publier automatiquement le jour prévu
           </label>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', fontSize: 'var(--fs-sm)', color: 'var(--ink-secondary)' }}>
+            <input type="checkbox" name="enable_images" checked={contextForm.enable_images} onChange={updateContextForm} />
+            Générer une photo IA en tête de chaque page — modifiable brief par brief avant de confirmer
+          </label>
           <div style={{ display: 'flex', justifyContent: 'space-between' }}>
             <button onClick={() => setStep(0)} className="btn-ghost">Retour</button>
             <button onClick={runAnalysis} disabled={!canAnalyze || loading === 'analysis'} className="btn-primary">
@@ -595,6 +603,7 @@ export default function NewStrategyWorkflowPage() {
             onChange={updatePlanItem}
             onSave={savePlanOnly}
             saving={loading === 'save'}
+            imageDefault={contextForm.enable_images}
           />
 
           {/* La garde est posée à l'endroit exact où l'humain peut la

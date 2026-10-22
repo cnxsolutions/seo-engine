@@ -34,7 +34,8 @@ function wp(routes: Array<{ match: RegExp; status?: number; body?: unknown; text
     sent.push({
       url,
       method: init?.method ?? 'GET',
-      body: init?.body ? JSON.parse(String(init.body)) : undefined,
+      // A media upload sends the file itself, not JSON.
+      body: init?.body ? (typeof init.body === 'string' ? JSON.parse(init.body) : { binary: true }) : undefined,
     })
 
     const route = routes.find((r) => r.match.test(url))
@@ -677,5 +678,42 @@ describe('mot de passe d application', () => {
 
     const decoded = Buffer.from(String(header).replace('Basic ', ''), 'base64').toString('utf-8')
     expect(decoded).toBe('admin:AbCd1234EfGh5678IjKl9012')
+  })
+})
+
+describe('image a la une', () => {
+  const ROUTES = (mediaStatus: number) => [
+    { match: /pages\?|posts\?/, body: [] },
+    { match: /wp-json\/$|wp-json$/, body: { namespaces: ['wp/v2'] } },
+    { match: /media\/77$/, body: { id: 77 } },
+    { match: /media$/, status: mediaStatus, body: mediaStatus === 201 ? { id: 77 } : { code: 'rest_upload_unknown_error' } },
+    { match: /pages$/, body: { id: 55, link: `${SITE_URL}/taxi-gare/`, status: 'publish' } },
+    { match: /pages\/55/, body: { id: 55, link: `${SITE_URL}/taxi-gare/`, status: 'publish', content: { raw: '<h1>Taxi</h1><script type="application/ld+json">{}</script>' } } },
+  ]
+  const photo = vi.fn(async (format: 'webp' | 'jpeg') => ({
+    data: Buffer.from('jpeg-bytes'), format, mimeType: 'image/jpeg' as const,
+    width: 1536, height: 1024, alt: 'Un taxi devant la gare',
+  }))
+
+  it('envoie la photo en jpeg dans la mediatheque et en fait l image a la une de la page creee', async () => {
+    const sent = wp(ROUTES(201))
+
+    const outcome = await wordPressConnector.publish({ site: SITE, page: PAGE, intent: 'publie', heroImage: photo })
+
+    expect(photo).toHaveBeenCalledWith('jpeg')
+    expect(sent.find((call) => /media$/.test(call.url))?.body).toEqual({ binary: true })
+    expect(sent.find((call) => /media\/77$/.test(call.url))?.body).toEqual({ alt_text: 'Un taxi devant la gare' })
+    expect(sent.find((call) => /pages$/.test(call.url) && call.method === 'POST')?.body).toMatchObject({ featured_media: 77 })
+    expect(outcome.notes.join(' ')).toContain('Image a la une : media 77')
+  })
+
+  it('publie la page sans image quand la mediatheque refuse le fichier', async () => {
+    const sent = wp(ROUTES(500))
+
+    const outcome = await wordPressConnector.publish({ site: SITE, page: PAGE, intent: 'publie', heroImage: photo })
+
+    expect(outcome.ok).toBe(true)
+    expect(sent.find((call) => /pages$/.test(call.url) && call.method === 'POST')?.body).not.toHaveProperty('featured_media')
+    expect(outcome.notes.join(' ')).toContain('Image non envoyee a la mediatheque')
   })
 })

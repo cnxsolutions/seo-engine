@@ -62,7 +62,7 @@ export function planActionKind(item: PlanItemBrief): PlanActionKind {
 const LEGACY_REFRESH_NOTE = 'ne sera pas produite'
 
 /** Les trois champs qu'un humain retape à cette étape, et pas un de plus. */
-export type PlanBriefPatch = Partial<Pick<PlanItemBrief, 'proposed_title' | 'proposed_slug' | 'target_keyword'>>
+export type PlanBriefPatch = Partial<Pick<PlanItemBrief, 'proposed_title' | 'proposed_slug' | 'target_keyword' | 'generate_image'>>
 
 export interface PlanBriefListProps {
   items: PlanItemBrief[]
@@ -83,6 +83,24 @@ export interface PlanBriefListProps {
   /** « Enregistrer » dans le panneau : conserve le plan sans lancer le cycle. */
   onSave?: () => void | Promise<void>
   saving?: boolean
+  /**
+   * Le réglage d'image de la campagne : ce que vaut un brief qui n'a pas fait
+   * son propre choix (`generate_image` absent).
+   */
+  imageDefault?: boolean
+  /**
+   * Cocher l'image d'un brief SANS rendre le reste modifiable : sur un cycle
+   * qui tourne, l'adresse est réservée, mais l'image reste un choix libre tant
+   * que la page n'est pas générée.
+   */
+  onToggleImage?: (id: string, value: boolean) => void
+  /** Le brief dont le choix d'image est en cours d'enregistrement. */
+  imageSavingId?: string | null
+}
+
+/** Ce que vaut l'image d'un brief : son choix, sinon celui de la campagne. */
+export function briefWantsImage(item: PlanItemBrief, imageDefault: boolean): boolean {
+  return item.generate_image ?? imageDefault
 }
 
 /**
@@ -104,6 +122,7 @@ function displayPath(slug: string): string {
 
 export function PlanBriefList({
   items, selectedId, onSelect, verdictFor, keywordNote, editable = false, onChange, onSave, saving = false,
+  imageDefault = false, onToggleImage, imageSavingId = null,
 }: PlanBriefListProps) {
   // Trié par date, comme le calendrier qu'il deviendra : l'ordre du planificateur
   // est déjà chronologique, mais une ligne retouchée ne doit pas le défaire.
@@ -131,6 +150,7 @@ export function PlanBriefList({
                   item={item}
                   selected={key === selectedId}
                   verdict={planActionKind(item) === 'create' ? verdictFor(item) : null}
+                  withImage={briefWantsImage(item, imageDefault)}
                   onOpen={() => onSelect(key)}
                 />
               </li>
@@ -148,6 +168,9 @@ export function PlanBriefList({
         onClose={() => onSelect(null)}
         onSave={onSave}
         saving={saving}
+        imageDefault={imageDefault}
+        onToggleImage={onToggleImage}
+        imageSaving={selected !== null && imageSavingId === selected.item.id}
       />
     </div>
   )
@@ -172,11 +195,12 @@ export function ActionBadge({ kind }: { kind: PlanActionKind }) {
 }
 
 function BriefRow({
-  item, selected, verdict, onOpen,
+  item, selected, verdict, withImage, onOpen,
 }: {
   item: PlanItemBrief
   selected: boolean
   verdict: AddressVerdict | null
+  withImage: boolean
   onOpen: () => void
 }) {
   const action = item.action
@@ -203,6 +227,7 @@ function BriefRow({
         <span className="plan-brief__tags">
           <ActionBadge kind={kind} />
           {!skipped && <span className="chip">{pageTypeLabel(item.page_type)}</span>}
+          {!skipped && withImage && <span className="chip" title="Une photo d’en-tête sera générée par IA">Photo IA</span>}
           <span className="meta">
             {action?.kind === 'skip'
               ? action.reasons[0] ?? 'Aucun motif enregistré.'
@@ -270,7 +295,7 @@ function BulletList({ lines }: { lines: string[] }) {
 }
 
 function BriefDetail({
-  row, verdict, keywordNote, editable, onChange, onClose, onSave, saving,
+  row, verdict, keywordNote, editable, onChange, onClose, onSave, saving, imageDefault, onToggleImage, imageSaving,
 }: {
   row: { item: PlanItemBrief; key: string } | null
   verdict: AddressVerdict | null
@@ -280,8 +305,13 @@ function BriefDetail({
   onClose: () => void
   onSave?: () => void | Promise<void>
   saving: boolean
+  imageDefault: boolean
+  onToggleImage?: (id: string, value: boolean) => void
+  imageSaving: boolean
 }) {
   const uid = useId()
+  const imageId = `${uid}-image`
+  const imageHintId = `${uid}-image-hint`
   const headingId = `${uid}-heading`
   const titleId = `${uid}-title`
   const slugId = `${uid}-slug`
@@ -393,6 +423,42 @@ function BriefDetail({
         <ReadField label="Requête visée">
           {item.target_keyword || '—'}
           <KeywordMeta item={item} note={keywordNote?.(item)} />
+        </ReadField>
+      )}
+
+      {kind === 'create' && (canEdit || onToggleImage) && (
+        <div>
+          <div className="field-label">Image</div>
+          <label
+            htmlFor={imageId}
+            style={{ display: 'flex', gap: 'var(--space-2)', alignItems: 'flex-start', cursor: 'pointer', fontSize: 'var(--fs-sm)', color: 'var(--ink-primary)' }}
+          >
+            <input
+              id={imageId}
+              type="checkbox"
+              checked={briefWantsImage(item, imageDefault)}
+              disabled={imageSaving}
+              aria-describedby={imageHintId}
+              onChange={(event) => {
+                if (canEdit) patch({ generate_image: event.target.checked })
+                else onToggleImage?.(item.id, event.target.checked)
+              }}
+              style={{ marginTop: 3 }}
+            />
+            <span>Générer une photo d’en-tête par IA</span>
+          </label>
+          <p id={imageHintId} className="meta" style={{ margin: 'var(--space-1) 0 0 calc(13px + var(--space-2))' }}>
+            {item.generate_image === undefined
+              ? `Réglage de la campagne : ${imageDefault ? 'oui' : 'non'}.`
+              : 'Choix propre à ce brief.'}{' '}
+            Pris en compte tant que la page n’est pas générée.
+          </p>
+        </div>
+      )}
+
+      {kind === 'create' && !canEdit && !onToggleImage && (
+        <ReadField label="Image">
+          {briefWantsImage(item, imageDefault) ? 'Photo d’en-tête générée par IA' : 'Aucune image'}
         </ReadField>
       )}
 

@@ -21,6 +21,7 @@ import type { Connector } from '../connector'
 import { rejectedOnArrival } from '../http-evidence'
 import type { PublishOutcome, PublishRequest } from '../outcome'
 import type { GeneratedPage } from '@/lib/ai/openai'
+import type { HeroImageSource } from '@/lib/ai/images'
 
 export const wordPressConnector: Connector = {
   label: 'WordPress',
@@ -145,6 +146,13 @@ export const wordPressConnector: Connector = {
       }
       if (site.wp_page_template) body.template = site.wp_page_template
 
+      // The hero image becomes the featured image — on a CREATION only: updating
+      // a page must not pay for a second picture of it.
+      if (request.heroImage && target.action === 'creer') {
+        const featured = await uploadHeroImage(client, request.heroImage, page.slug, notes)
+        if (featured) body.featured_media = featured
+      }
+
       // The target's own post type, not `pages` by reflex: updating a post at
       // `/wp/v2/pages/{id}` is a 404 against an unrelated content id.
       const path =
@@ -203,6 +211,42 @@ export const wordPressConnector: Connector = {
       return fail(error, attemptedWrite && !rejectedOnArrival(httpStatus), notes)
     }
   },
+}
+
+/**
+ * Send the hero image to the media library; its id, or null.
+ *
+ * JPEG, which every WordPress accepts — webp needs 5.8 and a server that
+ * decodes it. The alt text is a second request because WordPress does not
+ * read one from a binary upload. Never fatal: the page is published without
+ * an image, and the note says why.
+ */
+async function uploadHeroImage(
+  client: WpClient,
+  source: HeroImageSource,
+  slug: string,
+  notes: string[]
+): Promise<number | null> {
+  const image = await source('jpeg')
+  if (!image) {
+    notes.push('Image non generee : page publiee sans image a la une')
+    return null
+  }
+
+  try {
+    const media = await client.upload<{ id: number }>('/wp/v2/media', image.data, `${slug}.jpg`, image.mimeType)
+    await client.post(`/wp/v2/media/${media.id}`, { alt_text: image.alt }).catch(() => {
+      notes.push("Image envoyee sans son texte alternatif (WordPress l'a refuse)")
+    })
+    notes.push(`Image a la une : media ${media.id}`)
+    return media.id
+  } catch (error) {
+    notes.push(
+      `Image non envoyee a la mediatheque (${error instanceof Error ? error.message : String(error)}) : ` +
+        'page publiee sans image a la une'
+    )
+    return null
+  }
 }
 
 interface ReadBack {
