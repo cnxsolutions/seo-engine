@@ -9,6 +9,7 @@ import type { PageType } from '@/lib/types'
 import { isRedirectSource } from './redirects'
 import { HERO_IMAGE_SIZE, heroImageAlt, withHeroFigure, type HeroImageSource } from '@/lib/ai/images'
 import { takeLeadingH1 } from '@/lib/seo/h1'
+import { hasTypographyPlugin, withArticleStyles } from './article-styles'
 
 export interface NextJsPublishOptions {
   githubRepo: string
@@ -286,7 +287,11 @@ export async function publishToNextJs(opts: NextJsPublishOptions): Promise<NextJ
         })
       : null
     const shipped = hero ? { ...page, htmlContent: withHeroFigure(page.htmlContent, hero) } : page
-    const { content: pageContent, mode } = selectPageContent(profile, shipped, siteUrl, pageType)
+    // Read at every publication rather than at analysis: the plugin is the kind
+    // of thing a site adds between two analyses (lib/publishers/article-styles.ts).
+    const packageJson = await readExistingPage(repoApi, headers, `${profile.appRoot ?? ''}package.json`, branch)
+    const articleStyles = !hasTypographyPlugin(packageJson?.content ?? null)
+    const { content: pageContent, mode } = selectPageContent(profile, shipped, siteUrl, pageType, articleStyles)
 
     const pagePayload = {
       message: `seo-engine: publish ${page.slug}`,
@@ -741,7 +746,9 @@ function selectPageContent(
   profile: RepoProfile,
   page: GeneratedPage,
   siteUrl: string,
-  pageType?: PageType
+  pageType?: PageType,
+  /** Give the article its own typography: the site has no Typography plugin. */
+  articleStyles = false
 ): { content: string; mode: PageBuildMode } {
   const pageUrl = `${siteUrl.replace(/\/$/, '')}/${page.slug}`
 
@@ -771,6 +778,10 @@ function selectPageContent(
   // Prefer the chrome captured at analysis time: it saw the whole file, while
   // `samplePageContent` is a 3000-character prefix that usually stops before the
   // footer. Falling back to it keeps profiles stored before this existed working.
+  // Every mode below injects the article as raw HTML into a page the site
+  // styles; the contract above hands it to the site's own adapter instead.
+  if (articleStyles) page = { ...page, htmlContent: withArticleStyles(page.htmlContent) }
+
   const chrome = profile.chrome ?? extractChrome([profile.samplePageContent])
 
   if (chrome.before.length > 0 || chrome.after.length > 0) {
