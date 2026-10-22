@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { crawlPage, crawlWebsite, extractUrlsFromSitemap, MAX_NESTED_SITEMAPS } from './crawler'
+import { crawlPage, crawlWebsite, extractUrlsFromSitemap, isSameSite, MAX_NESTED_SITEMAPS } from './crawler'
 
 // No network anywhere in this file. Sitemap extraction takes an injected
 // fetcher, page parsing goes through a stubbed global fetch. That is the whole
@@ -242,5 +242,46 @@ describe('crawlWebsite', () => {
 
     expect(result.truncated).toBe(false)
     expect(result.pages).toHaveLength(2)
+  })
+})
+
+// flowyne.com, 2026-10-22: served on https://www.flowyne.com (the bare domain
+// redirects there), sitemap listing every page as https://flowyne.com/…. The
+// crawl read 0 of 107 pages and the site's Pages tab stayed empty.
+describe('crawlWebsite — www and bare domain are the same site', () => {
+  const WWW = 'https://www.flowyne.com'
+  const BARE_SITEMAP = `<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url><loc>https://flowyne.com/tarifs</loc></url>
+  <url><loc>https://flowyne.com/blog</loc></url>
+</urlset>`
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('crawls the pages a www site lists without www', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: unknown) => {
+        const url = String(input)
+        if (url === `${WWW}/sitemap.xml`) return new Response(BARE_SITEMAP, { status: 200 })
+        if (url.endsWith('.xml')) return new Response('', { status: 404 })
+        return htmlResponse(PLAIN_HTML)
+      })
+    )
+
+    const result = await crawlWebsite({ siteUrl: WWW, maxPages: 50, followLinks: false })
+
+    expect(result.pages).toHaveLength(2)
+    expect(result.truncated).toBe(false)
+  })
+
+  it('compares hosts, not prefixes', () => {
+    expect(isSameSite('https://flowyne.com/blog', WWW)).toBe(true)
+    expect(isSameSite('https://www.flowyne.com/blog', 'https://flowyne.com')).toBe(true)
+    expect(isSameSite('https://www.flowyne.com.evil.fr/x', WWW)).toBe(false)
+    expect(isSameSite('https://app.flowyne.com/x', WWW)).toBe(false)
+    expect(isSameSite('/relative', WWW)).toBe(false)
   })
 })

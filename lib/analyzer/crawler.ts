@@ -144,8 +144,7 @@ export async function crawlWebsite(opts: CrawlOptions): Promise<CrawlResult> {
       break
     }
     if (visited.has(url)) continue
-    const normalizedUrl = url.replace(/\/$/, '')
-    if (!normalizedUrl.startsWith(baseUrl)) continue
+    if (!isSameSite(url, baseUrl)) continue
 
     visited.add(url)
     const page = await crawlPage(url, baseUrl)
@@ -154,7 +153,7 @@ export async function crawlWebsite(opts: CrawlOptions): Promise<CrawlResult> {
 
       if (followLinks && visited.size < maxPages) {
         for (const link of page.internalLinks) {
-          if (!visited.has(link) && !queue.includes(link) && link.startsWith(baseUrl)) {
+          if (!visited.has(link) && !queue.includes(link) && isSameSite(link, baseUrl)) {
             queue.push(link)
           }
         }
@@ -169,6 +168,26 @@ export async function crawlWebsite(opts: CrawlOptions): Promise<CrawlResult> {
     totalPages: sitemapUrls.length || pages.length,
     crawledAt: new Date().toISOString(),
     truncated,
+  }
+}
+
+/**
+ * Same site, with or without « www. ».
+ *
+ * resolveBaseUrl follows the redirect between a site's two forms, but nothing
+ * obliges its sitemap or its links to use the form it lands on: flowyne.com is
+ * served on https://www.flowyne.com and lists its 107 pages as
+ * https://flowyne.com/…. A prefix test on the resolved base dropped every one of
+ * them and the site's inventory came back empty — the bug extractLoc was fixed
+ * for, still alive in the crawl loop. Comparing hosts also stops
+ * `https://www.site.fr.evil.com` from passing as `https://www.site.fr`.
+ */
+export function isSameSite(url: string, baseUrl: string): boolean {
+  try {
+    const host = (value: string) => new URL(value).hostname.toLowerCase().replace(/^www\./, '')
+    return host(url) === host(baseUrl)
+  } catch {
+    return false
   }
 }
 
@@ -447,10 +466,10 @@ function parsePage(html: string, url: string, baseUrl: string): CrawledPage {
 
   // Links
   const allLinks = extractLinks(html)
-  const internalLinks = allLinks.filter((l) => l.startsWith(baseUrl) || l.startsWith('/'))
+  const internalLinks = allLinks.filter((l) => l.startsWith('/') || isSameSite(l, baseUrl))
     .map((l) => l.startsWith('/') ? `${baseUrl}${l}` : l)
     .filter((l) => l !== url)
-  const externalLinks = allLinks.filter((l) => l.startsWith('http') && !l.startsWith(baseUrl))
+  const externalLinks = allLinks.filter((l) => l.startsWith('http') && !isSameSite(l, baseUrl))
 
   // Images
   const images = extractImages(html)
