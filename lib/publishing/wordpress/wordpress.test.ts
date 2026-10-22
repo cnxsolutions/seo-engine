@@ -717,3 +717,22 @@ describe('image a la une', () => {
     expect(outcome.notes.join(' ')).toContain('Image non envoyee a la mediatheque')
   })
 })
+
+describe('un seul H1', () => {
+  it('donne le texte du H1 de l article comme titre (le H1 du theme) et retire le H1 du contenu', async () => {
+    const sent = wp([
+      { match: /pages\?|posts\?/, body: [] },
+      { match: /wp-json\/$|wp-json$/, body: { namespaces: ['wp/v2'] } },
+      { match: /pages$/, body: { id: 55, link: `${SITE_URL}/taxi-gare/`, status: 'publish' } },
+      { match: /pages\/55/, body: { id: 55, link: `${SITE_URL}/taxi-gare/`, status: 'publish', content: { raw: '<p>x</p><script type="application/ld+json">{}</script>' } } },
+    ])
+    const page = { ...PAGE, htmlContent: '<h1>Taxi à la gare de Troyes</h1><p class="reponse-directe">Réponse.</p>' }
+
+    await wordPressConnector.publish({ site: SITE, page, intent: 'publie' })
+
+    const body = sent.find((call) => /pages$/.test(call.url) && call.method === 'POST')?.body as { title: string; content: string }
+    expect(body.title).toBe('Taxi à la gare de Troyes')
+    expect(body.content).not.toContain('<h1')
+    expect(body.content).toContain('<p class="reponse-directe">Réponse.</p>')
+  })
+})

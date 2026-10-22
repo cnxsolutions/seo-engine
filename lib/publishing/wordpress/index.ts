@@ -22,6 +22,7 @@ import { rejectedOnArrival } from '../http-evidence'
 import type { PublishOutcome, PublishRequest } from '../outcome'
 import type { GeneratedPage } from '@/lib/ai/openai'
 import type { HeroImageSource } from '@/lib/ai/images'
+import { takeLeadingH1 } from '@/lib/seo/h1'
 
 export const wordPressConnector: Connector = {
   label: 'WordPress',
@@ -66,6 +67,13 @@ export const wordPressConnector: Connector = {
     // proxy for it.
     let attemptedWrite = false
 
+    // The theme prints the post title as the page's H1. Sending the article's
+    // own H1 as well put two on the page (cnx-solutions.fr, 2026-10-22): the
+    // article gives its H1 up and lends its wording to the title instead. The
+    // SEO title stays page.title, in the SEO plugin's meta below.
+    const { h1, body: article } = takeLeadingH1(page.htmlContent)
+    const postTitle = h1 ?? page.title
+
     try {
       // ─── 1. Where does this go? ────────────────────────────────────────────
       const target = await decideTarget(client, {
@@ -79,7 +87,9 @@ export const wordPressConnector: Connector = {
         // resultat que `replaces` existe pour eviter.
         replaces: request.replaces,
         recovering: request.recovering,
-        expectedTitle: page.title,
+        // What this connector writes as the title: the recovery recognises its
+        // own half-written page by it.
+        expectedTitle: postTitle,
       })
 
       if (target.action === 'refuser') {
@@ -128,8 +138,8 @@ export const wordPressConnector: Connector = {
         notes.push('Page deja publiee sur le site : son statut est conserve plutot que remis en brouillon')
       }
       const body: Record<string, unknown> = {
-        title: page.title,
-        content: contentWithSchema(page),
+        title: postTitle,
+        content: contentWithSchema({ ...page, htmlContent: article }),
         slug: page.slug,
         status,
         meta: metaFor(dialect, {

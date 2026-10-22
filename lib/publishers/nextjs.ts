@@ -8,6 +8,7 @@ import { syncBranchWithProduction } from './sync-branch'
 import type { PageType } from '@/lib/types'
 import { isRedirectSource } from './redirects'
 import { HERO_IMAGE_SIZE, heroImageAlt, withHeroFigure, type HeroImageSource } from '@/lib/ai/images'
+import { takeLeadingH1 } from '@/lib/seo/h1'
 
 export interface NextJsPublishOptions {
   githubRepo: string
@@ -622,6 +623,10 @@ export function fillTemplate(template: string, page: GeneratedPage, siteUrl: str
   const misuse = TEMPLATE_MISUSES.find((m) => m.pattern.test(template))
   if (misuse) throw new TemplateSubstitutionError([`gabarit invalide : ${misuse.why}`])
 
+  // A template that prints its own H1 ({{TITLE}} in a hero, as Flowyne's does)
+  // gets the article WITHOUT the article's H1: one page, one H1 (lib/seo/h1.ts).
+  const htmlContent = /<h1\b/i.test(template) ? takeLeadingH1(page.htmlContent).body : page.htmlContent
+
   const filled = template
     .replace(/\{\{TITLE\}\}/g, escapeJs(page.title))
     .replace(/\{\{META_DESCRIPTION\}\}/g, escapeJs(page.metaDescription))
@@ -631,8 +636,8 @@ export function fillTemplate(template: string, page: GeneratedPage, siteUrl: str
     .replace(/\{\{OG_DESCRIPTION\}\}/g, escapeJs(page.ogDescription || page.metaDescription))
     // Inside backticks the template asked for a string: give it one. Anywhere
     // else it asked for a JSX child, and raw HTML is not one.
-    .replace(/`\{\{HTML_CONTENT\}\}`/g, `\`${escapeTemplate(page.htmlContent)}\``)
-    .replace(/\{\{HTML_CONTENT\}\}/g, htmlContentElement(page.htmlContent))
+    .replace(/`\{\{HTML_CONTENT\}\}`/g, `\`${escapeTemplate(htmlContent)}\``)
+    .replace(/\{\{HTML_CONTENT\}\}/g, htmlContentElement(htmlContent))
     .replace(/\{\{FAQ_ITEMS_JSON\}\}/g, faqJson)
     .replace(/\{\{SCHEMA_JSON\}\}/g, schemaJson)
     .replace(/\{\{PAGE_URL\}\}/g, pageUrl)

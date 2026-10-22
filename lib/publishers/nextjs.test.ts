@@ -499,3 +499,27 @@ describe('publishToNextJs — image d en-tete', () => {
     expect(result.heroImage).toBeUndefined()
   })
 })
+
+describe('fillTemplate — un seul H1', () => {
+  // Flowyne's template printed {{TITLE}} in its own <h1>, and the article
+  // brought a second one: two H1s on the live page, 2026-10-22.
+  const WITH_H1 =
+    'export default function {{COMPONENT_NAME}}() { return (<main><h1>{{TITLE}}</h1>' +
+    '<div dangerouslySetInnerHTML={{ __html: `{{HTML_CONTENT}}` }} /></main>) }'
+  const WITHOUT_H1 =
+    'export default function {{COMPONENT_NAME}}() { return (<main>' +
+    '<div dangerouslySetInnerHTML={{ __html: `{{HTML_CONTENT}}` }} /></main>) }'
+  const article = { ...page, htmlContent: '<h1>Taxi à Troyes</h1><p class="reponse-directe">Réponse.</p>' }
+
+  it('drops the article H1 when the template prints its own', () => {
+    const out = fillTemplate(WITH_H1, article, 'https://taxidriver10.fr')
+    expect(out.match(/<h1\b/g)).toHaveLength(1)
+    expect(out).toContain('Réponse.')
+  })
+
+  it('keeps the article H1 when the template has none', () => {
+    const out = fillTemplate(WITHOUT_H1, article, 'https://taxidriver10.fr')
+    expect(out.match(/<h1\b/g)).toHaveLength(1)
+    expect(out).toContain('<h1>Taxi à Troyes</h1>')
+  })
+})
