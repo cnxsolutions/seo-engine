@@ -144,10 +144,60 @@ BLOC DE REPONSE DIRECTE (OBLIGATOIRE, JUSTE APRES LE H1):
 - Il repond COMPLETEMENT a la requete cible : un lecteur qui ne lit que ce paragraphe a sa reponse.
 - AUTOSUFFISANT : aucun renvoi a la suite de la page. Interdits : "voir ci-dessous", "dans cet
   article", "nous verrons", "decouvrez plus bas", "comme explique plus loin", "ci-apres".
-- Aucun pronom sans antecedent : le sujet est nomme. Le mot-cle focus et la ville y figurent.
+- Aucun pronom sans antecedent : le sujet est nomme. Le mot-cle focus et la ville y figurent, ecrits
+  en francais correct (accents, articles, majuscules) : ce sont ses mots qui comptent, pas sa forme brute.
 - Phrases affirmatives et factuelles. Pas de question, pas d'accroche marketing, pas de CTA,
   pas de "Vous cherchez ... ?", pas de liste a puces, pas de lien.
 - Ce paragraphe est repris MOT POUR MOT dans le champ JSON "directAnswer".
+`.trim()
+
+/**
+ * How the page must READ, as opposed to what it must contain.
+ *
+ * Every other block of the prompt speaks about search engines — keyword,
+ * headings, entities, schema — and a model that obeys them literally writes to
+ * Google in front of the visitor. A published page did exactly that: it quoted
+ * the site's own Search Console queries as "signaux", pasted them unaccented
+ * ("la creation site internet", "l'automatisation ia"), called itself "cette
+ * page pilier", opened five sections with "Réponse courte :" and listed streets
+ * to look local. A reader leaves; Google's spam policies (keyword stuffing,
+ * scaled content) and answer engines read the same tells as mass production.
+ *
+ * This block is the counterweight. It outranks the SEO instructions when they
+ * conflict, and the audit (READER_FIRST rules, lib/pipeline/seo-audit.ts)
+ * refuses the tells it can measure.
+ */
+export const READER_FIRST_RULES = `
+ECRITURE — POUR LE LECTEUR, PAS POUR GOOGLE (prime sur les consignes SEO en cas de conflit):
+- Tu ecris pour la personne qui lit : un client potentiel avec un besoin concret. Chaque phrase
+  doit lui servir. Le referencement structure la page ; il ne se voit jamais dans le texte.
+- La page ne parle jamais d'elle-meme ni de sa strategie : pas de "cette page", "page pilier",
+  "pages filles", "cluster", "maillage", "ancres", "contenu optimise", ni de son intention de
+  recherche. Si le SUJET de la page est le referencement, ce vocabulaire sert a conseiller le
+  lecteur sur SON site, jamais a decrire celui-ci.
+- Les donnees internes sont invisibles : requetes Search Console, positions, impressions,
+  mots-cles et statistiques du site servent a comprendre ce que cherchent les visiteurs. Ne les
+  cite jamais, ne les enumere jamais, ne dis jamais d'ou elles viennent.
+- Un mot-cle est un sujet, pas une chaine a recopier. Ecris-le en francais correct, avec accents,
+  articles et majuscules — "création de site internet", "référencement", "SEO", "IA", "PME" —
+  et seulement la ou une personne le dirait. Jamais une suite de mots-cles separes par des virgules.
+- Lieux : un quartier, une rue, une commune ou un repere n'apparait que si tu as quelque chose de
+  precis a en dire (un trajet, une contrainte, une habitude locale). Jamais d'enumeration de lieux
+  pour paraitre local, jamais "pres de moi", jamais un code postal plaque dans une phrase.
+- Aucune formule mecanique : pas d'etiquette en tete de paragraphe ("Réponse courte :",
+  "En bref :", "À retenir :"), pas de phrase qui annonce la suite, pas de conclusion qui resume.
+- Tournures interdites : "il ne s'agit pas de X, mais de Y", "dans un monde ou", "a l'ere du
+  numerique", "en somme", "n'hesitez pas a", "veritable levier", "incontournable", "que vous soyez
+  X ou Y", "plus que jamais", "un enjeu majeur", et les series systematiques de trois elements.
+- Concret avant general : chaque section apporte un element utilisable — une situation type, une
+  etape, un critere de choix, une erreur a eviter. Une phrase qui irait telle quelle sur le site
+  d'un concurrent d'une autre ville est a reecrire ou a supprimer.
+- Voix : vouvoiement, phrases de longueurs variees, verbes actifs. L'entreprise dit "nous" quand
+  elle decrit sa facon de travailler, sans se vanter et sans rien inventer.
+- Un titre en question est une vraie question ("Comment choisir… ?", "Faut-il… ?"). Jamais un "?"
+  ajoute a un groupe nominal : "Stratégie de référencement pour PME ?" est interdit.
+- Un lien externe se place dans la phrase qu'il appuie, sur les mots qui le justifient. Pas de
+  section "Sources utiles" ni de liste de liens generiques ajoutee pour la forme.
 `.trim()
 
 /**
@@ -160,9 +210,9 @@ export function buildAuthorityRules(businessName: string, isoDate: string): stri
 E-E-A-T / PATERNITE ET FRAICHEUR (OBLIGATOIRE):
 - Auteur = "${businessName}", entite de type Organization. N'INVENTE JAMAIS de nom de personne,
   de titre, de diplome, d'annee d'obtention, ni de nombre d'annees d'experience.
-- Bloc auteur visible, place a la fin de l'article, avant le CTA final :
-  <p class="page-auteur">Publie par ${businessName} — mis a jour le
-  <time datetime="${isoDate}">${isoDate}</time></p>
+- Bloc auteur visible, place a la fin de l'article, avant le CTA final, recopie tel quel :
+  <p class="page-auteur">Publié par ${businessName} — mis à jour le
+  <time datetime="${isoDate}">${frenchLongDate(isoDate)}</time></p>
 - datePublished = "${isoDate}" et dateModified = "${isoDate}" (format ISO 8601 AAAA-MM-JJ).
 - "schemaArticle" : JSON-LD Article valide contenant headline, description, author
   {"@type":"Organization","name":"${businessName}"}, publisher identique, datePublished,
@@ -353,6 +403,27 @@ export function firstNonEmpty(...values: Array<unknown>): string {
 
 export function todayIso(date = new Date()): string {
   return date.toISOString().slice(0, 10)
+}
+
+const FRENCH_LONG_DATE = new Intl.DateTimeFormat('fr-FR', {
+  day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC',
+})
+
+/**
+ * `2026-10-21` → `21 octobre 2026`, the date a visitor reads.
+ *
+ * The ISO form stays in `datetime`, where machines read it; printed as the
+ * visible text, it read like a log line under every article. UTC on both sides,
+ * so the day never shifts with the server's zone. The first of the month is
+ * « 1er », which Intl does not write. Unparseable input comes back unchanged
+ * rather than as "Invalid Date".
+ */
+export function frenchLongDate(isoDate: string): string {
+  const date = new Date(`${isoDate}T00:00:00Z`)
+  if (Number.isNaN(date.getTime())) return isoDate
+  return FRENCH_LONG_DATE.formatToParts(date)
+    .map((part) => (part.type === 'day' && part.value === '1' ? '1er' : part.value))
+    .join('')
 }
 
 // ─── Local SEO page ────────────────────────────────────────────────────────

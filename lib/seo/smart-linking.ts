@@ -188,20 +188,25 @@ function injectExternalLinks(html: string, links: ExternalLink[], injected: stri
 
   // Sources whose anchor phrase is nowhere in the copy still have to be cited:
   // the generator was asked for them, and a source that is not linked is not a
-  // source. They go at the end rather than being forced into a sentence.
-  let result = htmlContent
-  for (const link of links) {
-    if (injectedLinks.some((anchorHtml) => anchorHtml.includes(`href="${escapeAttribute(link.url)}"`))) continue
+  // source. They go at the end rather than being forced into a sentence — on
+  // ONE line, above the author line when there is one. Appended one by one after
+  // the last paragraph, they landed under the call to action: three « Source : »
+  // in a row closing the page.
+  const unplaced = links.filter((link) =>
+    !injectedLinks.some((anchorHtml) => anchorHtml.includes(`href="${escapeAttribute(link.url)}"`)))
+  if (unplaced.length === 0) return htmlContent
 
-    const anchorHtml = render(link)(escapeAttribute(link.anchor))
-    const lastP = result.lastIndexOf('</p>')
-    if (lastP === -1) continue
+  const anchors = unplaced.map((link) => render(link)(escapeAttribute(link.anchor)))
+  const line = `<p class="external-ref">${anchors.length > 1 ? 'Sources' : 'Source'} : ${anchors.join(' · ')}</p>`
 
-    result = `${result.slice(0, lastP + 4)}\n<p class="external-ref">Source : ${anchorHtml}</p>${result.slice(lastP + 4)}`
-    injected.push(anchorHtml)
-  }
+  const author = /<p\b[^>]*class\s*=\s*["'][^"']*\bpage-auteur\b/i.exec(htmlContent)
+  const lastP = htmlContent.lastIndexOf('</p>')
+  if (!author && lastP === -1) return htmlContent
 
-  return result
+  injected.push(...anchors)
+  return author
+    ? `${htmlContent.slice(0, author.index)}${line}\n${htmlContent.slice(author.index)}`
+    : `${htmlContent.slice(0, lastP + 4)}\n${line}${htmlContent.slice(lastP + 4)}`
 }
 
 function buildChildNavigationBlock(links: InternalLinkTarget[], siteUrl: string): string {
