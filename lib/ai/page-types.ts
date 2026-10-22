@@ -4,6 +4,7 @@ import {
   AiOutputError,
   DIRECT_ANSWER_RULES,
   FACTUAL_INTEGRITY_RULES,
+  READER_FIRST_RULES,
   buildAuthorityRules,
   countHtmlWords,
   countWords,
@@ -227,30 +228,34 @@ const PAGE_TYPE_CONFIG: Record<PageType, {
   requiredSections: string[]
   defaultIntent: SearchIntent
 }> = {
+  // No "child_links" section, keyword density, streets or "pres de moi" here
+  // any more. Asked for a section of links to child pages that did not exist
+  // yet, the model wrote one ABOUT them — "Pages locales a creer en priorite",
+  // "Les ancres doivent rester naturelles" — in front of the visitor. Linking
+  // the cluster is the engine's job (pillar-hub block, lib/seo/smart-linking.ts);
+  // the locality lists were the stuffing.
   pillar: {
-    systemPromptExtra: `Tu rediges une PAGE PILIER (cornerstone content). C'est la page principale d'un cluster thematique.
-Elle doit etre exhaustive, faire autorite sur le sujet, et servir de hub vers les pages filles.
-Structure: introduction complete, historique/contexte, sous-sections detaillees, liens vers pages filles, FAQ riche, CTA.
-Densite de mots-cles naturelle (1.5-2.5%), au moins 7 sous-titres H2 dont 3 sous forme de QUESTIONS (People Also Ask).
+    systemPromptExtra: `Tu rediges une PAGE PILIER : la page de reference du site sur un sujet large.
+Elle donne au lecteur une vue d'ensemble complete et fiable, et le renvoie, par des liens places dans le texte, vers les pages du site qui detaillent chaque point.
+Structure: introduction, contexte, sous-sections detaillees, FAQ riche, CTA. Au moins 7 sous-titres H2, dont 3 formules comme les vraies questions des lecteurs.
 SLUG LONG-TAIL: format [activite]-[service-complet]-[specialite]-[ville]-[departement] (minimum 6 mots).
-Entites semantiques variees: quartiers, codes postaux, noms de rues, points de repere.
-Inclure des variantes "pres de moi", "a proximite", "dans le quartier" dans le contenu.`,
+Ancrage local: la realite de la ville et du departement (types d'entreprises, contraintes, habitudes), illustree par des situations concretes, plutot qu'une liste de quartiers ou de rues.`,
     targetLengthMultiplier: 2.5,
     minFaq: 6,
-    requiredSections: ['hero', 'introduction', 'context', 'detailed_sections', 'child_links', 'faq', 'cta'],
+    requiredSections: ['hero', 'introduction', 'context', 'detailed_sections', 'faq', 'cta'],
     defaultIntent: 'informationnelle',
   },
   child: {
-    systemPromptExtra: `Tu rediges une PAGE FILLE liee a une page pilier. Elle traite un sous-aspect specifique du sujet pilier.
-Elle doit contenir un lien retour vers la page pilier et des liens vers les pages soeurs.
-Plus focalisee qu'une page pilier, elle approfondit un angle precis et longue traine.
+    systemPromptExtra: `Tu rediges une PAGE FILLE : elle approfondit un aspect precis d'un sujet plus large que le site traite sur une page generale.
+Elle lie, dans le texte, cette page generale et, quand c'est utile au lecteur, les pages voisines.
+Plus focalisee que la page generale, elle approfondit un angle precis et longue traine.
 SLUG LONG-TAIL: format [service-specifique]-[action]-[contexte]-[ville]-[quartier] (minimum 6 mots).
-Le title DOIT etre sous forme de question longue traine ou intention specifique, en 60 caracteres maximum.
-Inclure un breadcrumb: Accueil > [Page Pilier] > [Cette page].
-Entites NLP: noms de quartiers, communes voisines, points de repere locaux.`,
+Le title vise une intention specifique, en 60 caracteres maximum ; une question seulement si elle est bien formee.
+Le schemaBreadcrumb suit : Accueil > [titre de la page generale] > [titre de cette page].
+Ancrage local: un quartier, une commune voisine ou un repere seulement quand il apporte une information utile.`,
     targetLengthMultiplier: 1.0,
     minFaq: 3,
-    requiredSections: ['hero', 'content', 'parent_link', 'faq', 'cta'],
+    requiredSections: ['hero', 'content', 'faq', 'cta'],
     defaultIntent: 'informationnelle',
   },
   alternative: {
@@ -282,16 +287,16 @@ Cibler: "meilleur X a Y", "top X", "quel X choisir", "X ou Y lequel choisir".`,
   },
   local_pack: {
     systemPromptExtra: `Tu rediges une PAGE LOCAL PACK optimisee pour le pack local Google (Google Maps / 3-pack).
-Maximise les signaux de localisation: zones desservies, quartiers, rues, points de repere locaux.
+Rends la page utile a quelqu'un qui est sur place : zones reellement desservies, acces, deroulement d'une intervention dans le secteur.
 Le NAP (nom, adresse, telephone), les horaires et la note Google ne sont ecrits QUE s'ils sont fournis
 dans les donnees Google Business Profile ci-dessous. Aucune de ces valeurs ne s'invente.
 SLUG LONG-TAIL: format [activite]-[quartier-ou-rue]-[ville]-proximite-[service] (minimum 6 mots).
-Optimiser pour "pres de moi", "a proximite", "ouvert maintenant", "urgence" et intentions locales.
+Les recherches "pres de moi", "ouvert maintenant" ou "urgence" se servent par des informations pratiques (zones, disponibilite, delais qualitatifs), jamais en recopiant ces expressions dans le texte.
 Le schema LocalBusiness est detaille (geo, openingHours, areaServed) mais ne contient aggregateRating
 que si une note et un nombre d'avis reels sont fournis.
 Section temoignages: uniquement a partir des avis REELS fournis. Si aucun avis n'est fourni, la
 remplacer par une section "Nos engagements" de longueur equivalente, sans citation inventee.
-Mentionner au moins 5 quartiers/zones differents de la ville dans le contenu.`,
+Une section zones desservies nomme au moins 5 quartiers ou communes couverts, chacun avec une precision utile ; ailleurs dans la page, aucune enumeration de lieux.`,
     targetLengthMultiplier: 1.2,
     minFaq: 3,
     requiredSections: ['hero', 'local_info', 'services', 'areas_served', 'testimonials', 'faq', 'cta'],
@@ -530,9 +535,11 @@ export async function generateSeoPage(opts: PageTypeGenerateOptions): Promise<Ge
 }
 
 export function buildSystemPrompt(pageType: PageType, extra: string, searchIntent: SearchIntent): string {
-  return `Tu es un expert SEO francophone de niveau Google Certified Partner, specialise en strategie de contenu, E-E-A-T, local pack, et schema.org.
-Tu maitrises parfaitement les strategies de maillage interne (pilier/fille/satellite) et de maillage externe.
-Tu connais RankMath SEO Pro et toutes ses exigences pour le score 100/100.
+  // A writer who knows SEO, not an SEO expert who writes. The persona this
+  // replaced — "Google Certified Partner", "RankMath 100/100" — wrote the way it
+  // was described: for the score, with the strategy showing through the text.
+  return `Tu es un redacteur web francophone experimente, qui ecrit pour les clients de l'entreprise avec la precision d'un professionnel du metier.
+Tu maitrises le referencement (SEO, GEO, E-E-A-T, schema.org, maillage interne et externe) : il organise la page, il ne se lit jamais dans le texte.
 
 TYPE DE PAGE: ${pageType.toUpperCase()}
 ${extra}
@@ -541,9 +548,11 @@ ${INTENT_DIRECTIVES[searchIntent].trim()}
 
 REGLES ABSOLUES:
 - Reponds UNIQUEMENT en JSON valide, sans markdown, sans backticks.
-- Le contenu doit etre unique, naturel, et ne jamais ressembler a du contenu genere par IA.
+- Le contenu est unique et naturel : un professionnel du metier le trouve juste, un client le trouve utile.
 - Appuie-toi sur des elements concrets: etapes, cas de figure, contraintes locales, vocabulaire metier.
 - Varie les formulations et la structure des phrases.
+
+${READER_FIRST_RULES}
 
 ${FACTUAL_INTEGRITY_RULES}
 `.trim()
@@ -592,8 +601,8 @@ export function buildUserPrompt(opts: {
   let contextBlock = ''
   if (opts.pageType === 'child' && opts.pillarSlug && opts.pillarTitle) {
     contextBlock = `
-- Page pilier parente : "${opts.pillarTitle}" (slug: /${opts.pillarSlug})
-- Inclure un lien retour vers la page pilier dans le contenu.`
+- Page generale du sujet : "${opts.pillarTitle}" (slug: /${opts.pillarSlug})
+- La lier dans le texte, sur des mots qui disent ce que le lecteur y trouvera.`
   }
   if (opts.pageType === 'alternative' && opts.alternativeNames.length > 0) {
     contextBlock = `
@@ -608,7 +617,8 @@ export function buildUserPrompt(opts: {
 
   const externalLinksBlock = opts.enableExternalLinks
     ? `
-- Inclure ${opts.externalLinkCount} liens externes vers des sources d'autorite REELLES (sites gouvernementaux, organismes officiels, Wikipedia, federations professionnelles).
+- Entre 1 et ${opts.externalLinkCount} liens externes vers des sources d'autorite REELLES (sites gouvernementaux, organismes officiels, Wikipedia, federations professionnelles).
+- Chaque source appuie une affirmation precise de la page, et "anchor" reprend MOT POUR MOT des mots de cette phrase : le lien y est pose a la publication. Une source qui n'appuie rien n'est pas ajoutee.
 - Une URL dont tu n'es pas certain est remplacee par la page d'accueil du domaine officiel. Jamais d'URL inventee.
 - Format: {"url": "https://...", "anchor": "texte d'ancrage", "domain": "example.com", "relevance": "pourquoi ce lien est pertinent"}`
     : '- Pas de liens externes.'
@@ -625,14 +635,17 @@ BRIEF DU PLAN A RESPECTER STRICTEMENT:
 - Titre cible: ${opts.planBrief.proposed_title}
 - Slug cible: ${opts.planBrief.proposed_slug}
 - Mot-cle focus cible: ${opts.planBrief.target_keyword}
-- Intention declaree: ${opts.planBrief.search_intent}
+- Intention declaree (usage interne): ${opts.planBrief.search_intent}
 - Objectif: ${opts.planBrief.page_goal}
 - Trame obligatoire: ${opts.planBrief.outline.join(' | ')}
-- Regles SEO: ${opts.planBrief.seo_rules.join(' | ')}
+- Regles SEO (a appliquer, jamais a ecrire dans la page): ${opts.planBrief.seo_rules.join(' | ')}
 - Entites requises: ${opts.planBrief.required_entities.join(', ')}
 - Maillage interne suggere: ${opts.planBrief.internal_link_targets.join(', ')}
 - Insights concurrents a exploiter sans copier: ${opts.planBrief.competitor_insights.join(' | ') || 'aucun'}
 
+La trame donne les sujets a couvrir, dans l'ordre : chaque point devient un titre ecrit pour le lecteur. Un point
+qui decrit une tache de referencement (maillage, liens, ancres, pages a creer, mots-cles) n'est pas une section :
+applique-le par des liens dans le texte, sans en parler.
 Tu dois conserver le slug cible et le mot-cle focus cible dans la reponse JSON.`
     : ''
 
@@ -660,10 +673,13 @@ DONNEES GOOGLE BUSINESS PROFILE: AUCUNE.
   if (opts.googleContext?.gsc) {
     const s = opts.googleContext.gsc
     googleBlock += `
-DONNEES SEARCH CONSOLE (mots-cles qui rankent reellement):
+REQUETES SEARCH CONSOLE DU SITE (donnees internes : elles disent ce que cherchent les visiteurs, elles ne s'ecrivent JAMAIS dans la page):
 - Top requetes: ${s.topQueries.slice(0, 8).map((q) => `"${q.query}" (pos ${q.position})`).join(', ')}
 - Position moyenne: ${s.averagePosition}
-IMPORTANT: Integrer naturellement ces requetes performantes dans le contenu pour renforcer le positionnement.
+Usage : garde seulement les requetes qui portent sur le sujet de CETTE page et sur sa ville, ignore les autres
+(une requete sur une autre ville ou un autre service n'a rien a faire ici). Une requete retenue est un besoin a
+traiter, reformule en francais correct : jamais recopiee telle quelle, jamais enumeree, jamais attribuee a la
+Search Console, a des positions ou a des "signaux".
 `
   }
 
@@ -681,9 +697,9 @@ Genere une page SEO de type "${opts.pageType}" complete et optimisee pour :
 - Business : ${opts.businessName}
 - Ville cible : ${opts.city} (${opts.department})
 - Site web : ${opts.siteUrl}
-- Mots-cles : ${opts.keywords.join(', ')}
+- Mots-cles (des sujets, a ecrire en francais correct) : ${opts.keywords.join(', ')}
 - Mot-cle focus : "${mainKeyword}"
-- Intention de recherche qualifiee : ${opts.searchIntent}
+- Intention de recherche qualifiee : ${opts.searchIntent} (usage interne : elle regle le ton et le format, ne la nomme jamais)
 - Longueur cible : ${opts.adjustedLength} a ${maximumWords} mots (mesuree sur les pages qui se positionnent deja)
 - Annee : ${year}
 - Date de publication : ${isoDate}
@@ -713,11 +729,11 @@ ${imagesBlock}
 
 REPONDS EN JSON avec cette structure :
 {
-  "title": "string (max 65 chars, format QUESTION longue traine ou intention specifique, mot-cle focus inclus)",
+  "title": "string (max 65 chars, intention specifique, mot-cle focus inclus ; une question seulement si elle est bien formee, jamais un '?' ajoute a un groupe nominal)",
   "metaDescription": "string (max 155 chars, mot-cle focus + benefice + CTA + localisation)",
   "slug": "recopie exactement le slug reserve annonce plus bas, sans rien y ajouter",
   "focusKeyword": "${mainKeyword}",
-  "secondaryKeywords": ["MINIMUM 8 mots-cles: 2 variations geo (quartiers/communes voisines), 2 questions longue-traine, 2 'pres de moi/a proximite', 2 variantes service specifique"],
+  "secondaryKeywords": ["MINIMUM 8 mots-cles: 2 variations geo (quartiers/communes voisines), 2 questions longue-traine, 2 'pres de moi/a proximite', 2 variantes service specifique — metadonnees, pas a placer telles quelles dans le texte"],
   "searchIntent": "${opts.searchIntent}",
   "ogTitle": "string",
   "ogDescription": "string",
@@ -747,21 +763,22 @@ REPONDS EN JSON avec cette structure :
 ${opts.existingAwareness}
 
 STRATEGIE LONG-TAIL (OBLIGATOIRE):
-- Le TITLE doit cibler une question ou intention longue-traine, en 60 caracteres maximum (ex: "Fuite urgente a Troyes : quel plombier appeler ?")
+- Le TITLE cible une intention longue-traine precise, en 60 caracteres maximum (ex: "Fuite urgente à Troyes : quel plombier appeler ?")
 - OBLIGATOIRE dans le contenu:
-  * Au moins 3 variantes semantiques LSI du mot-cle focus
-  * Au moins 2 formulations "pres de moi" / "a proximite" / "dans le quartier de"
-  * Au moins 3 sous-titres H2 en forme de QUESTIONS (style People Also Ask)
-  * Entites NLP: noms de quartiers, codes postaux, rues connues, points de repere de ${opts.city}
-  * Chaque H2-question recoit sa reponse en 2 phrases maximum AVANT tout developpement
-- secondaryKeywords DOIT contenir au minimum 8 mots-cles diversifies
+  * Le sujet du mot-cle focus est decline avec le vocabulaire du metier (synonymes, formulations voisines) plutot que repete a l'identique
+  * Au moins 3 sous-titres H2 formules comme les vraies questions des lecteurs
+  * Chaque H2-question commence par y repondre directement, en une ou deux phrases, SANS etiquette ("Réponse courte :" est interdit)
+  * L'ancrage dans ${opts.city} passe par des situations et des contraintes reelles, pas par une liste de quartiers, de rues ou de codes postaux
+- secondaryKeywords DOIT contenir au minimum 8 mots-cles diversifies (metadonnees : ils ne se placent pas tels quels dans le texte)
 
 Contraintes critiques :
-1. Le mot-cle focus "${mainKeyword}" apparait dans title, metaDescription, H1, reponse directe, un H2, et le slug.
+1. Le mot-cle focus "${mainKeyword}" apparait dans title, metaDescription, H1, reponse directe, un H2, et le slug —
+   partout sauf dans le slug, ce sont ses MOTS qui comptent, ecrits en francais correct (accents, articles,
+   majuscules), jamais sa forme brute de requete.
 2. Minimum ${opts.minFaq} questions FAQ, coherentes avec faqItems et schemaFaqPage.
 3. Le contenu tient dans la fourchette ${opts.adjustedLength} a ${maximumWords} mots.
 4. Les liens externes pointent vers des sources REELLES et fiables (pas de liens inventes).
-5. Le maillage interne suggere des pages coherentes avec la strategie pilier/fille.
+5. Le maillage interne (champ internalLinks) suggere des pages coherentes avec le sujet. Dans le texte, un lien est une ancre descriptive, jamais un commentaire sur le maillage.
 6. Schema.org complet et valide, sans aucune propriete inventee.
 7. Le slug est celui qui t'est donne. Il est deja reserve : toute autre valeur sera ignoree.
 8. Si une page listee ci-dessus traite deja le sujet, VARIER l'angle (sous-intention, geo-specifique, question differente).
@@ -775,7 +792,7 @@ ${buildAuditChecklist({
     requiredEntities: opts.planBrief?.required_entities ?? [],
   })}
 
-RAPPEL FINAL — LES TROIS POINTS QUI DECIDENT DE LA VALIDATION DE CETTE PAGE :
+RAPPEL FINAL — LES QUATRE POINTS QUI DECIDENT DE LA VALIDATION DE CETTE PAGE :
 1. LONGUEUR : le texte reel de htmlContent (hors balises) doit tenir entre ${opts.adjustedLength} et
    ${maximumWords} mots. En dessous de ${minimumWords} mots la page est REJETEE automatiquement.
    Au-dessus de ${maximumWords} elle est signalee comme diluee. Avant de repondre, verifie chaque
@@ -785,6 +802,10 @@ RAPPEL FINAL — LES TROIS POINTS QUI DECIDENT DE LA VALIDATION DE CETTE PAGE :
    recopiee a l'identique dans "directAnswer".
 3. AUCUN FAIT INVENTE : pas de chiffre, de prix, de note, d'avis, de source ou de citation qui ne
    figure pas dans les donnees fournies ci-dessus. En cas de doute, supprime l'element.
+4. ECRITE POUR LE LECTEUR : aucune donnee interne (requetes, Search Console, positions), aucun mot-cle
+   recopie sans ses accents ni ses majuscules, aucune phrase sur la page elle-meme ("cette page pilier",
+   "cluster", "maillage"), aucune etiquette repetee ("Réponse courte :"). Relis chaque section en te
+   demandant si un client l'aurait trouvee utile ; sinon, reecris-la.
 ${buildRevisionBlock(opts.revisionFeedback)}`.trim()
 }
 
@@ -819,12 +840,16 @@ export function buildAuditChecklist(opts: {
     opts.city ? `- "${opts.city}" est nomme au moins ${T.cityMentionsMin} fois dans le texte.` : '',
     `- "${opts.businessName}" est nomme au moins une fois dans le texte.`,
     entities.length >= T.requiredEntitiesMinListed
-      ? `- Citer ces entites dans le texte : ${entities.join(', ')}.`
+      ? `- Citer ces entites dans le texte : ${entities.join(', ')}. Chacune dans une phrase qui dit quelque chose d'elle, jamais en enumeration.`
       : '',
     `- Au moins ${opts.minFaq} questions FAQ, avec EXACTEMENT les memes questions dans faqItems et dans schemaFaqPage.`,
     opts.enableExternalLinks ? `- Au moins un lien externe https vers une source reelle et fiable.` : '',
     `- Chaque <img> a un alt non vide ; aucun lien vide ; aucun paragraphe repete ; aucun texte a completer ([VOTRE ...], TODO, lorem ipsum).`,
     `- Paragraphes de ${T.paragraphMaxWords} mots au plus, phrases courtes.`,
+    `- Aucune requete recopiee telle quelle : un meme mot ecrit avec et sans ses accents ("creation" a cote de "création"), ou un sigle en minuscules ("seo", "ia", "pme"), fait refuser la page.`,
+    `- Aucune phrase sur la page elle-meme ("cette page pilier", "cette page est optimisee") ni sur les donnees Search Console du site.`,
+    `- Aucune etiquette repetee en tete de paragraphe ("Réponse courte :", "En bref :").`,
+    `- Un title ou un H1 termine par "?" est une vraie question ("Comment… ?", "Quel… ?") ; sinon, pas de point d'interrogation.`,
   ].filter(Boolean)
 
   return `CONTROLE AVANT PUBLICATION — la page est verifiee automatiquement sur chacun de ces points, et refusee si l'un manque :\n${lines.join('\n')}`

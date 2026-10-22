@@ -15,6 +15,8 @@ import {
   resolveSearchIntent,
   type PageTypeGenerateOptions,
 } from './page-types'
+import { frenchLongDate } from './openai'
+import type { PlanItemBrief } from '@/lib/types'
 
 const baseOptions: PageTypeGenerateOptions = {
   pageType: 'child',
@@ -386,5 +388,87 @@ describe('resolveGenerationLength', () => {
   it('rounds to whole words', () => {
     expect(resolveGenerationLength(undefined, 850, 1.8)).toBe(1530)
     expect(Number.isInteger(resolveGenerationLength(1100.6, 800, 2.5))).toBe(true)
+  })
+})
+
+// The page reported on 2026-10-21 quoted the site's Search Console to the
+// visitor, pasted queries unaccented, called itself « cette page pilier » and
+// opened its sections with « Réponse courte : ». Each test pins one instruction
+// that produced a defect, gone, and the one that replaced it.
+describe('reader-first prompt', () => {
+  const brief: PlanItemBrief = {
+    id: 'p1',
+    scheduled_date: '2026-07-31',
+    page_type: 'pillar',
+    priority: 'high',
+    target_city: 'Troyes',
+    target_keyword: 'strategie referencement pme troyes',
+    secondary_keywords: [],
+    search_intent: 'informationnelle',
+    proposed_title: 'Stratégie de référencement pour PME à Troyes',
+    proposed_slug: 'strategie-referencement-pme-troyes',
+    page_goal: 'informer',
+    outline: ['H2: Pourquoi travailler le référencement ?', 'H3: Maillage interne vers les services clés'],
+    seo_rules: [],
+    required_entities: [],
+    internal_link_targets: [],
+    competitor_insights: [],
+    estimated_word_count: 1800,
+    rationale: '',
+  }
+
+  it('casts a writer who knows SEO, not an SEO bot, and carries the reader-first rules', () => {
+    const prompt = buildSystemPrompt('pillar', 'extra', 'informationnelle')
+    expect(prompt).toContain('ECRITURE — POUR LE LECTEUR, PAS POUR GOOGLE')
+    expect(prompt).toContain('"Réponse courte :"')
+    expect(prompt).toContain('"création de site internet", "référencement", "SEO", "IA"')
+    expect(prompt).not.toContain('Google Certified Partner')
+    expect(prompt).not.toContain('RankMath')
+  })
+
+  it('hands Search Console queries over as internal data, filtered to the page, never to integrate', () => {
+    const prompt = buildPrompt({
+      googleContext: {
+        gsc: { topQueries: [{ query: 'consultant seo reims', position: 8.2, clicks: 3 }], topPages: [], averagePosition: 8.2 },
+      },
+    })
+    expect(prompt).toContain('"consultant seo reims" (pos 8.2)')
+    expect(prompt).toContain("elles ne s'ecrivent JAMAIS dans la page")
+    expect(prompt).toContain('ignore les autres')
+    expect(prompt).not.toContain('Integrer naturellement ces requetes')
+  })
+
+  it('no longer asks for « pres de moi », streets, NLP entities or a question-shaped title', () => {
+    const prompt = buildPrompt()
+    expect(prompt).not.toContain('formulations "pres de moi"')
+    expect(prompt).not.toContain('Entites NLP')
+    expect(prompt).not.toContain('format QUESTION')
+    expect(prompt).toContain('SANS etiquette ("Réponse courte :" est interdit)')
+    expect(prompt).toContain('4. ECRITE POUR LE LECTEUR')
+  })
+
+  it('applies the SEO tasks of an outline as links instead of writing them as sections', () => {
+    const prompt = buildPrompt({ planBrief: brief, searchIntent: 'informationnelle' })
+    expect(prompt).toContain('H3: Maillage interne vers les services clés')
+    expect(prompt).toContain("n'est pas une section")
+    expect(prompt).toContain('Regles SEO (a appliquer, jamais a ecrire dans la page)')
+    expect(prompt).toContain('Intention de recherche qualifiee : informationnelle (usage interne')
+  })
+
+  it('writes the author line in French, with a date a visitor reads', () => {
+    const prompt = buildPrompt()
+    expect(prompt).toContain('Publié par Plomberie Martin — mis à jour le')
+    expect(prompt).toContain('<time datetime="2026-07-31">31 juillet 2026</time>')
+  })
+})
+
+describe('frenchLongDate()', () => {
+  it('prints the date a French reader expects, « 1er » included', () => {
+    expect(frenchLongDate('2026-10-21')).toBe('21 octobre 2026')
+    expect(frenchLongDate('2026-01-01')).toBe('1er janvier 2026')
+  })
+
+  it('returns an unreadable value unchanged rather than « Invalid Date »', () => {
+    expect(frenchLongDate('pas une date')).toBe('pas une date')
   })
 })

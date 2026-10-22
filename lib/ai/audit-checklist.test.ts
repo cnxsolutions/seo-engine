@@ -23,6 +23,14 @@ describe('buildAuditChecklist', () => {
     expect(text).toContain('"Artisan boisson teddy" est nomme au moins une fois')
   })
 
+  it('annonce les regles d ecriture que le controle refuse', () => {
+    const text = buildAuditChecklist(base)
+    expect(text).toContain('("creation" a cote de "création")')
+    expect(text).toContain('"cette page pilier"')
+    expect(text).toContain('"Réponse courte :"')
+    expect(text).toContain('Un title ou un H1 termine par "?" est une vraie question')
+  })
+
   it('ne reclame une source externe que si les liens externes sont actives', () => {
     expect(buildAuditChecklist(base)).toContain('lien externe https')
     expect(buildAuditChecklist({ ...base, enableExternalLinks: false })).not.toContain('lien externe https')

@@ -614,13 +614,18 @@ Regles:
    de mots est tronque a la fabrication, et c'est son dernier mot — celui qui distinguait la page
    de sa soeur — qui tombe.
 2. target_keyword doit etre une intention longue traine, differente des mots-cles deja cibles.
-3. page_type "pillar": brief autorite topique, trame hub, liens vers pages filles.
+3. page_type "pillar": vue d'ensemble qui fait autorite sur le sujet. Les liens vers les pages filles se placent
+   dans le texte des sections : jamais un point de la trame qui en parle.
 4. page_type "child": angle specifique, lien retour pilier et pages soeurs.
 5. page_type "alternative": capter "alternative a X", "moins cher que X", "remplacer X".
 6. page_type "comparative": capter "meilleur X", "X vs Y", "comparatif".
-7. page_type "local_pack": maximiser signaux locaux, quartiers, proximite, ouvert maintenant, avis.
-8. outline contient uniquement les H2/H3 attendus, pas les paragraphes.
-9. seo_rules contient les contraintes de redaction a respecter plus tard.
+7. page_type "local_pack": informations pratiques pour quelqu'un sur place (zones reellement desservies, acces,
+   disponibilite, avis reels s'il y en a).
+8. outline contient uniquement les H2/H3 attendus, pas les paragraphes, ecrits pour le lecteur : ce qu'il veut
+   savoir. Jamais une tache de referencement ("Maillage interne vers…", "Pages a creer", "Mots-cles a cibler",
+   "Intention de recherche") : la page publiee en ferait un titre visible.
+9. seo_rules contient les contraintes de redaction a respecter plus tard. Aucune ne demande de placer un mot-cle
+   tel quel, d'enumerer des lieux ni de citer des donnees Search Console.
 10. competitor_insights reprend des observations utiles des concurrents, sans copier leur contenu.
 11. Les slugs et mots-cles listes en "Anti-doublon" appartiennent a des pages existantes : ne les reutilise
     JAMAIS comme target_keyword ni comme proposed_slug, ni tels quels ni paraphrases (pluriel, ordre des
@@ -632,6 +637,9 @@ Regles:
     son propre target_keyword et son propre proposed_slug ; mets l'URL de cette page dans
     internal_link_targets. S'il n'existe vraiment aucun angle distinct, garde le sujet seme : le creneau
     sera ecarte plutot que de concurrencer la page.
+14. required_entities : 3 a 5 entites au plus, celles dont la page a besoin pour etre utile (une commune, un
+    organisme, un repere qui compte pour le sujet). Chacune devra etre citee dans le texte : une liste de
+    quartiers ou de rues pour faire local deviendrait une enumeration plaquee dans la page.
 
 Reponds avec ce JSON:
 {
@@ -650,7 +658,7 @@ Reponds avec ce JSON:
       "page_goal": "objectif de la page en une phrase",
       "outline": ["H2: ...", "H2: ...", "H3: ..."],
       "seo_rules": ["regle concrete", "regle concrete"],
-      "required_entities": ["quartier", "code postal", "entite locale"],
+      "required_entities": ["entite utile au sujet", "3 a 5 au plus"],
       "internal_link_targets": ["slug ou role de page cible"],
       "competitor_insights": ["observation concurrentielle utile"],
       "estimated_word_count": 800,
@@ -1198,10 +1206,12 @@ function intentFor(pageType: PageType) {
 }
 
 function titleFor(pageType: PageType, businessType: string, city: string) {
-  if (pageType === 'local_pack') return `${businessType} pres de moi a ${city}`
-  if (pageType === 'comparative') return `Quel ${businessType} choisir a ${city} ?`
-  if (pageType === 'alternative') return `Alternative de ${businessType} a ${city}`
-  return `${businessType} a ${city} : guide complet`
+  // Read by the visitor when the model returns no title of its own: accented,
+  // and no "pres de moi" — a query, not something a page says about itself.
+  if (pageType === 'local_pack') return `${businessType} à ${city} et alentours`
+  if (pageType === 'comparative') return `Quel ${businessType} choisir à ${city} ?`
+  if (pageType === 'alternative') return `Alternative de ${businessType} à ${city}`
+  return `${businessType} à ${city} : guide complet`
 }
 
 function defaultOutline(pageType: PageType, businessType: string, city: string) {
@@ -1219,15 +1229,17 @@ function defaultOutline(pageType: PageType, businessType: string, city: string) 
   if (pageType === 'alternative') {
     return ['H2: Pourquoi chercher une alternative ?', 'H2: Options possibles', 'H2: Comparaison des solutions', 'H2: FAQ']
   }
-  return ['H2: Besoin et intention de recherche', 'H2: Methode et criteres', 'H2: Conseils pratiques', 'H2: FAQ']
+  return ['H2: Le besoin, en pratique', 'H2: Méthode et critères de choix', 'H2: Conseils pratiques', 'H2: FAQ']
 }
 
 function defaultRules(pageType: PageType, keyword: string) {
   return [
-    `Inclure le mot-cle "${keyword}" dans title, H1, introduction et un H2.`,
+    `Reprendre le sujet "${keyword}", ecrit en francais correct, dans le title, le H1, l'introduction et un H2.`,
     'Inclure au moins 3 formulations longue traine naturelles.',
     'Ajouter une FAQ structuree.',
-    pageType === 'local_pack' ? 'Renforcer les signaux de proximite, quartiers et avis.' : 'Prevoir un maillage interne coherent.',
+    pageType === 'local_pack'
+      ? "Donner les informations pratiques de proximite : zones desservies, acces, avis reels s'il y en a."
+      : 'Prevoir un maillage interne coherent.',
   ]
 }
 

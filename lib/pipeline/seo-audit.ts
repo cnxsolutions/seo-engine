@@ -22,7 +22,7 @@
 //   - THRESHOLDS ARE NAMED, ONCE. `AUDIT_THRESHOLDS` is the single place a limit
 //     lives; the messages and the tests both read it.
 //
-// Two families, two sources:
+// Three families, three sources:
 //
 //   'seo' — what a search engine needs to understand and rank the page: title and
 //           meta lengths, the keyword where it counts, a sound heading outline,
@@ -31,6 +31,12 @@
 //           QUOTE the page: a self-contained answer under the H1, headings phrased
 //           as the questions people ask, a FAQ that matches its schema, named
 //           entities, scannable lists, cited sources — and no invented NAP.
+//   'quality' — what the VISITOR reads as text written for a search engine: a
+//           query pasted as typed, the page describing its own SEO or quoting
+//           the site's Search Console, one label opening paragraph after
+//           paragraph, a "?" stuck on a statement. Reported on 2026-10-21 on a
+//           published page; the generator's READER_FIRST_RULES forbid them,
+//           these rules refuse what still gets through.
 //
 // What this module deliberately does NOT re-check: the presence of an H1 and the
 // parseability of the JSON-LD blocks. Both are owned by gate.ts (MISSING_H1,
@@ -40,7 +46,7 @@ import { countWords, stripHtml } from './word-count'
 
 // ─── Contract ───────────────────────────────────────────────────────────────
 
-export type AuditSource = 'seo' | 'geo'
+export type AuditSource = 'seo' | 'geo' | 'quality'
 export type AuditSeverity = 'blocking' | 'warning'
 
 export interface AuditFinding {
@@ -140,6 +146,10 @@ export const AUDIT_THRESHOLDS = {
   requiredEntitiesMinListed: 2,
   /** The window, in words, where a definition sentence is expected. */
   definitionWindowWords: 300,
+  /** Paragraphs a template label (« Réponse courte : ») may open before the page is refused. */
+  formulaicLabelMax: 1,
+  /** Paragraphs any other label may open before a warning. */
+  repeatedLabelMax: 2,
 } as const
 
 const T = AUDIT_THRESHOLDS
@@ -196,6 +206,11 @@ export function auditSeoGeo(input: SeoAuditInput): AuditFinding[] {
     ['AUTHOR_DATE', () => checkAuthorDate(page, add)],
     ['ARTICLE_SCHEMA', () => checkArticleSchema(input, add)],
     ['DEFINITION', () => checkDefinition(page, add)],
+    // ─── Quality: written for the reader ────────────────────────────────
+    ['RAW_KEYWORD', () => checkRawKeywords(page, add)],
+    ['SELF_REFERENCE', () => checkSelfReference(input, page, add)],
+    ['REPEATED_LABEL', () => checkRepeatedLabels(page, add)],
+    ['FAKE_QUESTION', () => checkFakeQuestions(input, page, add)],
   ]
 
   for (const [name, rule] of rules) {
@@ -278,12 +293,15 @@ function analysePage(input: SeoAuditInput): PageAnalysis {
  * The "see also" `<nav>` carries a `<ul>` and an `<h3>`; the pillar hub carries a
  * `<ul>` and an `<h2>`. Counting them would let a page pass SCANNABLE or H2_COUNT
  * on the strength of its own navigation — the same reason the length is measured
- * before linking.
+ * before linking. The « Source : … » lines it appends for sources no sentence
+ * named are boilerplate too: three of them would read as a repeated label the
+ * model never wrote and could never remove.
  */
 function withoutEngineBlocks(html: string): string {
   return html
     .replace(/<nav\b[^>]*>[\s\S]*?<\/nav>/gi, ' ')
     .replace(/<section\b[^>]*class\s*=\s*["'][^"']*\bpillar-hub\b[^"']*["'][^>]*>[\s\S]*?<\/section>/gi, ' ')
+    .replace(/<p\b[^>]*class\s*=\s*["'][^"']*\bexternal-ref\b[^"']*["'][^>]*>[\s\S]*?<\/p\s*>/gi, ' ')
 }
 
 function headingsOf(html: string): Heading[] {
@@ -920,6 +938,227 @@ function checkDefinition(page: PageAnalysis, add: Add): void {
     add('DEFINITION', 'geo', 'warning',
       `Aucune phrase de définition dans les ${T.definitionWindowWords} premiers mots : définir le sujet `
       + `(« Un … est … ») pour que la page puisse être citée comme réponse.`)
+  }
+}
+
+// ─── Quality checks: written for the reader ─────────────────────────────────
+//
+// Each rule measures a tell a published page carried, and only in a shape plain
+// French does not take. A false positive here sends a correct page back for a
+// rewrite it cannot understand, which is worse than letting one tell through:
+// these rules trade recall for precision, on purpose.
+
+/** Passages in quotes are deliberate: a page may cite a query « comme ceci ». */
+function unquoted(text: string): string {
+  return text.replace(/«[^»]{0,200}»|“[^”]{0,200}”|"[^"\n]{0,200}"/g, ' ')
+}
+
+function stripAccents(word: string): string {
+  return word.normalize('NFD').replace(/[̀-ͯ]/g, '')
+}
+
+/**
+ * Acronyms a search query carries in lowercase.
+ *
+ * None is a French word and French prose capitalises every one, so a lowercase
+ * "seo" or "ia" between two words is a query pasted as typed — « consultant seo
+ * reims », « l'automatisation ia ». Never inside a domain, an address or a
+ * hyphenated name: `seo-troyes.fr` is not prose.
+ */
+const LOWERCASE_ACRONYM =
+  /(?<![\p{L}\p{N}\-./@_])(seo|sea|ia|pme|tpe|eti|crm|erp|gbp|rgpd|tva|cms|vtc|cpam|btp|sap|saas|b2b|b2c)(?![\p{L}\p{N}\-/@_]|\.[\p{L}\p{N}])/gu
+
+/**
+ * Words that are French with AND without their accent, so never evidence alone.
+ * Words of three letters or fewer (a/à, ou/où, la/là, du/dû, sur/sûr) are not
+ * even looked at.
+ */
+const ACCENT_HOMOGRAPHS = new Set([
+  'cote', 'cotes', 'tache', 'taches', 'tacher', 'jeune', 'jeunes', 'foret', 'forets', 'notre', 'votre',
+  'mure', 'mures', 'roder', 'pale', 'pales', 'denier', 'reformer', 'repartir', 'reparti', 'repartie', 'repartis',
+])
+
+/**
+ * Accents whose absence proves nothing: a final é (« utilise » and « utilisé »,
+ * « marche » and « marché » are both French) and the î and û the 1990 spelling
+ * reform made optional (« cout », « boite »).
+ */
+function onlyBenignAccents(accented: string): boolean {
+  const reduced = accented.replace(/é(e?s?)$/, 'e$1').replace(/î/g, 'i').replace(/û/g, 'u')
+  return stripAccents(reduced) === reduced
+}
+
+/**
+ * Lowercase words the same page also writes WITH their accents.
+ *
+ * Judged against the page itself rather than a dictionary: six « référencement »
+ * and one « referencement site internet » is not a typo the writer cannot spell,
+ * it is a query copied as Search Console reports it.
+ */
+function unaccentedTwins(text: string): string[] {
+  const accented = new Map<string, Set<string>>()
+  const plain = new Set<string>()
+  for (const token of text.match(/\p{L}+/gu) ?? []) {
+    if (token.length < 4) continue
+    const lower = token.toLowerCase()
+    const bare = stripAccents(lower)
+    if (bare !== lower) {
+      const forms = accented.get(bare) ?? new Set<string>()
+      forms.add(lower)
+      accented.set(bare, forms)
+    } else if (token === lower) {
+      // Capitalised forms are left out: a brand may drop its accents.
+      plain.add(lower)
+    }
+  }
+
+  const found: string[] = []
+  for (const word of plain) {
+    if (ACCENT_HOMOGRAPHS.has(word)) continue
+    const twin = [...(accented.get(word) ?? [])].find(form => !onlyBenignAccents(form))
+    if (twin) found.push(`« ${word} » au lieu de « ${twin} »`)
+  }
+  return found
+}
+
+function checkRawKeywords(page: PageAnalysis, add: Add): void {
+  const text = unquoted(page.text)
+  const found = [
+    ...unaccentedTwins(text),
+    ...[...new Set([...text.matchAll(LOWERCASE_ACRONYM)].map(match => match[1]))]
+      .map(acronym => `« ${acronym} » au lieu de « ${acronym.toUpperCase()} »`),
+    ...(/\bpres de (?:moi|chez moi)\b/.test(normalizeText(text)) ? ['« près de moi », une recherche et pas une phrase'] : []),
+  ]
+  if (found.length > 0) {
+    add('RAW_KEYWORD', 'quality', 'blocking',
+      `Requête recopiée telle quelle dans le texte (${found.slice(0, 4).join(', ')}) : un mot-clé s'écrit en français `
+      + `correct — accents, articles, majuscules (« création de site internet », « SEO », « IA ») — dans une phrase `
+      + `qu'un lecteur pourrait dire, et jamais en suite de mots-clés.`)
+  }
+}
+
+/**
+ * The page describing its own SEO to the visitor.
+ *
+ * Matched on what the page says about ITSELF — « cette page pilier », « une page
+ * pilier comme celle-ci » — never on SEO vocabulary alone: on a site that sells
+ * SEO, « maillage interne » and « page pilier » are the subject, and advising the
+ * reader about HIS site is exactly what the page is for.
+ */
+const SELF_REFERENCES: ReadonlyArray<{ pattern: RegExp; label: string }> = [
+  { pattern: /\b(?:cette|la presente|notre) page (?:pilier|fille|satellite|hub|mere)\b/, label: '« cette page pilier »' },
+  { pattern: /\bpages? (?:pilier|fille|satellite)s? comme (?:celle|celui) ci\b/, label: '« une page pilier comme celle-ci »' },
+  { pattern: /\b(?:ce|notre) (?:cluster|silo|cocon semantique)\b/, label: '« ce cluster »' },
+  { pattern: /\b(?:cette|la presente) page (?:est |a ete )?(?:optimisee|ciblee|positionnee|referencee)\b/, label: '« cette page est optimisée »' },
+  { pattern: /\b(?:cet|ce) (?:article|contenu|texte|guide) (?:est |a ete )?(?:optimise|cible)\b/, label: '« ce contenu est optimisé »' },
+  { pattern: /\b(?:cette|notre) (?:page|approche|section|demarche) (?:reste|est) (?:informationnelle|transactionnelle|navigationnelle)\b/, label: '« cette approche reste informationnelle »' },
+  { pattern: /\bpos \d+\b/, label: 'une position Search Console (« pos 4 »)' },
+]
+
+/**
+ * A sentence reporting the site's OWN Search Console to the visitor.
+ *
+ * All three are required — the tool, this site (its name, « notre site »), and
+ * a verb reporting what the data shows — and a sentence about the READER's data
+ * (« vos requêtes », « votre Search Console ») never counts: on an SEO agency's
+ * site, explaining the tool is legitimate.
+ */
+function quotesOwnSearchConsole(text: string, businessName: string): boolean {
+  const business = normalizeText(businessName)
+  return text.split(/(?<=[.!?…])\s+/).some(sentence => {
+    const words = ` ${normalizeText(sentence)} `
+    if (!words.includes(' search console ') || / (?:votre|vos) /.test(words)) return false
+    const aboutThisSite = (business !== '' && words.includes(` ${business} `)) || / (?:notre|ce) site /.test(words)
+    return aboutThisSite && / (?:montre|indique|revele|signal|observe|remonte)\w* /.test(words)
+  })
+}
+
+function checkSelfReference(input: SeoAuditInput, page: PageAnalysis, add: Add): void {
+  const normalized = normalizeText(unquoted(page.text))
+  const found = SELF_REFERENCES.filter(({ pattern }) => pattern.test(normalized)).map(({ label }) => label)
+  if (quotesOwnSearchConsole(page.text, input.businessName ?? '')) found.push('les données Search Console du site')
+  if (found.length > 0) {
+    add('SELF_REFERENCE', 'quality', 'blocking',
+      `La page parle d'elle-même ou des données du site (${found.join(', ')}) : le lecteur n'a pas à connaître la `
+      + `stratégie de référencement ni la Search Console — supprimer ces phrases et parler de son besoin à lui.`)
+  }
+}
+
+/** Labels that are a template's, whatever the page: one is already one too many. */
+const FORMULAIC_LABEL =
+  /^(?:reponse (?:courte|rapide|directe|breve)|en (?:bref|resume|clair|pratique)|a retenir|le saviez vous|bon a savoir|l essentiel)$/
+
+/** « Réponse courte : … » → « Réponse courte ». At most four words, or it is a sentence. */
+function paragraphLabel(paragraph: string): string | null {
+  const match = /^\s*(\p{L}[\p{L}'’ -]{0,38}?)\s*:\s+\S/u.exec(paragraph)
+  if (!match) return null
+  const label = match[1].trim()
+  return label.split(/\s+/).length <= 4 ? label : null
+}
+
+function checkRepeatedLabels(page: PageAnalysis, add: Add): void {
+  const counts = new Map<string, { label: string; count: number }>()
+  for (const paragraph of page.paragraphs) {
+    const label = paragraphLabel(paragraph)
+    if (!label) continue
+    const key = normalizeText(label)
+    const entry = counts.get(key) ?? { label, count: 0 }
+    entry.count++
+    counts.set(key, entry)
+  }
+
+  const formulaic = [...counts].find(([key, entry]) => FORMULAIC_LABEL.test(key) && entry.count > T.formulaicLabelMax)
+  if (formulaic) {
+    const { label, count } = formulaic[1]
+    add('REPEATED_LABEL', 'quality', 'blocking',
+      `« ${label} : » ouvre ${count} paragraphes : c'est une formule de gabarit. Répondre directement, sans étiquette, `
+      + `et varier l'entrée en matière d'une section à l'autre.`)
+    return
+  }
+
+  const repeated = [...counts.values()].find(entry => entry.count > T.repeatedLabelMax)
+  if (repeated) {
+    add('REPEATED_LABEL', 'quality', 'warning',
+      `« ${repeated.label} : » ouvre ${repeated.count} paragraphes : varier l'entrée en matière pour que la page ne `
+      + `se lise pas comme un formulaire.`)
+  }
+}
+
+const QUESTION_WORD =
+  /\b(?:comment|pourquoi|quand|quel|quelle|quels|quelles|combien|qui|que|quoi|lequel|laquelle|lesquels|lesquelles|est ce|faut il|peut on)\b/
+const SUBJECT_START = /^(?:vous|tu|on|il|elle|ils|elles|nous|c est|ca|et si|est ce)\b/
+const INVERSION = /-(?:t-)?(?:il|elle|on|ils|elles|je|tu|nous|vous|ce)\b/i
+/** « où », and the « ou » of an alternative (« Agence ou freelance ? »). Unaccented \b cannot see the ù. */
+const OU = /(?:^|[\s'’(])o[uù](?=$|[\s,.!?)])/i
+
+/**
+ * A title ending in « ? » that a French reader takes for a question.
+ *
+ * Judged on the clause that carries the « ? » — « Fuite à Troyes : quel plombier
+ * appeler ? » is a question — and generous: an interrogative word, an inversion,
+ * an alternative, or a subject pronoun (« Vous cherchez… ? ») all qualify. What
+ * remains is a noun phrase with a « ? » appended, which the old prompt's
+ * "format QUESTION" produced: « Stratégie de référencement pour PME à Troyes ? ».
+ */
+export function isWellFormedQuestion(text: string): boolean {
+  const raw = (text || '').trim()
+  if (!/\?\s*$/.test(raw)) return false
+  if (INVERSION.test(raw)) return true
+  const clause = raw.replace(/\?\s*$/, '').split(/\s[:;—–]\s|,\s/).pop() ?? raw
+  if (OU.test(clause)) return true
+  const normalized = normalizeText(clause)
+  return QUESTION_WORD.test(normalized) || SUBJECT_START.test(normalized)
+}
+
+function checkFakeQuestions(input: SeoAuditInput, page: PageAnalysis, add: Add): void {
+  const h1 = page.headings.find(heading => heading.level === 1)
+  const fake = ([['title', input.title], ['H1', h1?.text]] as const)
+    .filter(([, text]) => /\?\s*$/.test((text ?? '').trim()) && !isWellFormedQuestion(text ?? ''))
+  if (fake.length > 0) {
+    const [which, text] = fake[0]
+    add('FAKE_QUESTION', 'quality', 'blocking',
+      `Le ${which} « ${excerpt(text ?? '')} » se termine par « ? » sans être une question : écrire une vraie question `
+      + `(« Comment… ? », « Quel… ? », « Faut-il… ? ») ou retirer le point d'interrogation.`)
   }
 }
 

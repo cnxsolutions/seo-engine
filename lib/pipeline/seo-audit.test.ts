@@ -10,7 +10,7 @@
 // other test's business.
 
 import { describe, expect, it } from 'vitest'
-import { auditSeoGeo, AUDIT_THRESHOLDS, type AuditFinding, type SeoAuditInput } from './seo-audit'
+import { auditSeoGeo, AUDIT_THRESHOLDS, isWellFormedQuestion, type AuditFinding, type SeoAuditInput } from './seo-audit'
 import {
   COMPLIANT,
   COMPLIANT_DIRECT_ANSWER,
@@ -18,6 +18,7 @@ import {
   COMPLIANT_HTML,
   COMPLIANT_SCHEMAS,
 } from './compliant-page.fixture'
+import { REPORTED, REPORTED_HTML } from './reported-page.fixture'
 
 function input(overrides: Partial<SeoAuditInput> = {}): SeoAuditInput {
   return {
@@ -494,5 +495,115 @@ describe('auditSeoGeo — sources', () => {
     expect(source('FAQ_MINIMUM')).toBe('geo')
     expect(source('SCANNABLE')).toBe('geo')
     expect(source('SOURCES')).toBe('geo')
+  })
+})
+
+describe('auditSeoGeo — quality: written for the reader', () => {
+  const QUALITY_CODES = ['RAW_KEYWORD', 'SELF_REFERENCE', 'REPEATED_LABEL', 'FAKE_QUESTION']
+
+  /** The compliant page with one paragraph added after the direct answer. */
+  const withParagraphs = (...paragraphs: string[]) =>
+    htmlWith(INTRO, `${INTRO}\n${paragraphs.map(text => `<p>${text}</p>`).join('\n')}`)
+
+  const reported = () => audit({
+    html: REPORTED_HTML,
+    title: REPORTED.title,
+    focusKeyword: REPORTED.focusKeyword,
+    city: REPORTED.city,
+    businessName: REPORTED.businessName,
+    pageType: REPORTED.pageType,
+  })
+
+  it('refuses the page reported on 2026-10-21 on each of its tells, under quality', () => {
+    const findings = reported()
+
+    expect(blocking(findings)).toEqual(expect.arrayContaining(QUALITY_CODES))
+    for (const code of QUALITY_CODES) expect(find(findings, code)?.source).toBe('quality')
+
+    expect(find(findings, 'RAW_KEYWORD')?.message).toContain('« creation » au lieu de « création »')
+    expect(find(findings, 'RAW_KEYWORD')?.message).toContain('« ia » au lieu de « IA »')
+    expect(find(findings, 'SELF_REFERENCE')?.message).toContain('« cette page pilier »')
+    expect(find(findings, 'SELF_REFERENCE')?.message).toContain('les données Search Console du site')
+    expect(find(findings, 'REPEATED_LABEL')?.message).toContain('« Réponse courte : » ouvre 2 paragraphes')
+    expect(find(findings, 'FAKE_QUESTION')?.message).toContain('Stratégie de référencement pour PME à Troyes ?')
+  })
+
+  it('passes the compliant page on every quality rule', () => {
+    const codes = audit().map(f => f.code)
+    for (const code of QUALITY_CODES) expect(codes).not.toContain(code)
+  })
+
+  it('RAW_KEYWORD: refuses a lowercase acronym and « près de moi », each on its own', () => {
+    expect(blocking(audit({ html: withParagraphs('Un audit seo complet commence par les pages qui reçoivent déjà des visites.') })))
+      .toContain('RAW_KEYWORD')
+    expect(blocking(audit({ html: withParagraphs('Vous cherchez un plombier près de moi un dimanche soir à Troyes.') })))
+      .toContain('RAW_KEYWORD')
+  })
+
+  it('RAW_KEYWORD: leaves final é, optional î/û, homographs, quotes, domains and brands alone', () => {
+    const html = withParagraphs(
+      'Le marché local bouge : il marche bien en hiver, et le coût reste stable car le cout du matériel baisse.',
+      'Sur la côte, la cote des artisans dépend des avis ; notre équipe se tient à votre disposition.',
+      'Les internautes tapent « agence seo troyes » ou « creation site internet » sans accent.',
+      'Écrivez à contact@seo-troyes.fr ; Referencement Pro, une marque voisine, fait du référencement.',
+    )
+    expect(audit({ html }).map(f => f.code)).not.toContain('RAW_KEYWORD')
+  })
+
+  it('SELF_REFERENCE: accepts SEO vocabulary that advises the reader about HIS site', () => {
+    const html = withParagraphs(
+      'Une page pilier relie vos pages filles par un maillage interne clair.',
+      'Suivez vos requêtes dans votre Search Console : elle montre les pages qui progressent.',
+      'Dupont Plomberie suit la Search Console de chaque client depuis le premier mois.',
+    )
+    expect(audit({ html }).map(f => f.code)).not.toContain('SELF_REFERENCE')
+  })
+
+  it('SELF_REFERENCE: refuses the page describing itself, even without Search Console', () => {
+    const finding = find(audit({ html: withParagraphs('Ce contenu est optimisé pour les recherches locales à Troyes.') }), 'SELF_REFERENCE')
+    expect(finding?.severity).toBe('blocking')
+    expect(finding?.message).toContain('« ce contenu est optimisé »')
+  })
+
+  it('REPEATED_LABEL: refuses a template label from its second use', () => {
+    const html = withParagraphs('En bref : le devis est gratuit.', 'En bref : nous intervenons le week-end.')
+    expect(blocking(audit({ html }))).toContain('REPEATED_LABEL')
+  })
+
+  it('REPEATED_LABEL: only warns on another repeated label, ignores numbered steps and the linker\'s sources', () => {
+    const repeated = withParagraphs('Exemple : une fuite sous évier.', 'Exemple : un chauffe-eau entartré.', 'Exemple : un siphon bouché.')
+    expect(warnings(audit({ html: repeated }))).toContain('REPEATED_LABEL')
+    expect(blocking(audit({ html: repeated }))).not.toContain('REPEATED_LABEL')
+
+    const steps = withParagraphs('Étape 1 : le diagnostic.', 'Étape 2 : le devis.', 'Étape 3 : les travaux.')
+    const sources = `${COMPLIANT_HTML}\n${['A', 'B', 'C'].map(name =>
+      `<p class="external-ref">Source : <a href="https://${name.toLowerCase()}.fr">${name}</a></p>`).join('\n')}`
+    expect(audit({ html: steps }).map(f => f.code)).not.toContain('REPEATED_LABEL')
+    expect(audit({ html: sources }).map(f => f.code)).not.toContain('REPEATED_LABEL')
+  })
+
+  it('FAKE_QUESTION: tells a question from a noun phrase with a « ? »', () => {
+    for (const question of [
+      'Fuite urgente à Troyes : quel plombier appeler ?',
+      'Combien coûte un site vitrine à Troyes ?',
+      'Un site vitrine suffit-il ?',
+      'Agence web ou freelance à Troyes ?',
+      'SEO à Troyes, par où commencer ?',
+      'Le référencement, c’est quoi ?',
+      'Vous cherchez un plombier à Troyes ?',
+    ]) expect(isWellFormedQuestion(question), question).toBe(true)
+
+    for (const statement of [
+      'Stratégie de référencement pour PME à Troyes ?',
+      'Plombier à Troyes : dépannage rapide ?',
+      'Plombier à Troyes',
+    ]) expect(isWellFormedQuestion(statement), statement).toBe(false)
+  })
+
+  it('FAKE_QUESTION: judges the title and the H1, never the H2', () => {
+    expect(blocking(audit({ title: 'Plombier à Troyes : dépannage rapide ?' }))).toContain('FAKE_QUESTION')
+    expect(blocking(audit({ html: htmlWith(H1, '<h1>Plombier à Troyes : dépannage rapide ?</h1>') }))).toContain('FAKE_QUESTION')
+    const h2 = htmlWith(INTRO, `${INTRO}\n<h2>Et pour les copropriétés ?</h2><p>Le syndic reçoit le devis.</p>`)
+    expect(audit({ html: h2 }).map(f => f.code)).not.toContain('FAKE_QUESTION')
   })
 })

@@ -195,7 +195,9 @@ export class FullRagContextBuilder {
 
     // Google
     if (promptBlocks.google) {
-      sections.push('## DONNÉES GOOGLE (GSC + GBP)')
+      // Internal data, said so in the heading: under "DONNÉES GOOGLE" the model
+      // quoted the site's own queries to the visitor as "signaux".
+      sections.push('## CE QUE CHERCHENT LES VISITEURS (données internes, jamais citées dans la page)')
       sections.push(promptBlocks.google)
       sections.push('')
     }
@@ -209,7 +211,7 @@ export class FullRagContextBuilder {
 
     // Internal Links
     if (promptBlocks.internalLinks) {
-      sections.push('## MAILLAGE INTERNE')
+      sections.push('## PAGES DU SITE À LIER DANS LE TEXTE')
       sections.push(promptBlocks.internalLinks)
       sections.push('')
     }
@@ -391,9 +393,11 @@ export class FullRagContextBuilder {
     // Keywords to include
     const toInclude = context.generationContext.keywords.toInclude || []
     if (toInclude.length > 0) {
-      parts.push(`Keywords à intégrer naturellement:`)
+      // Unquoted, and named as subjects: a quoted list read as strings to paste,
+      // and they came out as such — unaccented, lowercase, mid-sentence.
+      parts.push(`Sujets à couvrir (à écrire en français correct, jamais recopiés tels quels) :`)
       toInclude.slice(0, this.config.maxKeywords).forEach((kw: string) => {
-        parts.push(`- "${kw}"`)
+        parts.push(`- ${kw}`)
       })
     }
 
@@ -428,7 +432,7 @@ export class FullRagContextBuilder {
 
     // Local keywords
     if (context.keywords.local?.length) {
-      parts.push(`Keywords locaux: ${context.keywords.local.slice(0, 10).join(', ')}`)
+      parts.push(`Recherches locales (des besoins à traiter, pas des expressions à recopier) : ${context.keywords.local.slice(0, 10).join(', ')}`)
     }
 
     // Opportunities
