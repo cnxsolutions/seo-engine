@@ -16,6 +16,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { createServiceClient } from '@/lib/supabase'
+import { brandForms, claimOf, foldQuery, isBrandQuery, pageClaim, queryTokens } from './query-match'
 
 // ─── Tunables ────────────────────────────────────────────────────────────────
 
@@ -152,7 +153,27 @@ export interface GscPlanningSignals {
   cannibalized: CannibalizedQuery[]
   /** Queries a new page must NOT target: already cannibalized, or already won. */
   blockedQueries: string[]
+  /**
+   * Measured demand without a page: queries Google already shows the site on,
+   * beyond position 20, that no page of the site claims. The only Search
+   * Console list that proposes subjects rather than forbidding them. Absent
+   * from signals built before 2026-11-08.
+   */
+  emergingQueries?: EmergingQuery[]
 }
+
+export interface EmergingQuery {
+  query: string
+  /** Every page of the site together, over the window. */
+  impressions: number
+  /** The best position any page reached — beyond 20 by construction. */
+  position: number
+  /** The page Google showed most for it, which was not written for it. */
+  pageUrl: string
+}
+
+/** Below this, a query is one person's search, not a demand. */
+export const EMERGING_MIN_IMPRESSIONS = 5
 
 // ─── Public API ──────────────────────────────────────────────────────────────
 
@@ -279,6 +300,7 @@ export async function getGscPlanningSignals(
     deadPages: [],
     cannibalized: [],
     blockedQueries: [],
+    emergingQueries: [],
   }
 
   const rows = await fetchGscRows(siteId, windowStart, windowEnd)
@@ -288,7 +310,9 @@ export async function getGscPlanningSignals(
   const cannibalized = detectCannibalization(stats)
   const strikingDistance = selectStrikingDistance(stats)
   const lowCtrPages = selectLowCtrPages(stats)
-  const deadPages = await findDeadPages(siteId, rows, now, windowStart)
+  const [generations, site] = await Promise.all([fetchPublishedGenerations(siteId, 300), fetchSiteIdentity(siteId)])
+  const deadPages = findDeadPages(generations, rows, now, windowStart)
+  const blockedQueries = blockedQueriesFrom(stats, cannibalized)
 
   return {
     available: true,
@@ -298,7 +322,16 @@ export async function getGscPlanningSignals(
     lowCtrPages,
     deadPages,
     cannibalized,
-    blockedQueries: blockedQueriesFrom(stats, cannibalized),
+    blockedQueries,
+    emergingQueries: selectEmergingQueries(stats, {
+      brands: site ? brandForms(site) : [],
+      pages: generations.map((generation) => ({
+        url: generation.published_url,
+        focusKeyword: generation.focus_keyword,
+        title: generation.title,
+      })),
+      blocked: blockedQueries,
+    }),
   }
 }
 
@@ -564,6 +597,70 @@ export function detectCannibalization(stats: QueryPageStat[], options: Cannibali
   return cannibalized.sort((a, b) => b.impressions - a.impressions).slice(0, limit)
 }
 
+export interface EmergingQueryOptions {
+  /** Compacted brand forms (query-match `brandForms`): someone typing the name is not a subject. */
+  brands?: readonly string[]
+  /** The pages the engine knows the subject of. Every URL of `stats` is added, claimed by its address. */
+  pages?: ReadonlyArray<{ url: string; focusKeyword?: string | null; title?: string | null }>
+  /** Already refused as targets (cannibalized, already won). */
+  blocked?: readonly string[]
+  minImpressions?: number
+  limit?: number
+}
+
+/**
+ * Queries the site is shown on that no page of it was written for.
+ *
+ * The planner only ever saw what NOT to target. This is the other half: real
+ * searches, measured, on which Google already associates the site — but
+ * beyond position 20, through a page that does not treat them. A page written
+ * for one of them competes with nothing.
+ *
+ * Every condition is a way of refusing a false candidate:
+ *   - ranked 20 or better anywhere: a page carries it already (striking distance);
+ *   - claimed by any known page, by its keyword, title or address: that page
+ *     is the dedicated one, merely buried — a second page would compete;
+ *   - a brand query, a blocked query, or under five impressions.
+ */
+export function selectEmergingQueries(stats: QueryPageStat[], options: EmergingQueryOptions = {}): EmergingQuery[] {
+  const minImpressions = options.minImpressions ?? EMERGING_MIN_IMPRESSIONS
+  const limit = options.limit ?? 15
+  const brands = options.brands ?? []
+  const blocked = new Set((options.blocked ?? []).map(foldQuery))
+
+  const known = new Map<string, { url: string; focusKeyword?: string | null; title?: string | null }>()
+  for (const stat of stats) known.set(normalizePageUrl(stat.pageUrl), { url: stat.pageUrl })
+  for (const page of options.pages ?? []) known.set(normalizePageUrl(page.url), page)
+  const claims = [...known.values()].map(pageClaim)
+
+  const byQuery = new Map<string, { query: string; impressions: number; position: number; pageUrl: string; pageImpressions: number }>()
+  for (const stat of stats) {
+    const key = foldQuery(stat.query)
+    const entry = byQuery.get(key) ?? { query: stat.query, impressions: 0, position: stat.position, pageUrl: stat.pageUrl, pageImpressions: 0 }
+    entry.impressions += stat.impressions
+    entry.position = Math.min(entry.position, stat.position)
+    if (stat.impressions > entry.pageImpressions) {
+      entry.pageUrl = stat.pageUrl
+      entry.pageImpressions = stat.impressions
+    }
+    byQuery.set(key, entry)
+  }
+
+  const emerging: EmergingQuery[] = []
+  for (const [key, entry] of byQuery) {
+    if (entry.impressions < minImpressions) continue
+    if (entry.position <= STRIKING_DISTANCE_MAX_POSITION) continue
+    if (blocked.has(key) || isBrandQuery(entry.query, brands)) continue
+
+    const tokens = queryTokens(entry.query)
+    if (tokens.length === 0 || claims.some((claim) => claimOf(tokens, claim) !== 'unexpected')) continue
+
+    emerging.push({ query: entry.query, impressions: entry.impressions, position: entry.position, pageUrl: entry.pageUrl })
+  }
+
+  return emerging.sort((a, b) => b.impressions - a.impressions || a.position - b.position).slice(0, limit)
+}
+
 /** Reads a Search Console URL and a stored published_url as the same page. */
 export function normalizePageUrl(url: string): string {
   const trimmed = (url || '').trim()
@@ -601,7 +698,7 @@ export function verdictFor(page: { clicks: number; impressions: number; position
 
 // ─── Internals ───────────────────────────────────────────────────────────────
 
-interface PublishedGeneration {
+export interface PublishedGeneration {
   id: string
   title: string | null
   focus_keyword: string | null
@@ -615,7 +712,7 @@ interface PublishedGeneration {
  * exist makes PostgREST reject the whole request, so the read falls back to the
  * pre-migration shape instead of reporting "no published page at all".
  */
-async function fetchPublishedGenerations(siteId: string, limit: number): Promise<PublishedGeneration[]> {
+export async function fetchPublishedGenerations(siteId: string, limit: number): Promise<PublishedGeneration[]> {
   const supabase = createServiceClient()
 
   const { data, error } = await supabase
@@ -647,7 +744,7 @@ async function fetchPublishedGenerations(siteId: string, limit: number): Promise
  * credentials), and [] when the site simply has no data. Callers must treat both
  * as "no signal", but only the second is a fact about the site.
  */
-async function fetchGscRows(siteId: string, startDate: string, endDate: string): Promise<GscRawRow[] | null> {
+export async function fetchGscRows(siteId: string, startDate: string, endDate: string): Promise<GscRawRow[] | null> {
   const supabase = createServiceClient()
   const rows: GscRawRow[] = []
 
@@ -683,8 +780,7 @@ async function fetchGscRows(siteId: string, startDate: string, endDate: string):
  * opened, and calling that "never displayed" would be a lie about a page that
  * once worked.
  */
-async function findDeadPages(siteId: string, rows: GscRawRow[], now: Date, windowStart: string): Promise<DeadPage[]> {
-  const generations = await fetchPublishedGenerations(siteId, 300)
+function findDeadPages(generations: PublishedGeneration[], rows: GscRawRow[], now: Date, windowStart: string): DeadPage[] {
   if (generations.length === 0) return []
 
   const seen = new Set(rows.map((row) => normalizePageUrl(row.page_url)))
@@ -704,6 +800,17 @@ async function findDeadPages(siteId: string, rows: GscRawRow[], now: Date, windo
       daysLive: daysBetween(entry.publishedAt, now),
     }))
     .slice(0, 30)
+}
+
+/** The site's name and address, for brand queries. Null when unreadable: no brand is then recognised. */
+async function fetchSiteIdentity(siteId: string): Promise<{ name: string | null; url: string | null } | null> {
+  try {
+    const { data, error } = await createServiceClient().from('sites').select('name, url').eq('id', siteId).maybeSingle()
+    if (error || !data) return null
+    return { name: (data.name as string | null) ?? null, url: (data.url as string | null) ?? null }
+  } catch {
+    return null
+  }
 }
 
 /**
@@ -746,7 +853,7 @@ function comparePages(a: QueryPageStat, b: QueryPageStat): number {
   return a.position - b.position
 }
 
-function publicationDate(generation: PublishedGeneration): Date | null {
+export function publicationDate(generation: PublishedGeneration): Date | null {
   const raw = generation.published_at || generation.updated_at
   if (!raw) return null
   const date = new Date(raw)

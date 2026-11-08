@@ -15,6 +15,7 @@
 // being invention. Every failure raises instead, and the caller degrades to
 // planning without SERP evidence — visibly.
 
+import { recordSerpFailure, recordSerpSuccess } from './status'
 import type { SerpOrganicResult, SerpParseResult } from './types'
 
 const ENDPOINT = 'https://serpapi.com/search.json'
@@ -77,7 +78,22 @@ interface SerpApiOrganic {
   link?: string
 }
 
+/**
+ * Every outcome is recorded (./status.ts): the Stratégie tab says WHY no SERP
+ * was read, instead of only that none was.
+ */
 export async function fetchSerp(query: string, opts: FetchSerpOptions = {}): Promise<SerpParseResult> {
+  try {
+    const result = await readSerp(query, opts)
+    recordSerpSuccess()
+    return result
+  } catch (error) {
+    if (error instanceof SerpUnavailableError) recordSerpFailure(error.kind, error.message)
+    throw error
+  }
+}
+
+async function readSerp(query: string, opts: FetchSerpOptions): Promise<SerpParseResult> {
   const trimmed = query.trim()
   if (!trimmed) throw new SerpUnavailableError('Empty query', 'network')
 

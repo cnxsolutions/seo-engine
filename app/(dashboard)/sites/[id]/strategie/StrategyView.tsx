@@ -61,6 +61,7 @@ import {
   type PlanProvenance,
   type ProvenanceGrade,
 } from './provenance'
+import { SerpStatusLine } from './SerpStatusLine'
 
 const CYCLE_DURATIONS = [7, 14, 21, 30]
 
@@ -845,13 +846,35 @@ function ProvenancePanel({ provenance, items }: { provenance: PlanProvenance; it
                 </li>
                 <li>{provenance.gsc.strikingDistance.length} requêtes en position 5-20 exploitables</li>
                 <li>{provenance.gsc.lowCtrPages} pages vues sans clic · {provenance.gsc.deadPages} sujets sans demande</li>
+                {provenance.gsc.emergingQueries > 0 && (
+                  <li>
+                    {provenance.gsc.emergingQueries} requête{provenance.gsc.emergingQueries > 1 ? 's' : ''} où le site est vu
+                    sans page dédiée, proposée{provenance.gsc.emergingQueries > 1 ? 's' : ''} comme sujets
+                  </li>
+                )}
               </>
             )}
+          </SourceBlock>
+
+          <SourceBlock
+            icon={Search}
+            title="Suggestions Google / Bing"
+            measured={provenance.suggestions.length > 0}
+            empty="Aucune barre de recherche n’a répondu : les mots-clés n’ont pas été confrontés à ce que les gens tapent."
+          >
+            {provenance.suggestions.map((proof) => (
+              <li key={proof.query} style={{ marginBottom: 'var(--space-1)' }}>
+                <span style={{ color: 'var(--ink-primary)' }}>« {proof.query} »</span> —{' '}
+                {[...proof.google, ...proof.bing.filter((line) => !proof.google.includes(line))].slice(0, 4).join(' · ')}
+              </li>
+            ))}
           </SourceBlock>
         </div>
       )}
 
       {provenance.reported && <CannibalizationBlock gsc={provenance.gsc} />}
+
+      <SerpStatusLine />
     </div>
   )
 }

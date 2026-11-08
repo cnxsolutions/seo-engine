@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest'
+import { brandForms } from './query-match'
 import {
   aggregateRows,
   detectCannibalization,
   normalizePageUrl,
+  selectEmergingQueries,
   selectLowCtrPages,
   selectStrikingDistance,
   verdictFor,
@@ -185,5 +187,49 @@ describe('verdictFor', () => {
 
   it('recognises a page that is indexed and nowhere', () => {
     expect(verdictFor({ clicks: 0, impressions: 30, position: 45 })).toBe('buried')
+  })
+})
+
+describe('selectEmergingQueries', () => {
+  const brands = brandForms({ name: 'CNX Solutions', url: 'https://cnx-solutions.fr/' })
+  const stat = (query: string, pageUrl: string, impressions: number, position: number) => ({
+    pageUrl, query, clicks: 0, impressions, position, ctr: 0,
+  })
+
+  it('proposes the real searches no page of the site was written for', () => {
+    const emerging = selectEmergingQueries(
+      [
+        stat('agence web sens', 'https://cnx-solutions.fr/consultant-seo-sens/', 111, 38.3),
+        stat('consultant seo sens', 'https://cnx-solutions.fr/consultant-seo-sens/', 40, 45),
+      ],
+      { brands }
+    )
+    expect(emerging).toEqual([
+      { query: 'agence web sens', impressions: 111, position: 38.3, pageUrl: 'https://cnx-solutions.fr/consultant-seo-sens/' },
+    ])
+  })
+
+  it('refuses a query a page already carries, ranks, or that is too rare, brand or blocked', () => {
+    const emerging = selectEmergingQueries(
+      [
+        stat('agence seo troyes', 'https://cnx-solutions.fr/', 30, 14),
+        stat('agence sea troyes', 'https://cnx-solutions.fr/', 3, 52),
+        stat('cnx solutions avis', 'https://cnx-solutions.fr/', 40, 30),
+        stat('agence web reims', 'https://cnx-solutions.fr/', 25, 40),
+      ],
+      { brands, blocked: ['Agence Web Reims'] }
+    )
+    expect(emerging).toEqual([])
+  })
+
+  it('refuses a query another page targets, even buried: that page is the dedicated one', () => {
+    const emerging = selectEmergingQueries(
+      [stat('maintenance site internet troyes', 'https://cnx-solutions.fr/', 20, 55)],
+      {
+        brands,
+        pages: [{ url: 'https://cnx-solutions.fr/maintenance-site-internet-troyes-2/', focusKeyword: 'maintenance de site internet à Troyes' }],
+      }
+    )
+    expect(emerging).toEqual([])
   })
 })
