@@ -649,6 +649,14 @@ export interface PlanItemBrief {
   competitor_insights: string[]
   estimated_word_count: number
   rationale: string
+  /**
+   * Ce que Google et Bing proposent sous la barre de recherche autour du sujet
+   * (lib/serp/suggest.ts). Absent quand aucune suggestion ne le concernait, et
+   * des plans ecrits avant le 2026-11-08.
+   */
+  search_suggestions?: string[]
+  /** Les « Autres questions posées » des SERP lues qui concernent ce brief. */
+  people_also_ask?: string[]
   /** Ce que ce brief fait a l'existant. Absent des plans ecrits avant ce lot. */
   action?: PlanItemAction
   /**

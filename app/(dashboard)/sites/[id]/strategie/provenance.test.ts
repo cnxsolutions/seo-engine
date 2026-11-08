@@ -9,7 +9,7 @@
 
 import { describe, expect, it } from 'vitest'
 import type { PlanPreviewItem } from '@/lib/types'
-import { citesMeasurement, countMeasuredBriefs, sentenceCitesMeasurement } from './provenance'
+import { citesMeasurement, countMeasuredBriefs, readProvenance, sentenceCitesMeasurement } from './provenance'
 
 /** Un brief réduit à ce que le comptage lit : sa justification, ses règles, son verdict. */
 function brief(rationale: string, seoRules: string[] = [], action?: PlanPreviewItem['action']): PlanPreviewItem {
@@ -95,5 +95,27 @@ describe('les briefs construits sur une mesure', () => {
       brief(`Page pillar planifiee pour renforcer la couverture longue traine. ${BLIND_AS_READ}`),
     ]
     expect(countMeasuredBriefs(items)).toBe(1)
+  })
+})
+
+describe('readProvenance — la réponse de la route de plan', () => {
+  it('lit les SERP, Search Console et les suggestions qu’elle porte désormais', () => {
+    const provenance = readProvenance({
+      plan: { id: 'plan-1' },
+      serpEvidence: [],
+      signals: { available: true, windowStart: '2026-08-10', windowEnd: '2026-11-08', strikingDistance: [], lowCtrPages: [], deadPages: [], cannibalized: [], emergingQueries: [{ query: 'agence web sens' }] },
+      suggestions: [
+        { query: 'couvreur châlons', google: ['couvreur châlons-en-champagne'], bing: [] },
+        { query: 'zingueur châlons', google: [], bing: [] },
+      ],
+    })
+
+    expect(provenance.reported).toBe(true)
+    expect(provenance.gsc?.emergingQueries).toBe(1)
+    expect(provenance.suggestions).toEqual([{ query: 'couvreur châlons', google: ['couvreur châlons-en-champagne'], bing: [] }])
+  })
+
+  it('reste « inconnue » sur un plan relu de la base, sans preuve', () => {
+    expect(readProvenance({ plan: { id: 'plan-1', plan_data: [] } })).toEqual({ reported: false, serp: [], gsc: null, suggestions: [] })
   })
 })

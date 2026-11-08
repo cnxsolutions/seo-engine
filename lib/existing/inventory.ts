@@ -248,8 +248,10 @@ export async function loadSiteInventory(
   // compte-la que le plafond du crawler borne.
   const crawledCount = pages.filter(row => originOf(row) === 'crawl').length
 
+  // The MORE RECENT of the two: a campaign stamped at its creation used to win
+  // over a crawl run since, and the badge stayed « À rafraîchir » after a refresh.
   const freshness = freshnessOf(
-    campaignCrawledAt ?? latestCrawlOf(pages),
+    mostRecent(campaignCrawledAt, latestCrawlOf(pages)),
     hasCompletedRun,
     crawledCount,
     now,
@@ -658,6 +660,12 @@ function toGeneration(entry: InventoryEntry & { generationId: string }): Generat
  * ferait passer pour « analyse hier » un site que personne n'a jamais crawle,
  * ce qui est exactement le mensonge que la fraicheur existe pour empecher.
  */
+function mostRecent(a: string | null, b: string | null): string | null {
+  if (!a || Number.isNaN(Date.parse(a))) return b
+  if (!b || Number.isNaN(Date.parse(b))) return a
+  return Date.parse(a) >= Date.parse(b) ? a : b
+}
+
 function latestCrawlOf(pages: readonly SitePageRow[]): string | null {
   let latest: string | null = null
   let latestMs = Number.NEGATIVE_INFINITY

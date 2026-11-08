@@ -317,6 +317,16 @@ export async function getCampaignByIdSafe(id: string) {
   return (data ?? null) as SafeCampaign | null
 }
 
+/**
+ * Stamp every campaign of a site as crawled now: the inventory dates its
+ * freshness from this column first (lib/existing/inventory.ts).
+ */
+export async function markSiteCampaignsCrawled(siteId: string, at = new Date().toISOString()) {
+  const supabase = requireSupabase()
+  const { error } = await supabase.from('campaigns').update({ last_crawl_at: at }).eq('site_id', siteId)
+  if (error) throw new Error(error.message)
+}
+
 export async function updateCampaignSchedule(id: string, values: Partial<Campaign>) {
   const supabase = requireSupabase()
   const { error } = await supabase.from('campaigns').update(values).eq('id', id)

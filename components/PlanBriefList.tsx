@@ -464,6 +464,23 @@ function BriefDetail({
 
       {kind === 'create' && (
         <>
+          {item.search_suggestions && item.search_suggestions.length > 0 && (
+            <ReadField label="Ce que les gens tapent (Google / Bing)">
+              <span style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--space-1)' }}>
+                {item.search_suggestions.map((line) => <span key={line} className="chip">{line}</span>)}
+              </span>
+              <p className="meta" style={{ margin: 'var(--space-1) 0 0' }}>
+                Suggestions affichées sous la barre de recherche au moment du plan — une formulation réelle, pas un volume.
+              </p>
+            </ReadField>
+          )}
+
+          {item.people_also_ask && item.people_also_ask.length > 0 && (
+            <ReadField label="Questions posées par Google">
+              <BulletList lines={item.people_also_ask} />
+            </ReadField>
+          )}
+
           <ReadField label="Plan de la page">
             {item.outline.length > 0 ? (
               <ol className="plan-brief-detail__list">

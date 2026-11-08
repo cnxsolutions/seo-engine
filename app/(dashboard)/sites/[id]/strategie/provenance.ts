@@ -47,6 +47,8 @@ export interface GscProof {
   strikingDistance: MeasuredQuery[]
   lowCtrPages: number
   deadPages: number
+  /** Requêtes où le site est vu sans page dédiée : la section E du prompt. */
+  emergingQueries: number
   /**
    * LES COUPLES, pas leur nombre.
    *
@@ -59,14 +61,22 @@ export interface GscProof {
   cannibalized: CannibalizedQuery[]
 }
 
+/** Ce que les barres de recherche Google et Bing ont proposé pour une requête racine. */
+export interface SuggestionProof {
+  query: string
+  google: string[]
+  bing: string[]
+}
+
 export interface PlanProvenance {
   /** false when the response said nothing at all about how the plan was built. */
   reported: boolean
   serp: SerpProof[]
   gsc: GscProof | null
+  suggestions: SuggestionProof[]
 }
 
-export const UNKNOWN_PROVENANCE: PlanProvenance = { reported: false, serp: [], gsc: null }
+export const UNKNOWN_PROVENANCE: PlanProvenance = { reported: false, serp: [], gsc: null, suggestions: [] }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null
@@ -158,6 +168,7 @@ function parseGsc(raw: unknown): GscProof | null {
     strikingDistance,
     lowCtrPages: size(raw.lowCtrPages),
     deadPages: size(raw.deadPages),
+    emergingQueries: size(raw.emergingQueries),
     cannibalized: parseCannibalized(raw.cannibalized),
   }
 }
@@ -173,7 +184,24 @@ export function readProvenance(payload: unknown): PlanProvenance {
     return isRecord(payload.plan) ? readProvenance(payload.plan) : UNKNOWN_PROVENANCE
   }
 
-  return { reported: true, serp: parseSerp(rawSerp), gsc: parseGsc(rawSignals) }
+  return {
+    reported: true,
+    serp: parseSerp(rawSerp),
+    gsc: parseGsc(rawSignals),
+    suggestions: parseSuggestions(pick(payload, ['suggestions', 'searchSuggestions'])),
+  }
+}
+
+function strings(value: unknown): string[] {
+  return Array.isArray(value) ? value.map(str).filter((entry): entry is string => entry !== null) : []
+}
+
+function parseSuggestions(raw: unknown): SuggestionProof[] {
+  if (!Array.isArray(raw)) return []
+  return raw
+    .filter(isRecord)
+    .map((entry) => ({ query: str(entry.query) ?? '', google: strings(entry.google), bing: strings(entry.bing) }))
+    .filter((entry) => entry.query && (entry.google.length > 0 || entry.bing.length > 0))
 }
 
 export type ProvenanceGrade = 'measured' | 'partial' | 'blind' | 'unknown'

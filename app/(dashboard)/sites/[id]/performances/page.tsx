@@ -8,6 +8,7 @@
 // menu. Trois vues, chacune avec sa source :
 //
 //   Search Console   la table gsc_performance (positions, impressions, clics)
+//   Pages publiées   chaque page du moteur depuis sa publication, interprétée
 //   Fiche Google     les avis lus et les posts publiés par le moteur
 //   Production       generations, editorial_calendar, job_executions
 //
@@ -32,11 +33,13 @@ import { ProductionTab } from '@/app/(dashboard)/dashboard/ProductionTab'
 import { loadSite } from '../site-data'
 import { TabIntro } from '../TabIntro'
 import { GbpSummary } from './GbpSummary'
+import { PublishedTracking } from './PublishedTracking'
 
 export const dynamic = 'force-dynamic'
 
 const VIEWS = [
   { id: 'search', label: 'Search Console', caption: 'Ce que Google fait des pages du site' },
+  { id: 'suivi', label: 'Pages publiées', caption: 'Chaque page du moteur depuis sa mise en ligne : ce que Google en fait, ce que ça veut dire, quoi faire' },
   { id: 'fiche', label: 'Fiche Google', caption: 'Les avis de la fiche et les posts que le moteur y publie' },
   { id: 'production', label: 'Production', caption: 'Ce que le moteur a fabriqué pour ce site' },
 ] as const
@@ -82,9 +85,10 @@ export default async function SitePerformancePage({
       <TabNav items={tabItems} active={view} ariaLabel="Nature des mesures" />
       <p className="meta" style={{ margin: 'calc(-1 * var(--space-3)) 0 var(--space-4)' }}>{meta.caption}</p>
 
-      {/* La période ne s'applique pas à la fiche : avis et posts sont des
-          totaux, pas des séries. Le filtre n'y apparaît donc pas. */}
-      {view !== 'fiche' && (
+      {/* La période ne s'applique ni à la fiche — avis et posts sont des
+          totaux, pas des séries — ni au suivi, qui part de la publication de
+          chaque page. Le filtre n'y apparaît donc pas. */}
+      {view !== 'fiche' && view !== 'suivi' && (
         <Suspense fallback={<div style={{ height: 44, marginBottom: 'var(--space-5)' }} />}>
           <DashboardFilters days={days} />
         </Suspense>
@@ -97,6 +101,8 @@ export default async function SitePerformancePage({
           siteId={id}
         />
       )}
+
+      {view === 'suivi' && <PublishedTracking site={{ id, name: site.name, url: site.url }} />}
 
       {view === 'fiche' && <GbpSummary siteId={id} />}
 

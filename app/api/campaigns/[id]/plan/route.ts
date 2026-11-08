@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createCyclePlan, getActiveCyclePlan, getCampaignById, getCyclePlanById, getLatestCyclePlan, updateCyclePlan } from '@/lib/db'
 import { startCycle } from '@/lib/scheduler/cycle-manager'
-import { generatePlanPreview } from '@/lib/scheduler/plan-preview'
+import { generateBriefPlanWithSignals } from '@/lib/planning/brief-plan'
 import type { PlanItemBrief } from '@/lib/types'
 
 export async function GET(_req: NextRequest, context: { params: Promise<{ id: string }> }) {
@@ -39,7 +39,10 @@ export async function POST(req: NextRequest, context: { params: Promise<{ id: st
         `[plan] modele=${campaign.ai_model} mots-cles=${campaign.keywords.length} communes=${campaign.communes.length}`
     )
 
-    const planItems = await generatePlanPreview({
+    // The proofs travel with the plan: until 2026-11-08 only the plan did, and
+    // the Stratégie tab said « origine des mesures inconnue » under every plan
+    // it had just built — even one built on SERP really read.
+    const { items: planItems, serpEvidence, signals, suggestions } = await generateBriefPlanWithSignals({
       campaign,
       cycleDays,
     })
@@ -68,7 +71,7 @@ export async function POST(req: NextRequest, context: { params: Promise<{ id: st
         `${((Date.now() - startedAt) / 1000).toFixed(1)}s\n`
     )
 
-    return NextResponse.json({ plan })
+    return NextResponse.json({ plan, serpEvidence, signals, suggestions })
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : 'Erreur' }, { status: 500 })
   }

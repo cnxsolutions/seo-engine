@@ -4,9 +4,12 @@ import {
   getGscPlanningSignals,
   STRIKING_DISTANCE_MAX_POSITION,
   STRIKING_DISTANCE_MIN_POSITION,
+  type EmergingQuery,
   type GscPlanningSignals,
 } from '@/lib/google/performance'
+import { queryTokens } from '@/lib/google/query-match'
 import { buildSerpEvidence, type SerpEvidence } from '@/lib/serp'
+import { fetchSuggestionsFor, type QuerySuggestions } from '@/lib/serp/suggest'
 import { loadSiteInventory } from '@/lib/existing/inventory'
 import { generateEditorialCalendar } from '@/lib/scheduler/editorial'
 import { campaignDepartment, isNationalCampaign, resolveTargetCity, targetCommunes } from '@/lib/geo/scope'
@@ -55,7 +58,22 @@ export interface GenerateBriefPlanOptions {
    * it (tests, offline runs, or when the result markup has moved).
    */
   serpEvidence?: SerpEvidence[] | null
+  /**
+   * What Google and Bing propose under the search box for the campaign's root
+   * queries. Asked when omitted; pass `null` or `[]` to plan without it.
+   */
+  searchSuggestions?: QuerySuggestions[] | null
 }
+
+/**
+ * Root queries asked to the search boxes. Free and fast, so wider than the SERP
+ * read: every seed the campaign declares, up to eight.
+ */
+const SUGGESTION_QUERIES_PER_PLAN = 8
+
+/** Suggestions and SERP questions kept on one brief: what its screen can show. */
+const BRIEF_SUGGESTIONS = 8
+const BRIEF_QUESTIONS = 6
 
 /**
  * Root queries read per plan.
@@ -81,6 +99,8 @@ export interface BriefPlanResult {
    * an informed one.
    */
   serpEvidence: SerpEvidence[]
+  /** Empty when neither search box answered — the plan then did without. */
+  suggestions: QuerySuggestions[]
 }
 
 export async function generateBriefPlan(opts: GenerateBriefPlanOptions): Promise<PlanItemBrief[]> {
@@ -137,7 +157,7 @@ export async function generateBriefPlanWithSignals(opts: GenerateBriefPlanOption
     )
 
   const signals = await resolveSignals(opts)
-  const serpEvidence = await resolveSerpEvidence(opts)
+  const [serpEvidence, suggestions] = await Promise.all([resolveSerpEvidence(opts), resolveSuggestions(opts)])
 
   const frequency = campaign.schedule_frequency || 'daily'
   const frequencyDays: Record<string, number> = {
@@ -163,7 +183,7 @@ export async function generateBriefPlanWithSignals(opts: GenerateBriefPlanOption
     slotCount,
   })
 
-  if (calendarSlots.length === 0) return { items: [], signals, serpEvidence }
+  if (calendarSlots.length === 0) return { items: [], signals, serpEvidence, suggestions }
 
   // Les requetes Search Console ne sont plus distribuees comme cibles des
   // creneaux. Une requete en position 5-20 est, par definition, deja portee par
@@ -210,9 +230,13 @@ export async function generateBriefPlanWithSignals(opts: GenerateBriefPlanOption
         subjects: toWrite,
         signals,
         serpEvidence,
+        suggestions,
       })
 
-  const items = normalizeBriefs({ subjects, rawItems, campaign, takenPaths, inventory, signals, existingKeywords })
+  const items = attachSearchEvidence(
+    normalizeBriefs({ subjects, rawItems, campaign, takenPaths, inventory, signals, existingKeywords }),
+    { suggestions, serpEvidence, cityTokens: decisionContext.cityTokens }
+  )
 
   // Le modele a pu rendre un sujet qui ne se distingue pas de la page a eviter,
   // ou qui reprend un mot-cle deja porte : ces creneaux tombent apres la
@@ -226,7 +250,7 @@ export async function generateBriefPlanWithSignals(opts: GenerateBriefPlanOption
     )
   }
 
-  return { items, signals, serpEvidence }
+  return { items, signals, serpEvidence, suggestions }
 }
 
 /**
@@ -283,11 +307,13 @@ async function writeBriefs(opts: {
   subjects: readonly PlannedSubject[]
   signals: GscPlanningSignals | null
   serpEvidence: SerpEvidence[]
+  suggestions: QuerySuggestions[]
 }): Promise<Array<Partial<PlanItemBrief>>> {
   console.log(
     `[plan] redaction des briefs : ${opts.subjects.length} creneaux, modele ${DEFAULT_PLANNING_MODEL}` +
       `${opts.signals ? ' + signaux Search Console' : ' (aucun historique Search Console)'}` +
-      `${opts.serpEvidence.length ? ` + ${opts.serpEvidence.length} SERP mesurees` : ''}`
+      `${opts.serpEvidence.length ? ` + ${opts.serpEvidence.length} SERP mesurees` : ''}` +
+      `${opts.suggestions.length ? ` + suggestions Google/Bing sur ${opts.suggestions.length} requetes` : ''}`
   )
 
   const raw = await generateJson({
@@ -301,6 +327,7 @@ Tu ne rediges jamais la page, tu ne fournis jamais de HTML, et tu reponds unique
       subjects: opts.subjects,
       signals: opts.signals,
       serpEvidence: opts.serpEvidence,
+      suggestions: opts.suggestions,
     }),
     model: DEFAULT_PLANNING_MODEL,
     maxTokens: 7000,
@@ -449,15 +476,8 @@ async function resolveSerpEvidence(opts: GenerateBriefPlanOptions): Promise<Serp
   if (opts.serpEvidence !== undefined) return opts.serpEvidence ?? []
 
   const { campaign } = opts
-  const city = resolveTargetCity(campaign)
   const siteHost = hostOfSite(campaign.site?.url)
-
-  const queries = dedupe(
-    campaign.keywords
-      .map((keyword) => (city && !keyword.toLowerCase().includes(city.toLowerCase()) ? `${keyword} ${city}` : keyword))
-      .map((query) => query.trim())
-      .filter(Boolean)
-  ).slice(0, SERP_QUERIES_PER_PLAN)
+  const queries = rootQueries(campaign).slice(0, SERP_QUERIES_PER_PLAN)
 
   if (queries.length === 0) return []
 
@@ -490,6 +510,108 @@ async function resolveSerpEvidence(opts: GenerateBriefPlanOptions): Promise<Serp
 
   console.log(`[plan] SERP : ${evidence.length}/${queries.length} requetes exploitables`)
   return evidence
+}
+
+/** The campaign's seeds as someone would type them: with the target city, when there is one. */
+function rootQueries(campaign: Campaign): string[] {
+  const city = resolveTargetCity(campaign)
+  return dedupe(
+    campaign.keywords
+      .map((keyword) => (city && !keyword.toLowerCase().includes(city.toLowerCase()) ? `${keyword} ${city}` : keyword))
+      .map((query) => query.trim())
+      .filter(Boolean)
+  )
+}
+
+/**
+ * Ask Google's and Bing's search boxes what follows each root query. Never
+ * throws: lib/serp/suggest degrades to empty lists, and so does this.
+ */
+async function resolveSuggestions(opts: GenerateBriefPlanOptions): Promise<QuerySuggestions[]> {
+  if (opts.searchSuggestions !== undefined) return opts.searchSuggestions ?? []
+
+  const queries = rootQueries(opts.campaign).slice(0, SUGGESTION_QUERIES_PER_PLAN)
+  if (queries.length === 0) return []
+
+  const cityWords = new Set(campaignCityNames(opts.campaign).flatMap((city) => queryTokens(city)))
+
+  try {
+    const results = (await fetchSuggestionsFor(queries))
+      .map((entry) => relevantSuggestions(entry, cityWords))
+      .filter((entry) => entry.google.length > 0 || entry.bing.length > 0)
+    const total = results.reduce((sum, entry) => sum + entry.google.length + entry.bing.length, 0)
+    console.log(`[plan] suggestions Google/Bing : ${total} pour ${results.length}/${queries.length} requetes racines`)
+    return results
+  } catch (error) {
+    console.warn(`[plan] suggestions indisponibles : ${error instanceof Error ? error.message : error}`)
+    return []
+  }
+}
+
+/**
+ * What the search boxes said that is about THIS query, in THIS territory.
+ *
+ * Google completes a prefix, Bing matches loosely: asked « referencement site
+ * internet Troyes », Bing answered « logo ville de troyes » and « référencement
+ * site internet tarbes ». Two rules, both on words with the cities left out:
+ *
+ *   - a suggestion shares a word with the query (Google), half its words (Bing);
+ *   - when the query names one of the campaign's places, the suggestion names
+ *     one too — « création site internet lyon » is not a subject for Troyes.
+ */
+export function relevantSuggestions(entry: QuerySuggestions, cityWords: ReadonlySet<string>): QuerySuggestions {
+  const rootTokens = queryTokens(entry.query)
+  const subject = new Set(rootTokens.filter((word) => !cityWords.has(word)))
+  const local = rootTokens.some((word) => cityWords.has(word))
+
+  const keep = (minShared: number) => (suggestion: string) => {
+    const tokens = queryTokens(suggestion)
+    if (local && !tokens.some((word) => cityWords.has(word))) return false
+    return tokens.filter((word) => subject.has(word)).length >= minShared
+  }
+
+  const half = Math.max(1, Math.ceil(subject.size / 2))
+  return { ...entry, google: entry.google.filter(keep(1)), bing: entry.bing.filter(keep(half)) }
+}
+
+/**
+ * Each brief keeps the suggestions and the SERP questions that concern it —
+ * what the screen shows under « Ce que les gens tapent ».
+ *
+ * A suggestion concerns a brief when it shares a word with its keyword or its
+ * title, city names left out: every suggestion of a local campaign contains
+ * the city, and matching on it would hand the same list to every brief.
+ */
+export function attachSearchEvidence(
+  items: PlanItemBrief[],
+  evidence: { suggestions: readonly QuerySuggestions[]; serpEvidence: readonly SerpEvidence[]; cityTokens: readonly string[] }
+): PlanItemBrief[] {
+  const cityWords = new Set(evidence.cityTokens.flatMap((city) => queryTokens(city)))
+  const suggestions = dedupe(evidence.suggestions.flatMap((entry) => [...entry.google, ...entry.bing]))
+  const questions = dedupe(evidence.serpEvidence.flatMap((entry) => entry.peopleAlsoAsk))
+  if (suggestions.length === 0 && questions.length === 0) return items
+
+  return items.map((item) => {
+    if (item.action?.kind === 'skip') return item
+    const words = new Set(
+      [...queryTokens(item.target_keyword), ...queryTokens(item.proposed_title)].filter((word) => !cityWords.has(word))
+    )
+    const rank = (lines: string[], limit: number) =>
+      lines
+        .map((line) => ({ line, score: queryTokens(line).filter((word) => words.has(word)).length }))
+        .filter((entry) => entry.score > 0)
+        .sort((a, b) => b.score - a.score)
+        .slice(0, limit)
+        .map((entry) => entry.line)
+
+    const searchSuggestions = rank(suggestions, BRIEF_SUGGESTIONS)
+    const peopleAlsoAsk = rank(questions, BRIEF_QUESTIONS)
+    return {
+      ...item,
+      ...(searchSuggestions.length > 0 ? { search_suggestions: searchSuggestions } : {}),
+      ...(peopleAlsoAsk.length > 0 ? { people_also_ask: peopleAlsoAsk } : {}),
+    }
+  })
 }
 
 function hostOfSite(siteUrl: string | undefined): string | null {
@@ -536,6 +658,7 @@ export function buildPrompt(opts: {
   subjects: readonly PlannedSubject[]
   signals: GscPlanningSignals | null
   serpEvidence: SerpEvidence[]
+  suggestions?: QuerySuggestions[]
 }) {
   const analysis = opts.analysisRun?.analysis_data
   const competitorSummary = analysis?.competitors.map((competitor) => ({
@@ -598,8 +721,9 @@ Anti-doublon (pages DEJA en ligne sur le site, qui ne seront ni mises a jour ni 
 - Slugs deja utilises: ${opts.existingSlugs.slice(0, 50).join(', ') || 'aucun'}
 - Mots-cles deja cibles: ${opts.existingKeywords.slice(0, 50).join(', ') || 'aucun'}
 
-${buildPerformanceSection(opts.signals)}
+${buildPerformanceSection(opts.signals, opts.campaign, opts.existingKeywords)}
 ${buildSerpSection(opts.serpEvidence)}
+${buildSuggestionSection(opts.suggestions ?? [])}
 Slots a transformer en briefs (les sujets bloques par Search Console ont deja ete retires avant cet appel) :
 ${JSON.stringify(slots, null, 1)}
 ${avoidSection}
@@ -640,6 +764,9 @@ Regles:
 14. required_entities : 3 a 5 entites au plus, celles dont la page a besoin pour etre utile (une commune, un
     organisme, un repere qui compte pour le sujet). Chacune devra etre citee dans le texte : une liste de
     quartiers ou de rues pour faire local deviendrait une enumeration plaquee dans la page.
+15. Quand une suggestion Google/Bing ou une requete de la section E correspond au sujet d'un creneau, prends
+    SA formulation pour target_keyword et secondary_keywords : c'est ce que les gens tapent vraiment. Jamais
+    une suggestion qui contient le nom d'une entreprise, ni une ville hors de la zone de la campagne.
 
 Reponds avec ce JSON:
 {
@@ -749,7 +876,75 @@ de 800 mots sur une requete ou la mediane observee est 2000, ni l'inverse.
 `
 }
 
-function buildPerformanceSection(signals: GscPlanningSignals | null): string {
+/**
+ * The search boxes' own words, root query by root query.
+ *
+ * Empty when neither answered: an absent section is better than one that
+ * reads as « nobody types anything around this subject ».
+ */
+function buildSuggestionSection(suggestions: readonly QuerySuggestions[]): string {
+  const usable = suggestions.filter((entry) => entry.google.length > 0 || entry.bing.length > 0)
+  if (usable.length === 0) return ''
+
+  const lines = usable.map((entry) => {
+    const parts = [
+      entry.google.length > 0 ? `Google : ${entry.google.slice(0, 10).join(' | ')}` : '',
+      entry.bing.length > 0 ? `Bing : ${entry.bing.slice(0, 8).join(' | ')}` : '',
+    ].filter(Boolean)
+    return `- "${entry.query}" -> ${parts.join(' ; ')}`
+  })
+
+  return `
+Ce que Google et Bing proposent quand on tape ces requetes (autocompletion reelle, lue le ${usable[0].fetchedAt.slice(0, 10)}) :
+${lines.join('\n')}
+Ces formulations sont celles des internautes : elles priment sur une phrase redigee pour target_keyword et
+secondary_keywords (regle 15). Elles ne disent rien du volume : une suggestion est tapee, pas forcement souvent.
+`
+}
+
+/**
+ * The emerging queries that concern this campaign's activity.
+ *
+ * Search Console reports everything a site is shown on, and a site is shown on
+ * strange things: Flowyne on « code promo parfumdo », through a client's shop
+ * page. A query that shares no word with the campaign's seeds, its activity or
+ * the keywords of the site's own pages is not a subject for it.
+ *
+ * The site's keywords count, not only the seeds: CNX's seeds say
+ * « referencement » and « creation site internet », never « agence web », and
+ * « agence web sens » — 111 impressions, no page — would have been dropped.
+ * But a word of the site counts only when two of its pages use it: Flowyne
+ * hosts its clients' shops, and « parfumdo » names one of them, once.
+ */
+export function relevantEmergingQueries(
+  queries: readonly EmergingQuery[],
+  campaign: Campaign,
+  siteKeywords: readonly string[] = []
+): EmergingQuery[] {
+  const cityWords = new Set(campaignCityNames(campaign).flatMap((city) => queryTokens(city)))
+  const words = new Set(
+    [...campaign.keywords, campaign.business_type ?? '']
+      .flatMap((text) => queryTokens(text))
+      .filter((word) => !cityWords.has(word))
+  )
+
+  const uses = new Map<string, number>()
+  for (const keyword of siteKeywords) {
+    for (const word of new Set(queryTokens(keyword))) uses.set(word, (uses.get(word) ?? 0) + 1)
+  }
+  for (const [word, count] of uses) {
+    if (count >= 2 && !cityWords.has(word)) words.add(word)
+  }
+
+  if (words.size === 0) return []
+  return queries.filter((entry) => queryTokens(entry.query).some((word) => words.has(word)))
+}
+
+function buildPerformanceSection(
+  signals: GscPlanningSignals | null,
+  campaign?: Campaign,
+  siteKeywords: readonly string[] = []
+): string {
   if (!signals) return ''
 
   const blocks: string[] = [
@@ -803,6 +998,21 @@ function buildPerformanceSection(signals: GscPlanningSignals | null): string {
       ),
       'Ces pages s\'affaiblissent mutuellement. INTERDIT d\'en ajouter une de plus sur ces requetes :',
       'une page neuve d\'un autre sujet peut lier vers l\'URL gagnante, jamais la concurrencer.'
+    )
+  }
+
+  const emerging = campaign ? relevantEmergingQueries(signals.emergingQueries ?? [], campaign, siteKeywords) : []
+  if (emerging.length > 0) {
+    blocks.push(
+      '',
+      'E. DEMANDE MESUREE SANS PAGE DEDIEE — Google montre deja le site sur ces requetes, mais au-dela de la',
+      '   20e place et par une page qui ne les traite pas. Aucune page du site ne les porte : une page neuve',
+      "   ecrite pour l'une d'elles ne concurrence rien. Ce sont les meilleurs target_keyword possibles quand",
+      "   elles correspondent au sujet d'un creneau :",
+      ...emerging.slice(0, 12).map((entry) =>
+        `- "${entry.query}" : ${entry.impressions} impressions, meilleure position ${entry.position} (montree via ${entry.pageUrl})`
+      ),
+      'Ignore celles qui visent une ville hors de la zone de la campagne ou une autre entreprise.'
     )
   }
 

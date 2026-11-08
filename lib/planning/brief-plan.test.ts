@@ -16,7 +16,16 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import type { GscPlanningSignals } from '@/lib/google/performance'
 import type { InventoryEntry, SiteInventory } from '@/src/core/domain/existing/inventory'
 import type { Campaign, PlanItemBrief } from '@/lib/types'
-import { buildPrompt, decideForSlot, normalizeBriefs, type PlanSlot, type PlannedSubject } from './brief-plan'
+import {
+  attachSearchEvidence,
+  buildPrompt,
+  decideForSlot,
+  normalizeBriefs,
+  relevantEmergingQueries,
+  relevantSuggestions,
+  type PlanSlot,
+  type PlannedSubject,
+} from './brief-plan'
 
 // ─── Fixtures ───────────────────────────────────────────────────────────────
 
@@ -419,5 +428,120 @@ describe('campagne nationale — aucune ville dans le plan', () => {
     expect(text).toContain('aucun page_type local_pack')
     expect(text).not.toContain('- Departement: Aube')
     expect(text).not.toContain('- Communes: tous')
+  })
+})
+
+// ─── Ce que les gens tapent ─────────────────────────────────────────────────
+
+describe('suggestions Google/Bing et demande decouverte', () => {
+  const suggestions = [
+    {
+      query: 'plombier Troyes',
+      google: ['plombier troyes urgence', 'plombier troyes pas cher', 'chauffagiste troyes'],
+      bing: ['plombier troyes avis'],
+      fetchedAt: '2026-11-08T10:00:00.000Z',
+    },
+  ]
+
+  it('donne au modele les formulations reelles, et la regle qui les fait primer', () => {
+    const text = buildPrompt({
+      campaign,
+      analysisRun: null,
+      existingSlugs: [],
+      existingKeywords: [],
+      subjects: [decide(slot(), inventory([]))],
+      signals: null,
+      serpEvidence: [],
+      suggestions,
+    })
+
+    expect(text).toContain('Ce que Google et Bing proposent quand on tape ces requetes (autocompletion reelle, lue le 2026-11-08)')
+    expect(text).toContain('- "plombier Troyes" -> Google : plombier troyes urgence | plombier troyes pas cher | chauffagiste troyes ; Bing : plombier troyes avis')
+    expect(text).toContain('15. Quand une suggestion Google/Bing')
+  })
+
+  it('omet la section quand aucune barre de recherche n’a repondu', () => {
+    const text = buildPrompt({
+      campaign, analysisRun: null, existingSlugs: [], existingKeywords: [],
+      subjects: [decide(slot(), inventory([]))], signals: null, serpEvidence: [], suggestions: [],
+    })
+    expect(text).not.toContain('Ce que Google et Bing proposent')
+  })
+
+  it('propose la demande mesuree sans page (section E), filtree sur l’activite de la campagne', () => {
+    const signals = gsc({
+      emergingQueries: [
+        { query: 'plombier sainte savine', impressions: 40, position: 33, pageUrl: 'https://exemple.fr/' },
+        { query: 'code promo parfumdo', impressions: 37, position: 27, pageUrl: 'https://exemple.fr/v/boutique' },
+      ],
+    })
+
+    expect(relevantEmergingQueries(signals.emergingQueries ?? [], campaign).map((entry) => entry.query)).toEqual(['plombier sainte savine'])
+
+    // A word of the site's own pages counts as much as a seed.
+    const adoucisseur = [{ query: 'adoucisseur eau troyes', impressions: 12, position: 41, pageUrl: 'https://exemple.fr/' }]
+    expect(relevantEmergingQueries(adoucisseur, campaign)).toEqual([])
+    expect(relevantEmergingQueries(adoucisseur, campaign, ['installation adoucisseur sainte-savine'])).toEqual([])
+    expect(
+      relevantEmergingQueries(adoucisseur, campaign, ['installation adoucisseur sainte-savine', 'prix adoucisseur'])
+    ).toEqual(adoucisseur)
+
+    const text = buildPrompt({
+      campaign, analysisRun: null, existingSlugs: [], existingKeywords: [],
+      subjects: [decide(slot(), inventory([]))], signals, serpEvidence: [],
+    })
+    expect(text).toContain('E. DEMANDE MESUREE SANS PAGE DEDIEE')
+    expect(text).toContain('- "plombier sainte savine" : 40 impressions, meilleure position 33 (montree via https://exemple.fr/)')
+    expect(text).not.toContain('parfumdo')
+  })
+
+  it('rattache a chaque brief les suggestions et les questions qui le concernent, ville exclue', () => {
+    const [created, skipped] = attachSearchEvidence(
+      [
+        { id: 'a', target_keyword: 'plombier urgence troyes', proposed_title: 'Plombier en urgence à Troyes', action: { kind: 'create' } },
+        { id: 'b', target_keyword: 'plombier troyes', proposed_title: '', action: { kind: 'skip', reasons: ['deja porte'] } },
+      ] as unknown as PlanItemBrief[],
+      {
+        suggestions,
+        serpEvidence: [
+          {
+            query: 'plombier troyes', fetchedAt: '2026-11-08', competitors: [], relatedSearches: [], medianWordCount: null,
+            commonSections: [], faqShare: 0,
+            peopleAlsoAsk: ['Quel est le prix d’un plombier en urgence ?', 'Comment choisir un chauffe-eau ?'],
+          },
+        ],
+        cityTokens: CITY_TOKENS,
+      }
+    )
+
+    expect(created.search_suggestions).toEqual(['plombier troyes urgence', 'plombier troyes pas cher', 'plombier troyes avis'])
+    expect(created.people_also_ask).toEqual(['Quel est le prix d’un plombier en urgence ?'])
+    expect(skipped.search_suggestions).toBeUndefined()
+  })
+})
+
+describe('relevantSuggestions', () => {
+  const cities = new Set(['troye', 'sainte', 'savine', 'aube', 'auxerre'])
+
+  it('keeps what the search boxes said about this query, in this territory', () => {
+    const result = relevantSuggestions(
+      {
+        query: 'referencement site internet Troyes',
+        google: ['référencement site internet troyes prix', 'programmation troyes'],
+        bing: ['intranet ville de troyes', 'référencement site internet tarbes', 'tester référencement site internet', 'référencement site web troyes'],
+        fetchedAt: '2026-11-08T10:00:00.000Z',
+      },
+      cities
+    )
+    expect(result.google).toEqual(['référencement site internet troyes prix'])
+    expect(result.bing).toEqual(['référencement site web troyes'])
+  })
+
+  it('asks no city of a national query', () => {
+    const result = relevantSuggestions(
+      { query: 'application pour gérer ses rendez vous', google: [], bing: ['application de prise de rendez vous', 'monter son business en ligne'], fetchedAt: '' },
+      cities
+    )
+    expect(result.bing).toEqual(['application de prise de rendez vous'])
   })
 })

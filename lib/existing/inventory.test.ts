@@ -528,3 +528,19 @@ describe('nearestExistingEntries', () => {
     expect(proches.map(item => item.path)).toEqual(['/taxi-sainte-savine', '/taxi-troyes'])
   })
 })
+
+describe('fraicheur apres un rafraichissement', () => {
+  it('prend la plus recente des deux dates : celle de la campagne ne masque plus un crawl fait depuis', async () => {
+    // Flowyne, 2026-11-07 : campagne datee de sa creation (21/10), pages relues
+    // depuis — le badge restait « À rafraîchir ».
+    tables = {
+      site_pages: { data: [pageRow({ path: '/a', crawled_at: daysAgo(1) })] },
+      campaigns: { data: [{ last_crawl_at: daysAgo(20) }] },
+    }
+
+    const inventory = await loadSiteInventory('site-1', { now: NOW })
+
+    expect(inventory.freshness.lastCrawledAt).toBe(daysAgo(1))
+    expect(inventory.freshness.state).toBe('fresh')
+  })
+})

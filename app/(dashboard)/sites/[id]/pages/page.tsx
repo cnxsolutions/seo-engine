@@ -55,17 +55,10 @@ import { loadSiteInventory } from '@/lib/existing/inventory'
 import type { InventoryOrigin } from '@/src/core/domain/existing/inventory'
 import { loadSite } from '../site-data'
 import { TabIntro } from '../TabIntro'
+import { RefreshPagesButton } from '../../RefreshPagesButton'
 
 export const dynamic = 'force-dynamic'
 
-/** Le seul chemin de crawl que le produit possède : POST /api/analysis-runs exige
- *  un type d'activité, un nom, des concurrents et des villes, et aucun endpoint
- *  ne se contente de recrawler un site. Un bouton « Relancer une analyse » sans
- *  route derrière est un bouton qui ne fait rien. Le site part en `?site=` :
- *  la création de stratégie le présélectionne et y revient. */
-function analyseHref(siteId: string): string {
-  return `/strategy/new?site=${siteId}`
-}
 
 export default async function SitePagesPage({
   params,
@@ -98,7 +91,7 @@ export default async function SitePagesPage({
 
   const { summary, entries, total, pageSize } = view
   const filtering = q !== '' || origin !== undefined
-  const banner = freshnessBanner(summary, site.url, analyseHref(id))
+  const banner = freshnessBanner(summary, site.url)
 
   const lastPage = Math.max(1, Math.ceil(total / pageSize))
   const firstRow = total === 0 ? 0 : (view.page - 1) * pageSize + 1
@@ -109,7 +102,14 @@ export default async function SitePagesPage({
       <TabIntro
         title="Pages déjà en ligne"
         subtitle="Ce que le moteur sait être publié sur ce site. Il ne peut éviter de dupliquer que ce qu’il voit."
-        actions={<StatusBadge status={summary.freshness} />}
+        actions={
+          // Re-read the site's pages, nothing else — it used to go through the
+          // whole strategy wizard (lib/existing/refresh.ts).
+          <span style={{ display: 'inline-flex', alignItems: 'flex-start', gap: 'var(--space-3)' }}>
+            <StatusBadge status={summary.freshness} />
+            <RefreshPagesButton siteId={id} />
+          </span>
+        }
       />
 
       {/* Le bandeau de régime n'est jamais masqué ni repliable : il décrit une
@@ -207,7 +207,6 @@ export default async function SitePagesPage({
               beyondLastPage={total > 0}
               blindReason={summary.blindReason}
               resetHref={inventoryHref(id, q, origin, 1)}
-              analyseHref={analyseHref(id)}
             />
           </div>
         ) : (
@@ -427,13 +426,11 @@ function InventoryEmptyState({
   beyondLastPage,
   blindReason,
   resetHref,
-  analyseHref,
 }: {
   filtering: boolean
   beyondLastPage: boolean
   blindReason: InventorySummary['blindReason']
   resetHref: string
-  analyseHref: string
 }) {
   // Une page de liste au-delà du dernier numéro n'est pas un filtre sans
   // résultat : dire « aucune page ne correspond » enverrait chercher un bug de
@@ -471,7 +468,6 @@ function InventoryEmptyState({
         icon={SearchX}
         title="Ce site n’a jamais été analysé"
         description="Le moteur ne connaît que les pages qu’il a lui-même publiées. Il produira quand même, en vérifiant chaque adresse directement sur le site avant d’écrire — mais il ne peut comparer aucun titre à ceux d’une page qu’il n’a jamais vue."
-        action={{ label: 'Analyser le site', href: analyseHref }}
       />
     )
   }
@@ -483,7 +479,6 @@ function InventoryEmptyState({
       icon={Library}
       title="Aucune page connue sur ce site"
       description="Ni l’analyse ni le moteur n’ont rapporté de page. Un site neuf n’a rien à dupliquer : la génération se fait normalement."
-      action={{ label: 'Analyser le site', href: analyseHref }}
     />
   )
 }
@@ -519,9 +514,8 @@ interface FreshnessBanner {
  * fonction pure prenant `InventorySummary` pour qu'il y déménage sans
  * réécriture, et pour qu'aucune formulation ne soit inventée deux fois.
  */
-function freshnessBanner(summary: InventorySummary, siteUrl: string | null, analyseHref: string): FreshnessBanner {
+function freshnessBanner(summary: InventorySummary, siteUrl: string | null): FreshnessBanner {
   const day = summary.lastCrawledAt ? formatDayLong(summary.lastCrawledAt) : null
-  const analyser = { label: 'Analyser le site', href: analyseHref }
 
   if (summary.freshness === 'fresh') {
     return {
@@ -538,7 +532,6 @@ function freshnessBanner(summary: InventorySummary, siteUrl: string | null, anal
       tone: 'warning',
       title: `Inventaire vieux de ${summary.ageDays} jours`,
       body: `Dernière analyse le ${day}. Les pages mises en ligne depuis — par vous, par un autre outil — ne sont pas dans cette liste. Avant chaque écriture, le moteur ira vérifier l’adresse directement sur le site.`,
-      action: analyser,
     }
   }
 
@@ -547,7 +540,6 @@ function freshnessBanner(summary: InventorySummary, siteUrl: string | null, anal
       tone: 'serious',
       title: 'Inventaire trop vieux pour être utilisé',
       body: `Dernière analyse le ${day}, il y a ${summary.ageDays} jours. Le moteur ne s’en sert plus pour décider : il vérifie chaque adresse directement sur le site, sans plus comparer les titres.`,
-      action: analyser,
     }
   }
 
@@ -569,7 +561,6 @@ function freshnessBanner(summary: InventorySummary, siteUrl: string | null, anal
           )}
         </>
       ),
-      action: analyser,
     }
   }
 
@@ -577,7 +568,6 @@ function freshnessBanner(summary: InventorySummary, siteUrl: string | null, anal
     tone: 'info',
     title: 'Le moteur n’a jamais regardé ce site',
     body: 'Aucune analyse n’a été menée. Il ne sait donc pas quelles pages existent déjà, ni quels titres sont pris. Il continue de produire — il vérifie chaque adresse directement sur le site avant d’écrire — mais il ne peut comparer aucun titre.',
-    action: analyser,
   }
 }
 
