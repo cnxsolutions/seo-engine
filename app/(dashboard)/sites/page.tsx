@@ -24,6 +24,7 @@ import { listSites } from '@/lib/db'
 import { createServiceClient } from '@/lib/supabase'
 import { freshnessOf, type BlindReason, type InventoryFreshness } from '@/src/core/domain/existing/inventory'
 import { AnalyzeRepoButton } from './AnalyzeRepoButton'
+import { RefreshPagesButton } from './RefreshPagesButton'
 import { DeleteSiteButton } from './SiteActions'
 
 export const dynamic = 'force-dynamic'
@@ -251,8 +252,8 @@ function nextStep(site: SiteRow, facts: SiteFacts | null): NextStep | null {
    */
   if ((facts.crawledCount ?? 0) === 0) {
     return {
-      label: 'Analyser le site',
-      href: `/strategy/new?site=${site.id}`,
+      label: 'Lire les pages du site',
+      href: `/sites/${site.id}/pages`,
       why: 'Le moteur ne connaît aucune page de ce site : il générera sans savoir ce qui est déjà en ligne, et peut doubler une page qui vous positionne.',
     }
   }
@@ -549,6 +550,8 @@ function KnownPages({ siteId, facts }: { siteId: string; facts: SiteFacts | null
         </>
       )}
       <Link href={`/sites/${siteId}/pages`} className="btn-link">Voir</Link>
+      {/* Where the « À rafraîchir » badge is, the way to act on it. */}
+      {facts !== null && facts.freshness.state !== 'fresh' && <RefreshPagesButton siteId={siteId} compact />}
     </span>
   )
 }
