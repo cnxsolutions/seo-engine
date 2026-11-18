@@ -30,7 +30,7 @@ import {
 import { Panel, SourceNote } from '@/app/(dashboard)/dashboard/ui-bits'
 import { formatCount, formatPercent, formatPosition, shortenUrl } from '@/app/(dashboard)/dashboard/viz'
 
-const BADGE: Record<TrackingTone, string> = {
+export const BADGE: Record<TrackingTone, string> = {
   good: 'badge badge-success',
   info: 'badge badge-info',
   warning: 'badge badge-warning',

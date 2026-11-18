@@ -86,7 +86,7 @@ node scripts/db-migrate.mjs 020
 ```
 
 Les fichiers vivent dans `src/adapters/infrastructure/database/migrations/`
-(`001` a `019`), **jamais** dans `db/`. Ils doivent etre idempotents
+(`001` a `020`), **jamais** dans `db/`. Ils doivent etre idempotents
 (`IF NOT EXISTS`, `CREATE OR REPLACE`) : la base elle-meme fait office de
 journal, il n'y a pas de table de suivi.
 

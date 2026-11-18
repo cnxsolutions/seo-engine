@@ -20,6 +20,7 @@
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { GeneratedPage } from '@/lib/ai/openai'
+import type { IndexingResult } from '@/lib/seo/indexing'
 import type { Site } from '@/lib/types'
 import type { PublishOutcome } from './outcome'
 
@@ -57,10 +58,15 @@ vi.mock('@/lib/seo/sitemap-submit', () => ({
   }),
 }))
 
-vi.mock('@/lib/seo/indexing', () => ({
+/** What the search engines answer, per test. The real shape of `IndexingResult`. */
+let indexingAnswer: IndexingResult = { indexNow: { success: true } }
+
+vi.mock('@/lib/seo/indexing', async (importOriginal) => ({
+  // The note wording is the real one: only the network calls are doubled.
+  ...(await importOriginal<typeof import('@/lib/seo/indexing')>()),
   submitForIndexing: vi.fn(async ({ pageUrl }: { pageUrl: string }) => {
     indexedUrls.push(pageUrl)
-    return { submitted: true }
+    return indexingAnswer
   }),
 }))
 
@@ -159,6 +165,7 @@ beforeEach(() => {
   rejected.length = 0
   published.length = 0
   sitemapCalls.length = 0
+  indexingAnswer = { indexNow: { success: true } }
   gateVerdict = { publishable: true, reasons: [] }
   gateRuns = 0
   nextJsAnswer = outcome({ pageUrl: 'https://taxidriver10.fr/taxi-gare-troyes', mode: 'contrat' })
@@ -461,5 +468,35 @@ describe('Search Console', () => {
     await publishPage({ site: NEXTJS_SITE, page: PAGE, intent: 'publie', generationId: 'gen-1' })
 
     expect(sitemapCalls).toHaveLength(0)
+  })
+})
+
+describe('API Indexing Google', () => {
+  it('note qu elle a accepte la notification', async () => {
+    indexingAnswer = { indexNow: { success: true }, googleIndexingApi: { success: true } }
+
+    await publishPage({ site: NEXTJS_SITE, page: PAGE, intent: 'publie', generationId: 'gen-1' })
+
+    expect(updated.at(-1)?.publish_notes).toEqual(expect.arrayContaining(['API Indexing Google : notification acceptee', 'IndexNow : URL transmise']))
+  })
+
+  it('note son refus au lieu de le taire — la publication reste reussie', async () => {
+    indexingAnswer = {
+      indexNow: { success: false, error: 'No IndexNow key configured' },
+      googleIndexingApi: { success: false, error: 'Indexing API 403: Permission denied. Failed to verify the URL ownership.' },
+    }
+
+    const result = await publishPage({ site: NEXTJS_SITE, page: PAGE, intent: 'publie', generationId: 'gen-1' })
+
+    expect(result.outcome.ok).toBe(true)
+    expect(updated.at(-1)?.publish_notes).toContain(
+      'API Indexing Google : refusee (Indexing API 403: Permission denied. Failed to verify the URL ownership.)'
+    )
+  })
+
+  it('dit quand elle n est pas configuree, pour que l absence se voie', async () => {
+    await publishPage({ site: NEXTJS_SITE, page: PAGE, intent: 'publie', generationId: 'gen-1' })
+
+    expect(updated.at(-1)?.publish_notes).toContain('API Indexing Google : non configuree (GOOGLE_INDEXING_CREDENTIALS absente)')
   })
 })

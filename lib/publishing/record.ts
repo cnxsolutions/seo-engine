@@ -28,7 +28,7 @@ import { CONTENT_EXCERPT_MAX_CHARS } from '@/lib/analyzer/crawler'
 import { updateGeneration, upsertSitePages } from '@/lib/db'
 import { countHtmlWords, indexPublishedPage } from '@/lib/pipeline'
 import { censusHeadings } from '@/lib/pipeline/structure'
-import { submitForIndexing } from '@/lib/seo/indexing'
+import { describeIndexingResult, submitForIndexing } from '@/lib/seo/indexing'
 import { resubmitSitemaps } from '@/lib/seo/sitemap-submit'
 import { normalizeInventoryPath } from '@/src/core/domain/existing/inventory'
 import { stripHtmlToText } from '@/src/core/domain/text/text-utils'
@@ -117,7 +117,7 @@ export async function recordPublication(opts: RecordOptions): Promise<RecordRepo
     return null
   })
 
-  await submitForIndexing({ pageUrl: outcome.pageUrl, siteUrl: site.url }).catch((error) => {
+  const indexing = await submitForIndexing({ pageUrl: outcome.pageUrl, siteUrl: site.url }).catch((error) => {
     problems.push(`indexation non soumise : ${message(error)}`)
     return null
   })
@@ -134,7 +134,9 @@ export async function recordPublication(opts: RecordOptions): Promise<RecordRepo
     const note = sitemaps.submitted.length > 0
       ? `Search Console : sitemap renvoye (${sitemaps.submitted.join(', ')})`
       : `Search Console : aucun sitemap renvoye (${sitemaps.problems.join(' ; ') || 'rien a soumettre'})`
-    await updateGeneration(generationId, { publish_notes: [...outcome.notes, note] }).catch((error) => {
+    await updateGeneration(generationId, {
+      publish_notes: [...outcome.notes, note, ...describeIndexingResult(indexing)],
+    }).catch((error) => {
       problems.push(`note Search Console non enregistree : ${message(error)}`)
     })
   }

@@ -61,6 +61,31 @@ export async function submitForIndexing(opts: IndexingOptions): Promise<Indexing
 }
 
 /**
+ * What the search engines were told, as lines for the publication's notes.
+ *
+ * Before these lines the result was discarded: `submitUrlToIndexingApi` never
+ * throws, so a refused call — typically a service account that is not an owner
+ * of the Search Console property — read exactly like a success, and nobody
+ * could say whether the Indexing API worked at all. « non configuree » answers
+ * the other question: whether it is even switched on in that environment.
+ */
+export function describeIndexingResult(result: IndexingResult | null): string[] {
+  if (!result) return []
+
+  const google = result.googleIndexingApi
+    ? result.googleIndexingApi.success
+      ? 'API Indexing Google : notification acceptee'
+      : `API Indexing Google : refusee (${result.googleIndexingApi.error ?? 'erreur inconnue'})`
+    : 'API Indexing Google : non configuree (GOOGLE_INDEXING_CREDENTIALS absente)'
+
+  const indexNow = result.indexNow.success
+    ? 'IndexNow : URL transmise'
+    : `IndexNow : non transmise (${result.indexNow.error ?? 'erreur inconnue'})`
+
+  return [google, indexNow]
+}
+
+/**
  * Batch submit multiple URLs (e.g., after a cluster publish)
  */
 export async function submitBatchForIndexing(urls: string[], siteUrl: string): Promise<{
@@ -94,6 +119,40 @@ export async function submitBatchForIndexing(urls: string[], siteUrl: string): P
   ).length
 
   return { submitted: urls.length - failed, failed, results }
+}
+
+/**
+ * IndexNow alone, for pages already live that Google has not crawled yet — the
+ * daily index check (lib/indexing/check.ts). Deliberately without the Indexing
+ * API: Google reserves it to job postings and live streams.
+ *
+ * Grouped by origin: IndexNow refuses a batch whose URLs do not all belong to
+ * its `host`, and the key file is looked up on that same host.
+ */
+export async function submitIndexNowUrls(urls: readonly string[]): Promise<{ submitted: string[]; error?: string }> {
+  const key = process.env.INDEXNOW_KEY || ''
+  if (!key) return { submitted: [], error: 'INDEXNOW_KEY absente' }
+
+  const byOrigin = new Map<string, string[]>()
+  for (const url of urls) {
+    let origin: string
+    try {
+      origin = new URL(url).origin
+    } catch {
+      continue
+    }
+    byOrigin.set(origin, [...(byOrigin.get(origin) ?? []), url])
+  }
+
+  const submitted: string[] = []
+  const errors: string[] = []
+  for (const [origin, group] of byOrigin) {
+    const result = await submitIndexNowBatch({ urls: group, siteUrl: origin, key })
+    if (result.success) submitted.push(...group)
+    else errors.push(`${origin} : ${result.error ?? 'refus'}`)
+  }
+
+  return errors.length > 0 ? { submitted, error: errors.join(' ; ') } : { submitted }
 }
 
 // --- IndexNow ---
