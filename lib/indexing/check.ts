@@ -60,6 +60,13 @@ export const INSPECTIONS_PER_RUN = 300
 export const FORCED_RECHECK_MIN_HOURS = 6
 
 /**
+ * Inspections in flight at once, per site. Google allows 600 a minute per
+ * property; five calls of one to three seconds stay near 150 a minute, a
+ * quarter of it. One at a time, 300 pages kept the button spinning ten minutes.
+ */
+export const INSPECTION_CONCURRENCY = 5
+
+/**
  * The token is captured once for the whole loop, which lasts minutes: it must
  * outlive the run, not just the first call.
  */
@@ -89,6 +96,20 @@ export interface IndexCheckReport {
   problems: string[]
   error: string | null
   durationMs: number
+}
+
+/** Where a run stands, for the « Vérifier maintenant » button. */
+export interface IndexCheckProgress {
+  /** Pages already asked about in this run, answered or not. */
+  done: number
+  /** Pages due in this run. */
+  total: number
+}
+
+export interface IndexCheckOptions {
+  /** The button's run: re-inspects pages not seen for FORCED_RECHECK_MIN_HOURS, due or not. */
+  force?: boolean
+  onProgress?: (progress: IndexCheckProgress) => void
 }
 
 export interface IndexCheckDeps {
@@ -236,7 +257,7 @@ const running = new Set<string>()
 
 export async function checkSiteIndexing(
   siteId: string,
-  opts: { force?: boolean } = {},
+  opts: IndexCheckOptions = {},
   deps: IndexCheckDeps = defaultIndexCheckDeps
 ): Promise<IndexCheckReport> {
   const startedAt = Date.now()
@@ -260,7 +281,7 @@ export async function checkSiteIndexing(
   running.add(siteId)
 
   try {
-    await runCheck(siteId, opts.force === true, deps, report)
+    await runCheck(siteId, opts, deps, report)
   } catch (error) {
     report.status = 'failed'
     report.error = error instanceof Error ? error.message : String(error)
@@ -271,7 +292,7 @@ export async function checkSiteIndexing(
   return report
 }
 
-async function runCheck(siteId: string, force: boolean, deps: IndexCheckDeps, report: IndexCheckReport): Promise<void> {
+async function runCheck(siteId: string, opts: IndexCheckOptions, deps: IndexCheckDeps, report: IndexCheckReport): Promise<void> {
   let client: Awaited<ReturnType<IndexCheckDeps['connect']>>
   try {
     client = await deps.connect(siteId)
@@ -303,29 +324,46 @@ async function runCheck(siteId: string, force: boolean, deps: IndexCheckDeps, re
     report.problems.push(`pages connues non relues : ${error instanceof Error ? error.message : String(error)}`)
   }
 
-  // 2. Inspect what is due.
+  // 2. Inspect what is due, a few pages at a time. Each batch is written as soon
+  //    as Google has answered it: the screen fills while the run goes on, and a
+  //    restart midway keeps what was already learned instead of losing it all.
   const due = await deps.store.listDue(siteId, {
     now,
     limit: INSPECTIONS_PER_RUN,
-    inspectedBefore: force ? new Date(now.getTime() - FORCED_RECHECK_MIN_HOURS * HOUR_MS) : undefined,
+    inspectedBefore: opts.force ? new Date(now.getTime() - FORCED_RECHECK_MIN_HOURS * HOUR_MS) : undefined,
   })
+  opts.onProgress?.({ done: 0, total: due.length })
 
   const results: Array<{ row: PageIndexingRow; result: IndexingResult; answered: boolean }> = []
-  for (const row of due) {
-    const outcome = await deps.inspect(client.fetch, property, row.url)
-    if (!outcome.ok && stopsTheRun(outcome.failure)) {
-      report.stoppedBy = outcome.failure
-      report.error = outcome.error
-      break
+  for (let start = 0; start < due.length && !report.stoppedBy; start += INSPECTION_CONCURRENCY) {
+    const batch = due.slice(start, start + INSPECTION_CONCURRENCY)
+    const outcomes = await Promise.all(batch.map((row) => deps.inspect(client.fetch, property, row.url)))
+
+    const batchResults: IndexingResult[] = []
+    for (const [index, row] of batch.entries()) {
+      const outcome = outcomes[index]
+      // Not recorded: a refused quota or access says nothing about the page.
+      // The batch's other answers are kept — Google gave them, and counted them.
+      if (!outcome.ok && stopsTheRun(outcome.failure)) {
+        if (!report.stoppedBy) {
+          report.stoppedBy = outcome.failure
+          report.error = outcome.error
+        }
+        continue
+      }
+      const result = applyInspection(row, outcome, now)
+      results.push({ row, result, answered: outcome.ok })
+      batchResults.push(result)
+      if (outcome.ok) {
+        report.inspected += 1
+        report.states[result.state] = (report.states[result.state] ?? 0) + 1
+      } else {
+        report.problems.push(`${row.url} : ${outcome.error}`)
+      }
     }
-    const result = applyInspection(row, outcome, now)
-    results.push({ row, result, answered: outcome.ok })
-    if (outcome.ok) {
-      report.inspected += 1
-      report.states[result.state] = (report.states[result.state] ?? 0) + 1
-    } else {
-      report.problems.push(`${row.url} : ${outcome.error}`)
-    }
+
+    if (batchResults.length > 0) await deps.store.saveResults(batchResults)
+    opts.onProgress?.({ done: start + batch.length, total: due.length })
   }
 
   // 3. Resend what Google has not crawled yet — one sitemap submission for the
@@ -344,16 +382,17 @@ async function runCheck(siteId: string, force: boolean, deps: IndexCheckDeps, re
 
     // A sitemap lists the whole site: once one is accepted, every eligible page was resent.
     const resent = new Set(sitemaps.submitted.length > 0 ? urls : indexNow.submitted)
+    const stamped: IndexingResult[] = []
     for (const { row, result } of eligible) {
       if (!resent.has(row.url)) continue
       result.last_resubmitted_at = now.toISOString()
       result.resubmit_count = row.resubmit_count + 1
+      stamped.push(result)
     }
     report.resubmitted = resent.size
+    // One write for all the resent rows, never one per page.
+    if (stamped.length > 0) await deps.store.saveResults(stamped)
   }
-
-  // 4. Write everything in one batch: no query per page.
-  if (results.length > 0) await deps.store.saveResults(results.map(({ result }) => result))
 
   if (report.stoppedBy) report.status = report.inspected > 0 ? 'partial' : 'failed'
 }
@@ -383,6 +422,8 @@ export interface IndexCheckJob {
   state: 'running' | 'done'
   startedAt: string
   finishedAt?: string
+  /** Absent while the known pages are still being listed. */
+  progress?: IndexCheckProgress
   report?: IndexCheckReport
 }
 
@@ -407,7 +448,10 @@ async function trackRun(siteId: string, force: boolean): Promise<IndexCheckRepor
   const job: IndexCheckJob = { state: 'running', startedAt: new Date().toISOString() }
   jobs.set(siteId, job)
   // checkSiteIndexing never throws: every failure is a described report.
-  const report = await checkSiteIndexing(siteId, { force })
+  const report = await checkSiteIndexing(siteId, {
+    force,
+    onProgress: (progress) => jobs.set(siteId, { ...job, progress }),
+  })
   jobs.set(siteId, { ...job, state: 'done', finishedAt: new Date().toISOString(), report })
   return report
 }

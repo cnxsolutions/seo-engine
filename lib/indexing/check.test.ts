@@ -159,6 +159,14 @@ const UNKNOWN = row({ id: 'a', url: 'https://www.example.fr/a/', url_key: 'examp
 const NOINDEX = row({ id: 'b', url: 'https://www.example.fr/b/', url_key: 'example.fr/b' })
 const INDEXED = row({ id: 'c', url: 'https://www.example.fr/c/', url_key: 'example.fr/c' })
 
+/** Seven pages: one full batch of five, then two. */
+const SEVEN = Array.from({ length: 7 }, (_, i) => row({ id: `p${i}`, url: `https://www.example.fr/p${i}/`, url_key: `example.fr/p${i}` }))
+
+/** The last write of a row wins, as the upsert does. */
+function lastSaved(saved: IndexingResult[], url: string): IndexingResult | undefined {
+  return [...saved].reverse().find((result) => result.url === url)
+}
+
 describe('checkSiteIndexing', () => {
   it('resends only the page Google has not crawled — never the one in noindex', async () => {
     const { store, saved } = fakeStore([UNKNOWN, NOINDEX, INDEXED])
@@ -172,8 +180,8 @@ describe('checkSiteIndexing', () => {
     expect(report).toMatchObject({ status: 'success', inspected: 3, resubmitted: 1, states: { not_discovered: 1, blocked: 1, indexed: 1 } })
     expect(resubmitSitemaps).toHaveBeenCalledTimes(1)
     expect(submitIndexNow).toHaveBeenCalledWith([UNKNOWN.url])
-    expect(saved.find((result) => result.url === UNKNOWN.url)).toMatchObject({ resubmit_count: 1, last_resubmitted_at: NOW.toISOString() })
-    expect(saved.find((result) => result.url === NOINDEX.url)?.last_resubmitted_at).toBeNull()
+    expect(lastSaved(saved, UNKNOWN.url)).toMatchObject({ resubmit_count: 1, last_resubmitted_at: NOW.toISOString() })
+    expect(lastSaved(saved, NOINDEX.url)?.last_resubmitted_at).toBeNull()
   })
 
   it('writes every column on every row, so a failed call beside a success cannot null a state in the batch', async () => {
@@ -204,16 +212,53 @@ describe('checkSiteIndexing', () => {
   })
 
   it('stops at the first quota refusal instead of spending it on every remaining page', async () => {
-    const { store, saved } = fakeStore([UNKNOWN, NOINDEX, INDEXED])
+    const { store, saved } = fakeStore(SEVEN)
     const { value, inspect } = deps(store, {
-      [NOINDEX.url]: { ok: false, failure: 'quota', error: 'URL Inspection 429 : Quota exceeded' },
+      [SEVEN[1].url]: { ok: false, failure: 'quota', error: 'URL Inspection 429 : Quota exceeded' },
     })
 
     const report = await checkSiteIndexing(SITE, {}, value)
 
-    expect(inspect).toHaveBeenCalledTimes(2)
-    expect(report).toMatchObject({ status: 'partial', inspected: 1, stoppedBy: 'quota' })
-    expect(saved.map((result) => result.url)).toEqual([UNKNOWN.url])
+    // The batch already in flight finishes; the next one is never sent.
+    expect(inspect).toHaveBeenCalledTimes(5)
+    expect(report).toMatchObject({ status: 'partial', inspected: 4, stoppedBy: 'quota' })
+    expect(new Set(saved.map((result) => result.url))).toEqual(new Set([SEVEN[0], SEVEN[2], SEVEN[3], SEVEN[4]].map((page) => page.url)))
+  })
+
+  it('inspects five pages at a time and says how far it has gone', async () => {
+    const { store } = fakeStore(SEVEN)
+    let inFlight = 0
+    let peak = 0
+    const { value } = deps(store, {}, {
+      inspect: async () => {
+        inFlight += 1
+        peak = Math.max(peak, inFlight)
+        await new Promise((resolve) => setTimeout(resolve, 1))
+        inFlight -= 1
+        return inspection()
+      },
+    })
+    const progress: Array<{ done: number; total: number }> = []
+
+    await checkSiteIndexing(SITE, { onProgress: (step) => progress.push(step) }, value)
+
+    expect(peak).toBe(5)
+    expect(progress).toEqual([{ done: 0, total: 7 }, { done: 5, total: 7 }, { done: 7, total: 7 }])
+  })
+
+  it('keeps the answers already written when the run breaks midway', async () => {
+    const { store, saved } = fakeStore(SEVEN)
+    const { value } = deps(store, {}, {
+      inspect: async (_fetch, _property, url) => {
+        if (url === SEVEN[6].url) throw new Error('process interrompu')
+        return inspection()
+      },
+    })
+
+    const report = await checkSiteIndexing(SITE, {}, value)
+
+    expect(report).toMatchObject({ status: 'failed', error: 'process interrompu' })
+    expect(saved.map((result) => result.url)).toEqual(SEVEN.slice(0, 5).map((page) => page.url))
   })
 
   it('skips a site without a Search Console property, and says why', async () => {

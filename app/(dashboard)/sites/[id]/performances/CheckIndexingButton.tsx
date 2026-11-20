@@ -72,7 +72,7 @@ export function CheckIndexingButton({ siteId }: { siteId: string }) {
   return (
     <span style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'flex-start', gap: 'var(--space-1)' }}>
       <Button variant="secondary" size="sm" icon={ScanSearch} loading={running} onClick={start} disabled={running}>
-        {running ? 'Vérification en cours…' : 'Vérifier maintenant'}
+        {running ? runningLabel(job) : 'Vérifier maintenant'}
       </Button>
       {message && (
         <span
@@ -88,4 +88,11 @@ export function CheckIndexingButton({ siteId }: { siteId: string }) {
       )}
     </span>
   )
+}
+
+/** A count that moves, so a run of a few minutes does not read as a frozen screen. */
+function runningLabel(job: IndexCheckJob): string {
+  if (!job.progress) return 'Préparation de la liste des pages…'
+  const { done, total } = job.progress
+  return `Vérification… ${done} / ${total} page${total > 1 ? 's' : ''}`
 }

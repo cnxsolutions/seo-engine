@@ -14,6 +14,13 @@ import type { IndexStatusFacts } from '@/src/core/domain/indexing/status'
 
 const URL_INSPECTION_API = 'https://searchconsole.googleapis.com/v1/urlInspection/index:inspect'
 
+/**
+ * An inspection answers in one to three seconds. Without a bound, a request
+ * Google never answers holds the run for Node's own five-minute limit, and the
+ * « Vérifier maintenant » button spins for as long.
+ */
+export const INSPECTION_TIMEOUT_MS = 30_000
+
 export interface UrlInspection extends IndexStatusFacts {
   /** Google's own sentence (« Explorée, actuellement non indexée »), in French. Displayed, never parsed. */
   coverageState: string | null
@@ -43,9 +50,12 @@ export async function inspectUrl(googleFetch: GoogleFetch, property: string, url
     res = await googleFetch(URL_INSPECTION_API, {
       method: 'POST',
       body: JSON.stringify({ inspectionUrl: url, siteUrl: property, languageCode: 'fr-FR' }),
+      signal: AbortSignal.timeout(INSPECTION_TIMEOUT_MS),
     })
   } catch (error) {
-    return { ok: false, failure: 'error', error: error instanceof Error ? error.message : String(error) }
+    const timedOut = error instanceof Error && error.name === 'TimeoutError'
+    const detail = timedOut ? `pas de reponse en ${INSPECTION_TIMEOUT_MS / 1000} s` : error instanceof Error ? error.message : String(error)
+    return { ok: false, failure: 'error', error: `URL Inspection : ${detail}` }
   }
 
   const body: unknown = await res.json().catch(() => null)

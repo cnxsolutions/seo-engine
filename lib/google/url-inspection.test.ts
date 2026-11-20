@@ -49,7 +49,19 @@ describe('inspectUrl', () => {
 
   it('turns a network failure into a result rather than a throw', async () => {
     const fetch: GoogleFetch = async () => { throw new Error('ECONNRESET') }
-    expect(await inspectUrl(fetch, 'sc-domain:example.fr', 'https://example.fr/a')).toEqual({ ok: false, failure: 'error', error: 'ECONNRESET' })
+    expect(await inspectUrl(fetch, 'sc-domain:example.fr', 'https://example.fr/a')).toEqual({ ok: false, failure: 'error', error: 'URL Inspection : ECONNRESET' })
+  })
+
+  it('gives up on a request Google never answers instead of holding the run', async () => {
+    let signal: AbortSignal | null | undefined
+    const fetch: GoogleFetch = async (_url, options) => {
+      signal = options?.signal
+      throw new DOMException('The operation was aborted due to timeout', 'TimeoutError')
+    }
+    const outcome = await inspectUrl(fetch, 'sc-domain:example.fr', 'https://example.fr/a')
+
+    expect(signal).toBeInstanceOf(AbortSignal)
+    expect(outcome).toEqual({ ok: false, failure: 'error', error: 'URL Inspection : pas de reponse en 30 s' })
   })
 
   it('stops the run only on failures that would repeat for every URL', () => {
