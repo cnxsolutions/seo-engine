@@ -437,6 +437,12 @@ sont exposes par aucune route HTTP : ils disparaissent a chaque redemarrage.
       │  Next.js   → commit via l'API GitHub Contents
       ▼
   Notification aux moteurs    IndexNow · ping sitemap · API Indexing Google
+      ▼
+  Verification d'indexation   table `page_indexing` · cron quotidien 5h00
+      │  API URL Inspection de Search Console sur chaque page connue
+      │  (moteur + crawl), J+2, J+4, J+7 puis chaque semaine, chaque mois
+      │  une fois indexee ; sitemap + IndexNow renvoyes pour une page que
+      │  Google n'a pas encore exploree (lib/indexing/check.ts)
 ```
 
 Le cycle est renouvelable : `cycle-manager.ts` detecte la fin d'un cycle,

@@ -24,6 +24,7 @@ import { reserveSlug } from '@/lib/existing/reservation'
 import { blindInventory, type SiteInventory } from '@/src/core/domain/existing/inventory'
 import { getGoogleContext } from '@/lib/google/context'
 import { syncAllGbp, syncAllGsc } from '@/lib/google/sync'
+import { checkAllSitesIndexing } from '@/lib/indexing/check'
 import {
   countHtmlWords,
   markGenerationRejected,
@@ -227,6 +228,18 @@ export function initScheduler(): void {
   cron.schedule('0 4 * * *', async () => {
     await runWithConcurrencyControl('gsc', async () => {
       await syncAllGsc()
+    })
+  })
+
+  // Google index check - daily at 5:00 AM
+  //
+  // After the Search Console sync (4:00), not beside it: both draw on the same
+  // connections and token refreshes. Daily because every page carries its own
+  // next date (J+2, J+4, J+7, weekly, monthly once indexed): a run only
+  // inspects what is due (lib/indexing/check.ts).
+  cron.schedule('0 5 * * *', async () => {
+    await runWithConcurrencyControl('indexCheck', async () => {
+      await checkAllSitesIndexing()
     })
   })
 
@@ -2091,6 +2104,9 @@ export async function triggerJob(jobName: string, options?: Record<string, unkno
       break
     case 'gbpPlan':
       await planGbpPostSlotsForAll()
+      break
+    case 'indexCheck':
+      await checkAllSitesIndexing()
       break
     case 'cycle':
       await checkCycleCompletion()

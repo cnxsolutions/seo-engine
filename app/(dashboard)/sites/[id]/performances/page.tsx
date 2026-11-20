@@ -9,6 +9,7 @@
 //
 //   Search Console   la table gsc_performance (positions, impressions, clics)
 //   Pages publiées   chaque page du moteur depuis sa publication, interprétée
+//   Indexation       chaque page connue du site : indexée par Google ou non, et pourquoi
 //   Fiche Google     les avis lus et les posts publiés par le moteur
 //   Production       generations, editorial_calendar, job_executions
 //
@@ -33,6 +34,7 @@ import { ProductionTab } from '@/app/(dashboard)/dashboard/ProductionTab'
 import { loadSite } from '../site-data'
 import { TabIntro } from '../TabIntro'
 import { GbpSummary } from './GbpSummary'
+import { IndexingStatus } from './IndexingStatus'
 import { PublishedTracking } from './PublishedTracking'
 
 export const dynamic = 'force-dynamic'
@@ -40,6 +42,7 @@ export const dynamic = 'force-dynamic'
 const VIEWS = [
   { id: 'search', label: 'Search Console', caption: 'Ce que Google fait des pages du site' },
   { id: 'suivi', label: 'Pages publiées', caption: 'Chaque page du moteur depuis sa mise en ligne : ce que Google en fait, ce que ça veut dire, quoi faire' },
+  { id: 'indexation', label: 'Indexation', caption: 'Chaque page connue du site : Google l’a-t-il indexée, et sinon, qui doit agir' },
   { id: 'fiche', label: 'Fiche Google', caption: 'Les avis de la fiche et les posts que le moteur y publie' },
   { id: 'production', label: 'Production', caption: 'Ce que le moteur a fabriqué pour ce site' },
 ] as const
@@ -88,7 +91,7 @@ export default async function SitePerformancePage({
       {/* La période ne s'applique ni à la fiche — avis et posts sont des
           totaux, pas des séries — ni au suivi, qui part de la publication de
           chaque page. Le filtre n'y apparaît donc pas. */}
-      {view !== 'fiche' && view !== 'suivi' && (
+      {view !== 'fiche' && view !== 'suivi' && view !== 'indexation' && (
         <Suspense fallback={<div style={{ height: 44, marginBottom: 'var(--space-5)' }} />}>
           <DashboardFilters days={days} />
         </Suspense>
@@ -103,6 +106,10 @@ export default async function SitePerformancePage({
       )}
 
       {view === 'suivi' && <PublishedTracking site={{ id, name: site.name, url: site.url }} />}
+
+      {view === 'indexation' && (
+        <IndexingStatus siteId={id} group={single(query.etat)} page={Number(single(query.p)) || 1} />
+      )}
 
       {view === 'fiche' && <GbpSummary siteId={id} />}
 

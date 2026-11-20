@@ -476,7 +476,7 @@ export function interpret(
         tone: 'warning',
         explanation: `${capitalize(days)} de données, aucune impression : Google ne l’a montrée sur aucune recherche.`,
         action:
-          'Vérifier qu’elle est indexée : Search Console → Inspection de l’URL, puis « Demander l’indexation » si elle ne l’est pas. ' +
+          'L’onglet Indexation dit si Google l’a indexée : le moteur la vérifie chaque nuit et renvoie le sitemap tant qu’elle n’a pas été explorée. ' +
           'Un lien depuis une page du site déjà visitée accélère sa découverte.',
       }
     case 'no_demand':
@@ -486,7 +486,7 @@ export function interpret(
         tone: 'critical',
         explanation: `Aucune impression en ${days}.`,
         action:
-          'Si l’Inspection de l’URL la dit indexée, personne ne cherche ce sujet sous cette forme : les prochains plans évitent ce sujet et ses variantes.',
+          'Si l’onglet Indexation la dit indexée, personne ne cherche ce sujet sous cette forme : les prochains plans évitent ce sujet et ses variantes.',
       }
     case 'brand_only':
       return {
