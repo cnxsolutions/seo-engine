@@ -1,4 +1,4 @@
-# SEO Engine — cadrage : espace client, demandes de mots-clés, refonte UI/UX
+🟡 + cartes de `/sites` : bloc « À faire » comprimé, valeurs qui débordent (constaté au L0b, déjà sur `main`)
 
 Chantier demandé par CNX Solutions le 25/11/2026. Ce document est à valider avant la première ligne de code.
 
@@ -420,7 +420,7 @@ Ordonnés par **risque** (sécurité d'abord, planificateur ensuite), puis par *
 
 | Lot | Contenu | Couvre | Dépend de | Taille |
 |---|---|---|---|---|
-| **L0** | **L0a ✅ #30** (local, tests, RLS) · **L0b** (peau CNX) en cours. Socle : **Supabase local** (CLI épinglée, `config.toml`, remise à zéro, démo, `test:db`, job CI) ; scripts de migration ciblant le local par défaut ; jetons CNX, polices, marque, composants de base rhabillés, modale de confirmation ; vérification RLS (+ activation si besoin) ; CLAUDE.md à jour. Peut se scinder en L0a (local et tests) / L0b (peau CNX) | UX-1 à UX-4, UX-9, UX-10 (bases), QA-1, QA-4, QA-6, QA-7 | — | L · 4 j |
+| **L0** | **L0a ✅ #30** (local, tests, RLS) · **L0b ✅ #31** (peau CNX). Socle : **Supabase local** (CLI épinglée, `config.toml`, remise à zéro, démo, `test:db`, job CI) ; scripts de migration ciblant le local par défaut ; jetons CNX, polices, marque, composants de base rhabillés, modale de confirmation ; vérification RLS (+ activation si besoin) ; CLAUDE.md à jour. Peut se scinder en L0a (local et tests) / L0b (peau CNX) | UX-1 à UX-4, UX-9, UX-10 (bases), QA-1, QA-4, QA-6, QA-7 | — | L · 4 j |
 | **L1** | Identité client : tables `clients`/`client_members`, `@supabase/ssr`, branche de `proxy.ts`, connexion par code, invitation et révocation depuis les Réglages d'un site, pages d'erreur ; tests d'isolation, limites de débit | ACC-1 à ACC-7, QA-2, QA-3 | L0 | L · 4 j |
 | **L2** | Espace client en lecture : coquille mobile, accueil, pages en ligne, prochaines pages, sélecteur de site, **résultats Google**. Se scinde en L2a (lecture) / L2b (résultats) si la PR grossit | ESP-1 à ESP-6 | L1 | L · 5 j |
 | **L3** | Demandes, saisie et verdict : table, domaine (verdict, cycle de vie), tâche d'analyse, formulaire, liste et chronologie, retrait. Les demandes recevables sont **toutes** gardées pour la période suivante (pas encore d'insertion dans le cycle en cours) | KW-1 à KW-3, KW-5 (verdict), KW-6 à KW-9 | L2 | L · 4 j |
