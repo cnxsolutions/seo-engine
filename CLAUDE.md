@@ -44,6 +44,17 @@ avant de pousser coute quinze secondes et evite un aller-retour de trois minutes
 
 Node 22 (`.nvmrc`), source unique pour la CI, Docker et le poste local.
 
+La base de developpement est un **Supabase local** (Docker Desktop doit tourner) :
+
+```bash
+npm run db:local:start   # API :54321 · Postgres :54322 · Studio :54323 · Mailpit :54324
+npm run db:local:reset   # baseline + migrations + demonstration (sites fictifs, campagnes inactives)
+npm run test:db          # tests d'integration *.db.test.ts — rejoues en CI dans le job « base »
+```
+
+`.env.local` pointe sur cette base ; il ne contient **aucun** acces a la
+production. Details : [`db/README.md`](db/README.md) § 0.
+
 ---
 
 ## Le flux de developpement
@@ -66,7 +77,7 @@ Ce que fait la chaine :
 
 | Declencheur | Workflow | Effet |
 |---|---|---|
-| Pull request | `ci.yml` | lint + types + tests, et build Docker **sans** publication |
+| Pull request | `ci.yml` | lint + types + tests, build Docker **sans** publication, et tests d'integration contre un Supabase local |
 | Push sur `main` | `deploy.yml` | memes controles, image `ghcr.io/cnxsolutions/seo-engine:sha-<court>`, puis SSH vers le VPS : `pull`, bascule, attente du healthcheck, **retour arriere automatique** si le conteneur ne repond jamais |
 
 Le VPS ne construit rien : il tire une image deja verifiee.
@@ -79,24 +90,33 @@ Elles ne sont **pas** automatisees, deliberement. Elles s'appliquent a la main,
 depuis le poste, **avant** de merger la PR qui en depend — le conteneur redemarre
 trente secondes apres le merge, et echouerait sur une colonne absente.
 
+Une migration s'ecrit et se prouve **en local d'abord**, puis part en
+production par un geste explicite :
+
 ```bash
-node scripts/db-migrate.mjs --list
-node scripts/db-migrate.mjs 020 --dry     # lire avant d'appliquer
-node scripts/db-migrate.mjs 020
+npm run db:local:reset -- --keep               # rejouee sur la base locale
+npm run test:db                                # idempotence, RLS, demonstration
+node scripts/db-migrate.mjs 021 --dry          # lire avant d'appliquer
+node scripts/db-migrate.mjs 021 --prod=<ref>   # PRODUCTION : lit .env.prod-db, exige la ref du projet
 ```
 
-Les fichiers vivent dans `src/adapters/infrastructure/database/migrations/`
-(`001` a `020`), **jamais** dans `db/`. Ils doivent etre idempotents
-(`IF NOT EXISTS`, `CREATE OR REPLACE`) : la base elle-meme fait office de
-journal, il n'y a pas de table de suivi.
+Sans `--prod`, les scripts ne touchent **que** la base locale. `.env.prod-db`
+(ignore par git, jamais lu par Next.js) est le seul fichier qui contient la
+chaine de connexion de production.
 
-`db/000_baseline.sql` est la **definition de reference du schema** (28 tables) :
-beaucoup ont ete creees a la main dans Supabase et n'apparaissent dans aucune
+Les fichiers vivent dans `src/adapters/infrastructure/database/migrations/`
+(`001` a `021`), **jamais** dans `db/` ni dans `supabase/migrations/`. Ils
+doivent etre idempotents (`IF NOT EXISTS`, `CREATE OR REPLACE`) : la base
+elle-meme fait office de journal, il n'y a pas de table de suivi. Toute nouvelle
+table active son RLS dans sa propre migration (`db/rls.db.test.ts`).
+
+`db/000_baseline.sql` est la **definition de reference du schema** : beaucoup de
+tables ont ete creees a la main dans Supabase et n'apparaissent dans aucune
 migration. **Regenerer apres toute modification faite dans le tableau de bord**,
-sinon la baseline derive en silence :
+sinon la baseline derive en silence — elle enregistre aussi l'etat RLS :
 
 ```bash
-node scripts/db-baseline.mjs
+node scripts/db-baseline.mjs --prod=<ref>
 ```
 
 ---

@@ -29,7 +29,9 @@ const keepGoogle = args.has('--keep-google')
  */
 const PROTECTED = new Set(['schema_migrations', 'supabase_migrations'])
 
-const client = await connect()
+// LOCAL ONLY. Emptying every table is what a test run wants and what production
+// must never get: --prod is refused before any connection exists.
+const client = await connect({ allow: ['local'] })
 
 const { rows: tables } = await client.query(`
   select c.relname as name

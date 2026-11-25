@@ -129,10 +129,14 @@ maniere de sauvegarder le schema sont dans **[`db/README.md`](db/README.md)**.
 En resume, sur une base **existante**, une migration a la fois :
 
 ```bash
-node scripts/db-migrate.mjs --list      # ce qui existe
-node scripts/db-migrate.mjs 019 --dry   # lire avant d appliquer
-node scripts/db-migrate.mjs 019
+node scripts/db-migrate.mjs --list              # ce qui existe
+node scripts/db-migrate.mjs 019 --dry           # lire avant d appliquer
+node scripts/db-migrate.mjs 019                 # base LOCALE (par defaut)
+node scripts/db-migrate.mjs 019 --prod=<ref>    # PRODUCTION, via .env.prod-db
 ```
+
+La base de developpement est un Supabase local : `npm run db:local:start` puis
+`npm run db:local:reset` (voir [`db/README.md`](db/README.md) § 0).
 
 Les migrations sont ecrites idempotentes (`IF NOT EXISTS`, `CREATE OR REPLACE`) :
 les rejouer ne coute rien, et la base elle-meme fait office de journal de ce qui
@@ -159,7 +163,7 @@ psql "<CONNECTION_STRING>" -f db/000_baseline.sql
 > bord**, sans quoi il derive en silence :
 >
 > ```bash
-> node scripts/db-baseline.mjs
+> node scripts/db-baseline.mjs --prod=<ref>
 > ```
 >
 > Elle ne contient que la structure, jamais les donnees. Les sauvegardes de

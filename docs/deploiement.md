@@ -151,8 +151,8 @@ un aller-retour de trois minutes.
 La sequence correcte, quand une fonctionnalite a besoin d'une colonne :
 
 ```bash
-node scripts/db-migrate.mjs 014 --dry     # lire ce qui va partir
-node scripts/db-migrate.mjs 014           # appliquer sur Supabase
+node scripts/db-migrate.mjs 014 --dry           # lire ce qui va partir
+node scripts/db-migrate.mjs 014 --prod=<ref>    # appliquer sur Supabase (production)
 # ... puis seulement maintenant : merger la PR qui utilise la colonne
 ```
 

@@ -14,14 +14,18 @@
 // committed, losing the Supabase project means losing the product — the
 // migrations only ALTER those tables, they never create them.
 //
-//   node scripts/db-baseline.mjs
+//   node scripts/db-baseline.mjs --prod=<ref>
+//
+// PRODUCTION ONLY: the baseline is the definition of record of the live schema.
+// The local database is rebuilt FROM this file, so dumping the local one back
+// into it would only prove the file agrees with itself.
 
 import { writeFileSync, mkdirSync } from 'node:fs'
 import { connect } from './db-connect.mjs'
 
 const OUT = 'db/000_baseline.sql'
 
-const client = await connect()
+const client = await connect({ allow: ['prod'] })
 
 // ─── Extensions ─────────────────────────────────────────────────────────────
 
@@ -110,6 +114,25 @@ const triggers = await client.query(`
   order by c.relname, t.tgname
 `)
 
+// Row-level security, and the policies that open it. Until 2026-11-25 the
+// baseline carried neither, so a schema rebuilt from it had every table open to
+// the public key, whatever production actually had. A table whose RLS is OFF in
+// production now shows up as such — db/rls.db.test.ts then fails on it locally.
+const rls = await client.query(`
+  select c.relname as table_name
+  from pg_class c
+  join pg_namespace n on n.oid = c.relnamespace
+  where n.nspname = 'public' and c.relkind in ('r', 'p') and c.relrowsecurity
+  order by c.relname
+`)
+
+const policies = await client.query(`
+  select tablename as table_name, policyname, permissive, roles, cmd, qual, with_check
+  from pg_policies
+  where schemaname = 'public'
+  order by tablename, policyname
+`)
+
 const comments = await client.query(`
   select c.relname as table_name, a.attname as column_name,
          col_description(c.oid, a.attnum) as comment
@@ -154,7 +177,7 @@ out.push(`-- ──────────────────────�
 -- Data is not included — this is structure only.
 --
 -- Regenerate after any hand-made change in the dashboard:
---     node scripts/db-baseline.mjs
+--     node scripts/db-baseline.mjs --prod=<project-ref>
 `)
 
 out.push('\n-- ─── Extensions ─────────────────────────────────────────────────────────────\n')
@@ -194,6 +217,22 @@ for (const t of triggers.rows) {
   out.push(`${t.definition};\n`)
 }
 
+out.push('\n-- ─── Row-level security ─────────────────────────────────────────────────────')
+out.push('--\n-- RLS with no policy: nothing is readable but through the service key.\n')
+for (const r of rls.rows) {
+  out.push(`ALTER TABLE public.${quote(r.table_name)} ENABLE ROW LEVEL SECURITY;`)
+}
+for (const p of policies.rows) {
+  out.push(`DROP POLICY IF EXISTS ${quote(p.policyname)} ON public.${quote(p.table_name)};`)
+  out.push(
+    `CREATE POLICY ${quote(p.policyname)} ON public.${quote(p.table_name)}` +
+      ` AS ${p.permissive} FOR ${p.cmd} TO ${p.roles.join(', ')}` +
+      (p.qual ? ` USING (${p.qual})` : '') +
+      (p.with_check ? ` WITH CHECK (${p.with_check})` : '') +
+      ';'
+  )
+}
+
 out.push('\n-- ─── Column comments ────────────────────────────────────────────────────────\n')
 for (const c of comments.rows) {
   out.push(
@@ -206,6 +245,7 @@ writeFileSync(OUT, out.join('\n') + '\n', 'utf8')
 
 console.log(`[baseline] ${OUT}`)
 console.log(`[baseline] ${byTable.size} tables, ${constraints.rowCount} constraints, ` +
-  `${indexes.rowCount} indexes, ${functions.rowCount} functions, ${triggers.rowCount} triggers`)
+  `${indexes.rowCount} indexes, ${functions.rowCount} functions, ${triggers.rowCount} triggers, ` +
+  `RLS on ${rls.rowCount}/${byTable.size} tables, ${policies.rowCount} policies`)
 
 await client.end()
