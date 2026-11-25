@@ -1,4 +1,4 @@
-🟡 + cartes de `/sites` : bloc « À faire » comprimé, valeurs qui débordent (constaté au L0b, déjà sur `main`)
+# SEO Engine — cadrage : espace client, demandes de mots-clés, refonte UI/UX
 
 Chantier demandé par CNX Solutions le 25/11/2026. Ce document est à valider avant la première ligne de code.
 
@@ -114,18 +114,18 @@ reprendre · ❌ absent · ❓ à vérifier.
 
 | ID | Fonctionnalité | Source | État | Lot |
 |---|---|---|---|---|
-| UX-1 | Jetons CNX dans `components/tokens.css` : surfaces froides, encre `#08090d`, accent `#0b6cf9`, dégradé de marque, rayons, ombres, mouvement — **noms de jetons et alias conservés** | DA | 🟡 jetons en place, valeurs à remplacer | L0 |
-| UX-2 | Typographie : Plus Jakarta Sans (titres, chiffres, boutons) + Inter (texte), par `next/font` | DA | 🟡 Inter seule | L0 |
-| UX-3 | Marque : symbole CNX, nom « CNX SEO Engine », favicon, titres de page ; fin de « AI Content Platform » et de l'éclair générique | DA, captures du site | 🟡 | L0 |
-| UX-4 | Composants de base rhabillés : bouton pilule qui s'allonge, badge, carte, en-tête de page avec surtitre, champ, notice, état vide, onglets ; nouvelle **modale de confirmation** (remplace `confirm()`), squelette de chargement, toast | DA, règles dev | 🟡 `components/ui.tsx` | L0 |
-| UX-5 | Coquille opérateur repensée : rail (marque, sites, demandes), en-tête de site, navigation mobile | DA | 🟡 | L5 |
+| UX-1 | Jetons CNX dans `components/tokens.css` : surfaces froides, encre `#08090d`, accent `#0b6cf9`, dégradé de marque, rayons, ombres, mouvement — **noms de jetons et alias conservés** | DA | ✅ L0b (#31) : valeurs du thème CNX, noms et alias conservés, bloc sombre retiré | L0 |
+| UX-2 | Typographie : Plus Jakarta Sans (titres, chiffres, boutons) + Inter (texte), par `next/font` | DA | ✅ L0b (#31) | L0 |
+| UX-3 | Marque : symbole CNX, nom « CNX SEO Engine », favicon, titres de page ; fin de « AI Content Platform » et de l'éclair générique | DA, captures du site | ✅ L0b (#31) | L0 |
+| UX-4 | Composants de base rhabillés : bouton pilule qui s'allonge, badge, carte, en-tête de page avec surtitre, champ, notice, état vide, onglets ; nouvelle **modale de confirmation** (remplace `confirm()`), squelette de chargement, toast | DA, règles dev | 🟡 L0b (#31) : bouton, badge, carte, surtitre, focus, `ConfirmDialog` (remplace les 2 `confirm()`) ; squelette et toast créés quand un écran en aura besoin (L2, L3) | L0 |
+| UX-5 | Coquille opérateur repensée : rail (marque, sites, demandes), en-tête de site, navigation mobile | DA | 🟡 sous 1 024 px, le rail garde 248 px et écrase le contenu (constaté au L0b) | L5 |
 | UX-6 | Langage : plus de jargon interne visible (« gate », noms de tables, « slots ») ; un glossaire unique opérateur / client | DA (ton) | 🟡 | L5 · L6 |
 | UX-7 | Styles en ligne : **675** `style={{…}}` dans `app/` et `components/` → classes de composants ; aucun nouveau style en ligne | règles dev | 🟡 | L6 |
 | UX-8 | États : chargement, succès, erreurs en ligne, états vides utiles, pages 403/404/500 en français | règles dev | 🟡 | L6 |
 | UX-9 | Accessibilité : contraste AA (valeurs CNX déjà mesurées), focus visible, clavier, `prefers-reduced-motion` | règles dev | 🟡 | L0 · L6 |
 | UX-10 | Mouvement CNX : courbe `cubic-bezier(.165,.84,.44,1)`, survols qui glissent, listes échelonnées, aucun rebond | DA | ❌ | L0 · L6 |
 | UX-11 | Graphiques : série 1 = accent CNX, palette revalidée (contraste, daltonisme) contre les nouvelles surfaces | `components/charts.tsx` | 🟡 | L6 |
-| UX-12 | Écrans hérités : les redirections (`analyze`, `campaigns`, `calendar`…) inventoriées, les écrans morts retirés | — | 🟡 | L6 |
+| UX-12 | Écrans hérités : les redirections (`analyze`, `campaigns`, `calendar`…) inventoriées, les écrans morts retirés | — | 🟡 + cartes de `/sites` : bloc « À faire » comprimé, valeurs qui débordent (constaté au L0b, déjà sur `main`) | L6 |
 
 ### QA — Qualité, sécurité, exploitation
 
