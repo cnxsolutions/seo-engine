@@ -47,10 +47,13 @@ h1, h2, h3, h4, h5, h6, p, figure, blockquote, dl, dd, pre {
   margin: 0;
 }
 
+/* Titles, figures, buttons and tabs speak Plus Jakarta Sans, as on the CNX
+   site; running text stays in Inter (body). */
 h1, h2, h3, h4, h5, h6 {
+  font-family: var(--font-display);
   line-height: var(--lh-tight);
   letter-spacing: var(--ls-title);
-  font-weight: 600;
+  font-weight: 700;
 }
 
 a {
@@ -149,6 +152,13 @@ code, pre, kbd, samp, .mono {
   outline: none;
 }
 
+/* One focus ring for every control, never removed. `:where` keeps it at zero
+   specificity: a component that draws its own ring (.input) still wins. */
+:where(a, button, [role='button'], [role='tab'], summary, input, select, textarea):focus-visible {
+  outline: 3px solid var(--accent-ring);
+  outline-offset: 2px;
+}
+
 /* ═══ Frame ══════════════════════════════════════════════════════════════ */
 
 .sidebar {
@@ -171,6 +181,90 @@ code, pre, kbd, samp, .mono {
   align-items: center;
   gap: var(--space-3);
   border-bottom: 1px solid var(--line);
+  color: inherit;
+}
+
+/* ═══ Confirmation dialog (components/ConfirmDialog.tsx) ═════════════════ */
+
+.confirm-dialog__body {
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-5);
+  font-size: var(--fs-sm);
+  line-height: var(--lh-normal);
+  color: var(--ink-secondary);
+}
+
+.confirm-dialog__body p {
+  margin: 0;
+}
+
+.confirm-dialog__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  width: 100%;
+}
+
+/* ═══ Brand ══════════════════════════════════════════════════════════════
+   components/BrandMark.tsx. The tile and its satin sheen are the logo's own
+   (cnx-solutions/brand/logo/cnx-mark.svg: radius 138/512 = 27 %). */
+
+.brand-mark {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  border-radius: 27%;
+  background: var(--logo-grad);
+  overflow: hidden;
+}
+
+.brand-mark::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(160deg, rgb(255 255 255 / 0.22) 0%, rgb(255 255 255 / 0) 55%);
+}
+
+.brand-mark svg {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  height: 100%;
+}
+
+.brand-mark--sm { width: 28px; height: 28px; }
+.brand-mark--md { width: 36px; height: 36px; }
+.brand-mark--lg { width: 56px; height: 56px; }
+
+.brand-lockup {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.brand-lockup__text {
+  display: flex;
+  flex-direction: column;
+}
+
+.brand-lockup__name {
+  font-family: var(--font-display);
+  font-size: var(--fs-lg);
+  font-weight: 800;
+  letter-spacing: -0.035em;
+  line-height: 1.1;
+  color: var(--ink-primary);
+}
+
+.brand-lockup__by {
+  font-size: var(--fs-2xs);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-muted);
 }
 
 .nav-section-label {
@@ -295,13 +389,14 @@ code, pre, kbd, samp, .mono {
   align-items: center;
   gap: var(--space-2);
   font-size: var(--fs-2xs);
-  font-weight: 600;
+  font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: var(--ls-eyebrow);
-  color: var(--ink-muted);
+  letter-spacing: var(--ls-eyebrow-wide);
+  color: var(--accent-text);
 }
 
 .section-title {
+  font-family: var(--font-display);
   font-size: var(--fs-2xl);
   font-weight: 700;
   color: var(--ink-primary);
@@ -324,6 +419,7 @@ code, pre, kbd, samp, .mono {
 }
 
 .card-title {
+  font-family: var(--font-display);
   font-size: var(--fs-lg);
   font-weight: 600;
   color: var(--ink-primary);
@@ -364,7 +460,7 @@ code, pre, kbd, samp, .mono {
 .card {
   background: var(--surface-card);
   border: 1px solid var(--line);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-xl);
   padding: var(--space-5);
   box-shadow: var(--shadow-xs);
 }
@@ -388,7 +484,7 @@ button > .glass-card:hover {
 .panel {
   background: var(--surface-card);
   border: 1px solid var(--line);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-xl);
   box-shadow: var(--shadow-xs);
   overflow: hidden;
 }
@@ -461,17 +557,42 @@ button > .glass-card:hover {
   align-items: center;
   justify-content: center;
   gap: var(--space-2);
-  padding: 0.5rem 0.875rem;
-  border-radius: var(--radius-md);
+  padding: 0.5rem 1rem;
+  border-radius: var(--radius-pill);
+  font-family: var(--font-display);
   font-size: var(--fs-sm);
   font-weight: 600;
+  letter-spacing: -0.01em;
   line-height: 1.25;
   white-space: nowrap;
   border: 1px solid transparent;
   background: transparent;
   cursor: pointer;
   transition: background var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease),
-    color var(--dur-fast) var(--ease);
+    color var(--dur-fast) var(--ease), box-shadow var(--dur-slow) var(--ease),
+    transform var(--dur-slow) var(--ease);
+}
+
+/* The CNX button gesture, kept to what a dense tool can afford: the site
+   lengthens the pill on hover, which here would shove its neighbours in a
+   toolbar or a table row. The trailing icon glides instead, and a filled
+   button lifts by one pixel — same intent, no layout movement. */
+.btn > svg:last-child:not(:first-child),
+.btn-primary > svg:last-child:not(:first-child),
+.btn-secondary > svg:last-child:not(:first-child) {
+  transition: transform var(--dur-slow) var(--ease);
+}
+
+.btn:hover:not(:disabled) > svg:last-child:not(:first-child),
+.btn-primary:hover:not(:disabled) > svg:last-child:not(:first-child),
+.btn-secondary:hover:not(:disabled) > svg:last-child:not(:first-child) {
+  transform: translateX(3px);
+}
+
+.btn-primary:hover:not(:disabled),
+.btn-danger:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-sm);
 }
 
 .btn-primary {
@@ -537,13 +658,12 @@ button > .glass-card:hover {
 }
 
 .btn-sm {
-  padding: 0.3125rem 0.625rem;
+  padding: 0.3125rem 0.75rem;
   font-size: var(--fs-xs);
-  border-radius: var(--radius-sm);
 }
 
 .btn-lg {
-  padding: 0.6875rem 1.125rem;
+  padding: 0.75rem 1.375rem;
   font-size: var(--fs-md);
 }
 
@@ -594,7 +714,9 @@ button > .glass-card:hover {
   border-radius: var(--radius-md);
   padding: 0.5rem 0.75rem;
   color: var(--ink-primary);
-  font-size: var(--fs-sm);
+  /* 16px, not the 13px of the old scale: below 16px, iOS zooms the page on
+     every field the user taps (docs/design.md § 4). */
+  font-size: 1rem;
   line-height: 1.4;
   outline: none;
   transition: border-color var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease);
@@ -622,14 +744,10 @@ button > .glass-card:hover {
 select.input {
   appearance: none;
   padding-right: 2rem;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%236f6d67' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23687080' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
   background-repeat: no-repeat;
   background-position: right 0.625rem center;
   cursor: pointer;
-}
-
-:root[data-theme='dark'] select.input {
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23898781' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
 }
 
 textarea.input {
@@ -657,8 +775,8 @@ textarea.input {
   display: inline-flex;
   align-items: center;
   gap: 0.3em;
-  padding: 0.1875rem 0.5rem;
-  border-radius: var(--radius-sm);
+  padding: 0.1875rem 0.5625rem;
+  border-radius: var(--radius-pill);
   font-size: var(--fs-2xs);
   font-weight: 600;
   line-height: 1.4;
@@ -678,9 +796,9 @@ textarea.input {
   display: inline-flex;
   align-items: center;
   gap: var(--space-1);
-  padding: 0.125rem 0.4375rem;
+  padding: 0.125rem 0.5rem;
   border: 1px solid var(--line);
-  border-radius: var(--radius-xs);
+  border-radius: var(--radius-sm);
   background: var(--surface-inset);
   font-family: var(--font-mono);
   font-size: var(--fs-2xs);
@@ -712,6 +830,7 @@ textarea.input {
 }
 
 .stat-value {
+  font-family: var(--font-display);
   font-size: var(--fs-3xl);
   font-weight: 700;
   color: var(--ink-primary);
@@ -730,10 +849,11 @@ textarea.input {
 /* The one number a view leads with. Exactly one per page, same sans as
    everything else — a display face here reads as decoration. */
 .hero-figure {
+  font-family: var(--font-display);
   font-size: var(--fs-hero);
-  font-weight: 700;
+  font-weight: 800;
   line-height: 1;
-  letter-spacing: -0.028em;
+  letter-spacing: -0.035em;
   color: var(--ink-primary);
   font-variant-numeric: proportional-nums;
 }
@@ -836,6 +956,7 @@ textarea.input {
   gap: var(--space-2);
   padding: 0.5rem 0.75rem;
   margin-bottom: -1px;
+  font-family: var(--font-display);
   font-size: var(--fs-sm);
   font-weight: 500;
   color: var(--ink-muted);
@@ -868,8 +989,8 @@ textarea.input {
 .tabs__count {
   font-size: var(--fs-2xs);
   font-weight: 600;
-  padding: 0.0625rem 0.3125rem;
-  border-radius: var(--radius-xs);
+  padding: 0.0625rem 0.375rem;
+  border-radius: var(--radius-pill);
   background: var(--status-neutral-wash);
   color: var(--status-neutral-text);
   font-variant-numeric: tabular-nums;
@@ -888,13 +1009,14 @@ textarea.input {
   padding: 2px;
   background: var(--surface-inset);
   border: 1px solid var(--line);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-pill);
 }
 
 .segmented__tab {
-  padding: 0.25rem 0.625rem;
+  padding: 0.25rem 0.75rem;
   border: 0;
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-pill);
+  font-family: var(--font-display);
   background: transparent;
   font-size: var(--fs-xs);
   font-weight: 500;

@@ -1,11 +1,6 @@
-import type { Metadata } from 'next'
 import { headers } from 'next/headers'
 import { Sidebar, type SidebarEnvironment, type SidebarSite } from '@/components/Sidebar'
 import { createServiceClient } from '@/lib/supabase'
-
-export const metadata: Metadata = {
-  title: 'SEO Engine – Dashboard',
-}
 
 /**
  * The active sites, for the rail. Two columns, nothing else: the rail needs a

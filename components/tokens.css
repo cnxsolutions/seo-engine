@@ -1,102 +1,127 @@
 /* ═══════════════════════════════════════════════════════════════════════════
-   SEO Engine — design tokens
+   SEO Engine — design tokens, à la DA de CNX Solutions
    ───────────────────────────────────────────────────────────────────────────
    The single source of truth for colour, space, radius, shadow and type.
    Imported first by app/globals.css; nothing else should declare a raw hex.
+
+   WHERE THE VALUES COME FROM (docs/design.md § 3). Colour, radius, shadow and
+   motion are copied from the CNX Solutions theme — cnx-solutions/wp-content/
+   themes/cnx-solutions/assets/css/theme.css, § 1 « Tokens » — where each pair
+   was measured for contrast. When a value here and that file disagree, that
+   file wins. The tool is the same company as the site: a client moving from
+   cnx-solutions.fr to their space must feel they never left.
+
+   THE NAMES DID NOT CHANGE. Only the values moved (2026-11-25, lot L0b): every
+   class of globals.css and every component reads the same tokens as before,
+   so the whole product changed skin without a component being rewritten.
 
    Reading order for a page author:
      surfaces  → what the thing sits on
      ink       → what the text is
      lines     → borders, grid, axis
-     accent    → the one interactive hue
+     accent    → the one interactive hue, and the brand gradient
      status    → good / warning / serious / critical (never colour alone)
      data      → series, ordinal ramp, diverging pair  (charts only)
      metrics   → space, radius, shadow, type, motion
 
-   Colour rules enforced here (dataviz method):
+   Colour rules (dataviz method, unchanged):
      · Series hues are a FIXED, ORDERED set. Slot follows the entity, never
        its rank. Never cycle past slot 8 — fold the tail into "Autres".
      · Status hues are reserved. A status colour always ships with an icon or
        a label; it never impersonates a series.
      · Text wears ink tokens, never a series hue.
-     · Sequential = one hue light→dark. Diverging = two hues + neutral grey.
-     · Dark mode is SELECTED, not inverted: every dark step was picked and
-       measured against the dark surface (#1a1a19), not derived from the light
-       one. Opt in with <html data-theme="dark">; there is no automatic flip.
 
-   Every value below was validated with the dataviz palette validator
-   (OKLab ΔE for CVD separation, WCAG for contrast). See the report for the
-   measured numbers.
+   LIGHT ONLY. The dark set this file used to carry was never switched on, and
+   it described the previous palette: kept, it would have lied about a mode
+   nobody maintains (docs/cadrage.md, decision 11).
    ═══════════════════════════════════════════════════════════════════════════ */
 
-:root,
-:root[data-theme='light'] {
+:root {
   color-scheme: light;
 
   /* ── Surfaces ─────────────────────────────────────────────────────────
-     Three planes, deepest to lightest: rail < page < card. Depth comes from
-     the plane change plus a hairline — not from a drop shadow. */
-  --surface-rail: #edece7;
-  --surface-page: #f4f4f1;
-  --surface-card: #fcfcfb;
+     The CNX « day » register: a cool grey page, white cards, a hairline.
+     Depth comes from the plane change plus the line — a shadow is for what
+     floats (menu, dialog, a card you can click). */
+  --surface-rail: #ffffff;    /* --cnx-surface,   separated by --line */
+  --surface-page: #f4f5f7;    /* --cnx-surface-2 */
+  --surface-card: #ffffff;    /* --cnx-surface */
   --surface-raised: #ffffff;
-  --surface-inset: #eeede9;
-  --surface-hover: #f2f1ec;
-  --surface-scrim: rgb(11 11 11 / 0.44);
+  --surface-inset: #f4f5f7;   /* a field, a well inside a card */
+  --surface-hover: #fafafb;   /* --cnx-surface-3 */
+  --surface-scrim: rgb(8 9 13 / 0.48);
 
   /* ── Ink ──────────────────────────────────────────────────────────────
-     primary 19.2:1 · secondary 7.7:1 · muted 5.0:1 · faint 3.5:1 on the card.
-     faint is chrome only (axis rules, disabled glyphs) — never body copy. */
-  --ink-primary: #0b0b0b;
-  --ink-secondary: #52514e;
-  --ink-muted: #6f6d67;
-  --ink-faint: #898781;
+     muted is the CNX body text: 4.98:1 on white, 4.56:1 on the page grey.
+     faint (2.6:1) is decoration only — rules, glyphs — never a word. */
+  --ink-primary: #08090d;     /* --cnx-ink */
+  --ink-secondary: #2b2f3a;   /* --cnx-ink-soft */
+  --ink-muted: #687080;       /* --cnx-body */
+  --ink-faint: #98a0b0;       /* --cnx-muted */
   --ink-inverse: #ffffff;
 
   /* ── Lines ────────────────────────────────────────────────────────────── */
-  --line: #e3e2da;
-  --line-strong: #cfcec5;
-  --line-grid: #e1e0d9;
-  --line-axis: #c3c2b7;
+  --line: #e8eaef;            /* --cnx-line */
+  --line-strong: #d9dce4;     /* --cnx-line-strong */
+  --line-grid: #e8eaef;
+  --line-axis: #d9dce4;
 
   /* ── Accent ───────────────────────────────────────────────────────────
-     Blue 550. White on it: 6.6:1. As text on the card: 6.5:1. Deliberately
-     a darker step than series slot 1 so a button never reads as a data mark. */
-  --accent: #1c5cab;
-  --accent-hover: #184f95;
-  --accent-active: #104281;
+     #0b6cf9 rather than the logo's #0c6fff: white on it and it on white go
+     from 4.44:1 to 4.64:1. Small accent TEXT on a pale fill takes the hover
+     step (#0059e0, 5.3:1) — the accent itself only makes 4.1:1 there. */
+  --accent: #0b6cf9;          /* --cnx-accent */
+  --accent-hover: #0059e0;    /* --cnx-accent-hover */
+  --accent-active: #004dc4;
   --accent-on: #ffffff;
-  --accent-text: #1c5cab;
-  --accent-wash: rgb(42 120 214 / 0.10);
-  --accent-wash-strong: rgb(42 120 214 / 0.18);
-  --accent-ring: rgb(42 120 214 / 0.32);
+  --accent-text: #0059e0;
+  --accent-wash: rgb(11 108 249 / 0.09);         /* --cnx-accent-soft */
+  --accent-wash-strong: rgb(11 108 249 / 0.16);  /* --cnx-accent-soft-2 */
+  --accent-ring: rgb(11 108 249 / 0.35);
+
+  /* The brand gradient, SEO blue to SAP violet: the thread of the films, the
+     one main action of a screen. Never behind running text. */
+  --brand-grad: linear-gradient(135deg, #0b6cf9 0%, #5b3df5 100%);
+
+  /* The LOGO's own gradient, a hair brighter than the interface's (#0C6FFF,
+     #6D4AFF, cnx-solutions/brand/README.md § 2). Only the mark wears it. */
+  --logo-grad: linear-gradient(135deg, #0c6fff 0%, #6d4aff 100%);
+
+  /* The « hero » register: the navy of the site's hero, for the few moments
+     that matter (sign-in, a client's welcome band, a site header). */
+  --hero-1: #0d1440;
+  --hero-2: #16266f;
+  --hero-3: #0b4da2;
+  --hero-4: #2f7ef0;
 
   /* ── Status (reserved — always with an icon or a label) ────────────────
      -mark is the fill/glyph, -text is the WCAG-AA text step for the same
      state, -wash is the tinted background a badge sits on. */
-  --status-good: #0ca30c;
-  --status-good-text: #006300;
-  --status-good-wash: rgb(12 163 12 / 0.12);
+  --status-good: #12a150;     /* the films' --ok */
+  --status-good-text: #006b2e;
+  --status-good-wash: rgb(18 161 80 / 0.12);
   --status-warning: #fab219;
   --status-warning-text: #7a4a00;
-  --status-warning-wash: rgb(250 178 25 / 0.14);
+  --status-warning-wash: rgb(250 178 25 / 0.16);
   --status-serious: #ec835a;
   --status-serious-text: #9a4a22;
   --status-serious-wash: rgb(236 131 90 / 0.14);
   --status-critical: #d03b3b;
   --status-critical-text: #a32222;
   --status-critical-wash: rgb(208 59 59 / 0.12);
-  --status-neutral-text: #5f5d59;
-  --status-neutral-wash: #eeede8;
+  --status-neutral-text: #4f5665;
+  --status-neutral-wash: #eef0f3;
 
   /* ── Chart chrome ─────────────────────────────────────────────────────── */
   --chart-surface: var(--surface-card);
   --chart-grid: var(--line-grid);
   --chart-axis: var(--line-axis);
   --chart-label: var(--ink-muted);
-  --chart-quiet: #cfcec5; /* the "everything else" grey in an emphasis chart */
+  --chart-quiet: #d9dce4; /* the "everything else" grey in an emphasis chart */
 
-  /* ── Series — fixed order, assigned in sequence, never cycled ─────────── */
+  /* ── Series — fixed order, assigned in sequence, never cycled ──────────
+     Unchanged in L0b: the palette is revalidated as a whole against the new
+     surfaces in L6 (UX-11), slot 1 then moving to the CNX accent. */
   --series-1: #2a78d6; /* blue    */
   --series-2: #eb6834; /* orange  */
   --series-3: #1baf7a; /* aqua    */
@@ -115,104 +140,15 @@
 
   /* ── Diverging — warm/cool poles, neutral grey midpoint ───────────────── */
   --diverge-pos: #2a78d6;
-  --diverge-mid: #f0efec;
+  --diverge-mid: #eef0f3;
   --diverge-neg: #e34948;
 
-  /* ── Elevation ────────────────────────────────────────────────────────── */
-  --shadow-xs: 0 1px 2px rgb(11 11 11 / 0.04);
-  --shadow-sm: 0 1px 3px rgb(11 11 11 / 0.06);
-  --shadow-md: 0 4px 12px rgb(11 11 11 / 0.07);
-  --shadow-lg: 0 12px 32px rgb(11 11 11 / 0.10);
-}
+  /* ── Elevation — the theme's shadows, tinted with the ink ─────────────── */
+  --shadow-xs: 0 1px 2px rgb(9 13 24 / 0.04), 0 2px 6px rgb(9 13 24 / 0.04);
+  --shadow-sm: 0 1px 3px rgb(9 13 24 / 0.04), 0 6px 16px rgb(9 13 24 / 0.05);
+  --shadow-md: 0 2px 6px rgb(9 13 24 / 0.05), 0 12px 32px rgb(9 13 24 / 0.08);
+  --shadow-lg: 0 4px 10px rgb(9 13 24 / 0.05), 0 30px 60px rgb(9 13 24 / 0.12);
 
-/* ═══════════════════════════════════════════════════════════════════════════
-   Dark theme — every step chosen against #1a1a19 and measured, not inverted.
-   Opt in explicitly: <html data-theme="dark">.
-   ═══════════════════════════════════════════════════════════════════════════ */
-:root[data-theme='dark'] {
-  color-scheme: dark;
-
-  --surface-rail: #0a0a0a;
-  --surface-page: #0d0d0d;
-  --surface-card: #1a1a19;
-  --surface-raised: #232322;
-  --surface-inset: #131312;
-  --surface-hover: #232322;
-  --surface-scrim: rgb(0 0 0 / 0.66);
-
-  /* primary 17.4:1 · secondary 9.7:1 · muted 4.9:1 on the dark card */
-  --ink-primary: #ffffff;
-  --ink-secondary: #c3c2b7;
-  --ink-muted: #898781;
-  --ink-faint: #6e6d67;
-  --ink-inverse: #0b0b0b;
-
-  --line: #2e2e2b;
-  --line-strong: #3f3f3a;
-  --line-grid: #2c2c2a;
-  --line-axis: #383835;
-
-  /* Blue 500: fill 3.2:1 against the dark card, white label on it 5.4:1.
-     Accent TEXT moves up the ramp to #86b6ef (8.3:1) — the fill step is too
-     dark to read as type on this surface. */
-  --accent: #256abf;
-  --accent-hover: #2a78d6;
-  --accent-active: #3987e5;
-  --accent-on: #ffffff;
-  --accent-text: #86b6ef;
-  --accent-wash: rgb(57 135 229 / 0.16);
-  --accent-wash-strong: rgb(57 135 229 / 0.26);
-  --accent-ring: rgb(57 135 229 / 0.45);
-
-  /* Same four status marks (they are mode-invariant by design); only the text
-     steps move, because #006300 is unreadable on a dark surface. */
-  --status-good: #0ca30c;
-  --status-good-text: #3fd23f;
-  --status-good-wash: rgb(12 163 12 / 0.18);
-  --status-warning: #fab219;
-  --status-warning-text: #fab219;
-  --status-warning-wash: rgb(250 178 25 / 0.18);
-  --status-serious: #ec835a;
-  --status-serious-text: #ec835a;
-  --status-serious-wash: rgb(236 131 90 / 0.18);
-  --status-critical: #d03b3b;
-  --status-critical-text: #e66767;
-  --status-critical-wash: rgb(208 59 59 / 0.20);
-  --status-neutral-text: #a8a69d;
-  --status-neutral-wash: #232322;
-
-  --chart-quiet: #4a4a45;
-
-  /* The same eight hues, stepped for the dark band — not a second palette. */
-  --series-1: #3987e5;
-  --series-2: #d95926;
-  --series-3: #199e70;
-  --series-4: #c98500;
-  --series-5: #d55181;
-  --series-6: #008300;
-  --series-7: #9085e9;
-  --series-8: #e66767;
-
-  --ramp-1: #cde2fb;
-  --ramp-2: #9ec5f4;
-  --ramp-3: #6da7ec;
-  --ramp-4: #3987e5;
-  --ramp-5: #184f95;
-
-  --diverge-pos: #3987e5;
-  --diverge-mid: #383835;
-  --diverge-neg: #e66767;
-
-  --shadow-xs: 0 1px 2px rgb(0 0 0 / 0.40);
-  --shadow-sm: 0 1px 3px rgb(0 0 0 / 0.48);
-  --shadow-md: 0 4px 12px rgb(0 0 0 / 0.55);
-  --shadow-lg: 0 12px 32px rgb(0 0 0 / 0.62);
-}
-
-/* ═══════════════════════════════════════════════════════════════════════════
-   Mode-independent metrics
-   ═══════════════════════════════════════════════════════════════════════════ */
-:root {
   /* ── Space — a 4px grid. Every gap, pad and margin picks a rung. ──────── */
   --space-1: 0.25rem; /*  4 */
   --space-2: 0.5rem;  /*  8 */
@@ -225,18 +161,25 @@
   --space-12: 3rem;   /* 48 */
   --space-16: 4rem;   /* 64 */
 
-  /* ── Radius ───────────────────────────────────────────────────────────── */
-  --radius-xs: 4px;
-  --radius-sm: 6px;
-  --radius-md: 8px;
-  --radius-lg: 10px;
-  --radius-xl: 14px;
-  --radius-pill: 999px;
+  /* ── Radius — the theme's scale, tightened one notch for a dense tool ─── */
+  --radius-xs: 6px;    /* checkbox, colour dot */
+  --radius-sm: 8px;    /* compact chip, list row */
+  --radius-md: 12px;   /* field, dropdown */
+  --radius-lg: 16px;   /* dense card: table, tile */
+  --radius-xl: 20px;   /* standard card (.cnx-card) */
+  --radius-2xl: 28px;  /* panel, dialog, hero band */
+  --radius-pill: 999px; /* button, badge, segmented tab */
 
   /* ── Type ─────────────────────────────────────────────────────────────
+     Two families, as on the site: Plus Jakarta Sans for what is read at a
+     glance (titles, figures, buttons, tabs), Inter for what is read line by
+     line. Both self-hosted by next/font (app/layout.tsx), which sets
+     --font-jakarta and --font-inter on <html> to its hashed family names;
+     the fallbacks only serve where next/font did not run (a test renderer).
      Root is 16px, body is 14px: this is a dense instrument, not a landing
      page. Sizes below are the whole scale — do not invent an in-between. */
-  --font-sans: 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-display: var(--font-jakarta, 'Plus Jakarta Sans'), ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-sans: var(--font-inter, 'Inter'), ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
   --font-mono: ui-monospace, 'SFMono-Regular', 'JetBrains Mono', 'Cascadia Mono', Menlo, Consolas, monospace;
 
   --fs-2xs: 0.6875rem; /* 11 — eyebrow, table head, chart tick */
@@ -245,7 +188,7 @@
   --fs-md: 0.875rem;   /* 14 — body */
   --fs-lg: 1rem;       /* 16 — card title */
   --fs-xl: 1.25rem;    /* 20 — section title */
-  --fs-2xl: 1.5rem;    /* 24 — page title */
+  --fs-2xl: 1.75rem;   /* 28 — page title */
   --fs-3xl: 2rem;      /* 32 — stat tile value */
   --fs-hero: 3rem;     /* 48 — hero figure, one per view */
 
@@ -254,13 +197,20 @@
   --lh-normal: 1.55;
 
   --ls-tight: -0.011em;
-  --ls-title: -0.018em;
-  --ls-eyebrow: 0.07em;
+  --ls-title: -0.03em;   /* the theme's large-title tracking */
+  /* Small capitals, as the CNX theme sets them at 11px: labels, table heads
+     and rail sections at 0.06em; the eyebrow above a page title wider. (The
+     films' 0.14em is calibrated for 26px type and reads loose at 11px.) */
+  --ls-eyebrow: 0.06em;
+  --ls-eyebrow-wide: 0.12em;
 
-  /* ── Motion ───────────────────────────────────────────────────────────── */
-  --dur-fast: 110ms;
-  --dur: 170ms;
-  --ease: cubic-bezier(0.2, 0, 0, 1);
+  /* ── Motion — the theme's curve ───────────────────────────────────────
+     Colour and border snap quickly; the button's lengthening glides slowly,
+     « le survol doit glisser et non claquer » (theme.css § 5). */
+  --dur-fast: 150ms;
+  --dur: 250ms;
+  --dur-slow: 500ms;
+  --ease: cubic-bezier(0.165, 0.84, 0.44, 1);
 
   /* ── Layers ───────────────────────────────────────────────────────────── */
   --z-sticky: 30;
@@ -273,9 +223,9 @@
   --content-max: 1440px;
 
   /* ═══ Compatibility aliases ══════════════════════════════════════════════
-     The names pages were already written against. Keep them: five other
-     workstreams reference them right now. New code should prefer the tokens
-     above, but nothing here is deprecated to the point of removal. */
+     The names pages were already written against. Keep them: they are how
+     the skin changed without touching a page. New code prefers the tokens
+     above. */
   --bg-primary: var(--surface-page);
   --bg-secondary: var(--surface-inset);
   --bg-card: var(--surface-card);
