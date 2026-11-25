@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { Unplug } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui'
+import { ConfirmDialog } from '@/components/ConfirmDialog'
 
 /**
  * `DELETE /api/sites/[id]/google` — drops the stored connection (tokens,
@@ -17,17 +18,11 @@ import { Button } from '@/components/ui'
  */
 export function DisconnectGoogleButton({ siteId }: { siteId: string }) {
   const router = useRouter()
+  const [open, setOpen] = useState(false)
   const [working, setWorking] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   const disconnect = async () => {
-    const confirmed = window.confirm(
-      'Déconnecter Google de ce site ?\n\n' +
-        'Les données déjà synchronisées sont conservées, mais plus aucune synchronisation ne tournera ' +
-        'et aucun post de fiche ne pourra être publié tant que Google n’est pas reconnecté.'
-    )
-    if (!confirmed) return
-
     setWorking(true)
     setError(null)
     try {
@@ -35,28 +30,41 @@ export function DisconnectGoogleButton({ siteId }: { siteId: string }) {
       const data = await res.json().catch(() => ({}))
       if (!res.ok) {
         setError(data.error || `Déconnexion refusée (erreur ${res.status})`)
-        setWorking(false)
         return
       }
+      setOpen(false)
       // The page is a server component keyed on the stored connection: a
       // refresh is what turns it back into the « non connecté » state.
       router.refresh()
     } catch {
       setError('Impossible de joindre le serveur')
+    } finally {
       setWorking(false)
     }
   }
 
   return (
-    <span style={{ display: 'inline-grid', gap: 'var(--space-1)', justifyItems: 'end' }}>
-      <Button variant="ghost" icon={Unplug} loading={working} onClick={disconnect}>
+    <>
+      <Button variant="ghost" icon={Unplug} onClick={() => setOpen(true)}>
         Déconnecter Google
       </Button>
-      {error && (
-        <span role="alert" className="meta" style={{ color: 'var(--status-critical-text)', textAlign: 'right' }}>
-          {error}
-        </span>
-      )}
-    </span>
+      <ConfirmDialog
+        open={open}
+        title="Déconnecter Google de ce site ?"
+        confirmLabel="Déconnecter Google"
+        confirmIcon={Unplug}
+        busy={working}
+        error={error}
+        errorTitle="Google toujours connecté"
+        onConfirm={disconnect}
+        onClose={() => { setOpen(false); setError(null) }}
+      >
+        <p>Les données déjà synchronisées sont conservées.</p>
+        <p>
+          Plus aucune synchronisation ne tournera, et aucun post de fiche ne pourra être publié tant que
+          Google n’est pas reconnecté.
+        </p>
+      </ConfirmDialog>
+    </>
   )
 }

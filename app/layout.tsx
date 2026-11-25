@@ -1,25 +1,35 @@
 import type { Metadata } from 'next'
-import { Inter } from 'next/font/google'
+import { Inter, Plus_Jakarta_Sans } from 'next/font/google'
 import './globals.css'
 
 /**
- * One UI sans for the whole product, self-hosted by next/font (no third-party
- * request, no layout shift). Numbers stay in the same face everywhere: a
- * display or serif figure reads as decoration, not as measurement.
+ * The two families of the CNX Solutions site, self-hosted by next/font (no
+ * third-party request, no layout shift): Plus Jakarta Sans for what is read at
+ * a glance — titles, figures, buttons — and Inter for running text.
  *
- * `variable` publishes the loaded family under --font-sans so components can
- * name the token instead of the hashed class.
+ * Each publishes its hashed family name as a CSS variable on <html>, which
+ * components/tokens.css turns into --font-display and --font-sans.
  */
+const jakarta = Plus_Jakarta_Sans({
+  subsets: ['latin', 'latin-ext'],
+  weight: ['600', '700', '800'],
+  variable: '--font-jakarta',
+  display: 'swap',
+})
+
 const inter = Inter({
-  subsets: ['latin'],
-  weight: ['400', '500', '600', '700', '800'],
-  variable: '--font-sans',
+  subsets: ['latin', 'latin-ext'],
+  weight: ['400', '500', '600', '700'],
+  variable: '--font-inter',
   display: 'swap',
 })
 
 export const metadata: Metadata = {
-  title: 'SEO Engine – AI Content Generator',
-  description: 'Generate and publish local SEO pages automatically with AI',
+  title: {
+    default: 'CNX SEO Engine',
+    template: '%s · CNX SEO Engine',
+  },
+  description: 'Le moteur de référencement de CNX Solutions : analyse, planification, rédaction et publication des pages.',
 }
 
 export default function RootLayout({
@@ -28,16 +38,8 @@ export default function RootLayout({
   children: React.ReactNode
 }) {
   return (
-    /*
-     * The theme is an explicit attribute, never an automatic inversion of the
-     * OS setting: the dark steps in components/tokens.css were each selected
-     * and measured against the dark surface. Flip this to "dark" (or have a
-     * future toggle stamp it) and the whole token set switches with it.
-     */
-    <html lang="fr" data-theme="light" className={inter.variable}>
-      <body className={inter.className} suppressHydrationWarning>
-        {children}
-      </body>
+    <html lang="fr" className={`${jakarta.variable} ${inter.variable}`}>
+      <body suppressHydrationWarning>{children}</body>
     </html>
   )
 }

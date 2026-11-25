@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+	<title>CNX SEO Engine</title>
+	<!-- Copie de cnx-solutions/brand/logo/cnx-mark.svg : le symbole CNX, sert d'icone d'onglet. -->
+	<defs>
+		<linearGradient id="cnxBrand" x1="0" y1="0" x2="512" y2="512" gradientUnits="userSpaceOnUse">
+			<stop offset="0" stop-color="#0C6FFF"/>
+			<stop offset="1" stop-color="#6D4AFF"/>
+		</linearGradient>
+		<linearGradient id="cnxSheen" x1="120" y1="0" x2="392" y2="512" gradientUnits="userSpaceOnUse">
+			<stop offset="0" stop-color="#FFFFFF" stop-opacity=".22"/>
+			<stop offset=".55" stop-color="#FFFFFF" stop-opacity="0"/>
+		</linearGradient>
+	</defs>
+	<rect width="512" height="512" rx="138" fill="url(#cnxBrand)"/>
+	<rect width="512" height="512" rx="138" fill="url(#cnxSheen)"/>
+	<g stroke="#FFFFFF" stroke-width="62" stroke-linecap="round" fill="none">
+		<path d="M166 166 L346 346"/>
+		<path d="M346 166 L166 346" opacity=".6"/>
+	</g>
+</svg>

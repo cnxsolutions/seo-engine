@@ -147,11 +147,33 @@ node scripts/db-baseline.mjs --prod=<ref>
 
 ---
 
+## Interface
+
+La DA est celle de CNX Solutions (site et films), detaillee dans `docs/design.md`.
+
+- **Jetons uniquement** : couleurs, rayons, ombres, polices et mouvement viennent
+  de `components/tokens.css`, dont les valeurs sont recopiees du theme CNX
+  (`cnx-solutions/.../assets/css/theme.css`). Aucune valeur brute ailleurs.
+- **Deux polices** : `--font-display` (Plus Jakarta Sans) pour titres, chiffres,
+  boutons, onglets ; `--font-sans` (Inter) pour le texte courant.
+- **Aucun nouveau style en ligne** (`style={{…}}`) : une classe de composant.
+  Les 675 existants se retirent ecran par ecran (lot L6).
+- **Jamais `window.confirm()`** : `components/ConfirmDialog.tsx`, qui garde le
+  refus du serveur sous les yeux. **Jamais de jargon interne** dans un texte
+  visible (nom de table, « gate », « slot »).
+- Tout nouveau couple texte/fond se mesure (AA, 4,5:1) avant d'entrer dans les jetons.
+
+---
+
 ## Pieges connus
 
 - **`npm run typecheck` echoue en local mais passe en CI** : un `.next` perime
   apres un changement de branche. Les erreurs pointent des fichiers **generes**
   (`.next/types/validator.ts`), pas ton code. `rm -rf .next`.
+- **`npm run dev` sert un CSS d'une autre branche** apres un `git stash` ou un
+  changement de branche pendant qu'il tourne : le cache de Turbopack garde
+  l'ancien `globals.css` (les jetons, eux, sont a jour), meme apres un
+  redemarrage. Arreter le serveur, `rm -rf .next`, relancer.
 - **`output: 'standalone'` est conditionnel** (`BUILD_STANDALONE=1`), et c'est
   voulu : le tracage ne peut pas s'achever sur Windows (Turbopack emet des
   chunks nommes `[externals]_node:fs_<hash>._.js`, NTFS interdit le `:`). Seul

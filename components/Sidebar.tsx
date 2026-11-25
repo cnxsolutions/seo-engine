@@ -7,9 +7,9 @@ import {
   ChevronRight,
   Globe,
   LayoutDashboard,
-  Zap,
   type LucideIcon,
 } from 'lucide-react'
+import { BrandLockup } from './BrandMark'
 import { SITE_TABS, activeSiteTab, siteIdFromPathname, siteTabHref } from './site-tabs'
 
 // ─── Navigation model ────────────────────────────────────────────────────────
@@ -119,20 +119,9 @@ export function Sidebar({ sites: initialSites, environment }: { sites: SidebarSi
 
   return (
     <aside className="sidebar">
-      <div className="sidebar-logo">
-        <div style={{
-          width: 36, height: 36,
-          background: 'var(--accent)',
-          borderRadius: 'var(--radius-lg)',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-        }}>
-          <Zap size={18} color="var(--accent-on)" />
-        </div>
-        <div>
-          <div style={{ fontWeight: 700, fontSize: 'var(--fs-lg)', lineHeight: 1.2, color: 'var(--ink-primary)' }}>SEO Engine</div>
-          <div className="meta">AI Content Platform</div>
-        </div>
-      </div>
+      <Link href="/dashboard" className="sidebar-logo" aria-label="CNX SEO Engine — tableau de bord">
+        <BrandLockup />
+      </Link>
 
       <nav aria-label="Navigation principale" style={{ flex: 1, padding: '0.5rem 0', overflowY: 'auto' }}>
         <div style={{ height: 8 }} />

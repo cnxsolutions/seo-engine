@@ -4,11 +4,12 @@ import { useState } from 'react'
 import { Trash2, TriangleAlert } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { Button, FormField } from '@/components/ui'
+import { ConfirmDialog } from '@/components/ConfirmDialog'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Deleting a site — two entry points, one call
 //
-// The card on /sites wants a one-click « Supprimer » with a native confirm; the
+// The card on /sites wants a quick « Supprimer » confirmed in a dialog; the
 // edit page wants a slower ritual where the operator types the site name. Both
 // end in the same DELETE and the same list of consequences, so the call and the
 // wording live here once. A second copy of « what gets deleted » would drift
@@ -42,44 +43,52 @@ async function deleteSite(siteId: string): Promise<string | null> {
 // ─── Card button ─────────────────────────────────────────────────────────────
 
 /**
- * The « Supprimer » of a site card. Native `confirm()` on purpose: the card
- * has no room for an inline dialog, and the browser's modal is the one every
- * screen reader already knows how to announce.
+ * The « Supprimer » of a site card. The card has no room for the typed-name
+ * ritual of the settings tab, so it asks in a dialog that says what goes and
+ * what stays — and keeps the server's refusal in view (a 409 while a
+ * generation runs) instead of the browser's confirm() closing before it.
  */
 export function DeleteSiteButton({ siteId, siteName }: { siteId: string; siteName: string }) {
   const router = useRouter()
+  const [open, setOpen] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   const remove = async () => {
-    const confirmed = window.confirm(
-      `Supprimer « ${siteName} » ?\n\n${DELETION_SCOPE}\n\nCette action est irréversible.`
-    )
-    if (!confirmed) return
-
     setDeleting(true)
     setError(null)
     const failure = await deleteSite(siteId)
+    setDeleting(false)
     if (failure) {
       setError(failure)
-      setDeleting(false)
       return
     }
+    setOpen(false)
     // The list is a server component: refreshing it is what makes the card go.
     router.refresh()
   }
 
   return (
-    <span style={{ display: 'inline-grid', gap: 'var(--space-1)', justifyItems: 'end' }}>
-      <Button variant="ghost" size="sm" icon={Trash2} loading={deleting} onClick={remove} title="Supprimer ce site">
+    <>
+      <Button variant="ghost" size="sm" icon={Trash2} onClick={() => setOpen(true)} title="Supprimer ce site">
         Supprimer
       </Button>
-      {error && (
-        <span role="alert" className="meta" style={{ color: 'var(--status-critical-text)', textAlign: 'right' }}>
-          {error}
-        </span>
-      )}
-    </span>
+      <ConfirmDialog
+        open={open}
+        title="Supprimer ce site ?"
+        subject={siteName}
+        confirmLabel="Supprimer le site"
+        confirmIcon={Trash2}
+        busy={deleting}
+        error={error}
+        errorTitle="Site non supprimé"
+        onConfirm={remove}
+        onClose={() => { setOpen(false); setError(null) }}
+      >
+        <p>{DELETION_SCOPE}</p>
+        <p><strong>Cette action est irréversible.</strong></p>
+      </ConfirmDialog>
+    </>
   )
 }
 
