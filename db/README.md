@@ -7,6 +7,52 @@ attendant.
 
 ---
 
+## 0. En local : toute la base en une commande
+
+Developpement, tests et recette se font contre un **Supabase local** (Docker),
+jamais contre la production (decision du 25/11/2026, `docs/cadrage.md` § 4.8).
+
+```bash
+npm run db:local:start    # Docker Desktop doit tourner ; CLI epinglee dans scripts/supabase.mjs
+npm run db:local:reset    # base videe, puis baseline + migrations + db/seed-local.sql
+npm run test:db           # tests d'integration (*.db.test.ts) contre cette base
+npm run db:local:reset -- --keep   # rejoue migrations + demonstration sans tout vider
+```
+
+| Service local | Adresse |
+|---|---|
+| API (ce que lit l'application) | `http://127.0.0.1:54321` |
+| Postgres | `postgresql://postgres:postgres@127.0.0.1:54322/postgres` |
+| Studio | `http://127.0.0.1:54323` |
+| Mailpit (e-mails d'authentification, jamais envoyes) | `http://127.0.0.1:54324` |
+
+`db/seed-local.sql` charge trois sites **fictifs** (`*.test`, sans identifiant de
+publication) et des campagnes **inactives** : le planificateur de `npm run dev`
+n'a nulle part ou publier. `db/seed-local.db.test.ts` le verifie.
+
+`001_schema_federation.sql` n'est **pas** rejouee en local : elle precede la
+baseline, qui contient tout ce qu'elle cree, et elle n'est pas idempotente
+(`CREATE TABLE` nu). Une migration jouee en production ne se modifie pas : elle
+est donc ecartee par son nom (`ABSORBED_BY_BASELINE`, `scripts/db-local-reset.mjs`).
+Toutes les autres sont rejouees par-dessus la baseline, puis une seconde fois par
+`db/migrations.db.test.ts` : c'est la preuve de leur idempotence.
+
+**Atteindre la production** demande un geste explicite. Les scripts visent la
+base locale par defaut ; `--prod=<ref-du-projet>` lit la chaine de connexion dans
+`.env.prod-db` (ignore par git, jamais lu par Next.js) et refuse si la ref tapee
+n'est pas celle du fichier :
+
+```bash
+node scripts/db-migrate.mjs 021 --dry
+node scripts/db-migrate.mjs 021 --prod=<ref>      # avant le merge de la PR qui en depend
+node scripts/db-baseline.mjs --prod=<ref>         # la baseline ne se tire QUE de la production
+```
+
+`db-reset-data.mjs` (vide toutes les tables) refuse `--prod`, quel que soit
+l'argument.
+
+---
+
 ## 1. Ou vivent les migrations
 
 Les migrations SQL ne sont **pas** dans ce dossier. Elles vivent dans :
@@ -72,6 +118,13 @@ est idempotente et **rejouable** : tous ses ajouts sont `IF NOT EXISTS`, tous
 ses CHECK sont precedes d'un `DROP ... IF EXISTS`, et son amorcage se termine
 par `ON CONFLICT (site_id, path) DO NOTHING`. La relancer deux fois de suite ne
 produit ni erreur ni doublon.
+
+Depuis, dans le meme ordre : `019_gbp_posts.sql` (posts de fiche
+etablissement), `020_page_indexing.sql` (suivi de l'indexation des pages), puis
+`021_rls_toutes_tables.sql` : **RLS active sur les 30 tables publiques, sans
+politique**. L'application ne passe que par la cle de service, qui contourne le
+RLS ; la cle publique, elle, ne lit plus rien. Une nouvelle table active son RLS
+dans sa propre migration — `db/rls.db.test.ts` echoue sinon.
 
 Tous ses CHECK sont poses `NOT VALID` : ils s'appliquent aux ecritures futures
 sans jamais faire echouer la migration sur une ligne historique. Une ligne

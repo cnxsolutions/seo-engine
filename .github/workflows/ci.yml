@@ -2,10 +2,18 @@
 # CI — porte d'entree des pull requests
 #
 # Ne publie rien et ne touche a aucun serveur. Son seul role : dire si la
-# branche peut etre fusionnee. Deux verifications independantes, en parallele :
+# branche peut etre fusionnee. Trois verifications independantes, en parallele :
 #
 #   1. qualite  — lint, types, tests (workflow reutilisable quality.yml) ;
-#   2. image    — le build Docker complet, SANS publication.
+#   2. image    — le build Docker complet, SANS publication ;
+#   3. base     — un Supabase local sur le runner, reconstruit depuis la
+#                 baseline et les migrations, puis les tests d'integration
+#                 (`npm run test:db` : RLS, idempotence des migrations, et a
+#                 partir du L1 le cloisonnement entre clients).
+#
+# La base n'est verifiee QU'ICI, pas dans quality.yml : deploy.yml appelle
+# quality.yml avant chaque publication, et deux minutes de demarrage de
+# conteneurs n'y apprendraient rien — une PR n'est fusionnee que verte.
 #
 # Pourquoi construire l'image ici alors qu'elle sera reconstruite au
 # deploiement : l'etape `builder` du Dockerfile est le SEUL endroit ou
@@ -52,3 +60,30 @@ jobs:
           # package-lock.json ne bouge pas.
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  db:
+    name: Base locale, tests d'integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - run: npm ci
+
+      # La CLI a la version epinglee dans scripts/supabase.mjs, la meme que sur
+      # le poste. Studio et son API de meta-donnees ne servent qu'a un humain
+      # devant un navigateur : inutile de les demarrer ici.
+      - name: Supabase local
+        run: npm run db:local:start -- -x studio,postgres-meta
+
+      - name: Schema, migrations, demonstration
+        run: npm run db:local:reset
+
+      - name: Tests d'integration
+        run: npm run test:db

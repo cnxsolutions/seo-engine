@@ -11,7 +11,8 @@
 // Nothing is written here: push rights are read from the repository object,
 // which reports the authenticated user's permissions directly.
 //
-//   node scripts/github-check.mjs <site-id>
+//   node scripts/github-check.mjs <site-id> --prod=<ref>   # a real client site
+//   node scripts/github-check.mjs <site-id>                # a local demo site
 
 import { connect } from './db-connect.mjs'
 

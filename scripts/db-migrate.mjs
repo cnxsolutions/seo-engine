@@ -8,9 +8,10 @@
 // than an error. That is what makes this safe to run without tracking state:
 // the database itself is the record of what has been applied.
 //
-//   node scripts/db-migrate.mjs 012          # apply migration 012
-//   node scripts/db-migrate.mjs 012 --dry    # print the statements, change nothing
-//   node scripts/db-migrate.mjs --list       # what exists, and what is applied
+//   node scripts/db-migrate.mjs 012                # apply migration 012 to the LOCAL database
+//   node scripts/db-migrate.mjs 012 --dry          # print the statements, change nothing
+//   node scripts/db-migrate.mjs 012 --prod=<ref>   # apply it to PRODUCTION (see db-connect.mjs)
+//   node scripts/db-migrate.mjs --list             # what exists, and what is applied
 
 import { readdirSync, readFileSync } from 'node:fs'
 import { connect } from './db-connect.mjs'
@@ -26,7 +27,7 @@ const files = readdirSync(DIR).filter((f) => f.endsWith('.sql')).sort()
 if (args.includes('--list') || !target) {
   console.log(`\n${files.length} migrations dans ${DIR}\n`)
   for (const file of files) console.log(`  ${file}`)
-  console.log('\nUsage: node scripts/db-migrate.mjs <numero>')
+  console.log('\nUsage: node scripts/db-migrate.mjs <numero> [--dry] [--prod=<ref>]')
   process.exit(0)
 }
 
