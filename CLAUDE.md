@@ -25,7 +25,11 @@ architecture, pas un defaut a corriger.
 
 **Ne developpe jamais contre la base de production.** Le planificateur demarre
 **aussi** en `npm run dev` : un `.env.local` pointant sur la base de prod publie
-pour de vrai, en concurrence avec le VPS. Utiliser un projet Supabase separe.
+pour de vrai, en concurrence avec le VPS. Developpement, tests et recette se
+font **contre le Supabase local** (`npx supabase start`, Docker), avec des sites
+de demonstration sans identifiants de publication — mis en place au L0 du
+chantier en cours, voir [`docs/cadrage.md`](docs/cadrage.md) § 4.8. La
+production n'est touchee que pour appliquer une migration avant un merge.
 
 ---
 
@@ -35,7 +39,7 @@ pour de vrai, en concurrence avec le VPS. Utiliser un projet Supabase separe.
 npm run dev          # http://localhost:3000
 npm run lint         # ESLint          — 0 erreur attendue (33 warnings tolerees)
 npm run typecheck    # tsc --noEmit    — 0 erreur attendue
-npm test             # Vitest          — 889 tests, tous verts
+npm test             # Vitest          — 1 283 tests (79 fichiers), tous verts
 npm run build        # build local (sans sortie standalone, voir next.config.ts)
 ```
 
@@ -137,6 +141,10 @@ node scripts/db-baseline.mjs
   secret depuis Git Bash ou WSL.
 - **Cache GitHub Actions cloisonne par branche** : `main` ne lit pas le cache
   cree sur une branche de PR. Le premier build apres un merge repart de zero.
+- **Vitest echoue en bloc sous Git Bash** quand le chemin courant commence par
+  un lecteur en minuscule (`c:/laragon/...`) : les 79 fichiers tombent avec
+  « Cannot read properties of undefined (reading 'config') », zero test lance.
+  Ce n'est pas le code : lancer `npm test` depuis PowerShell, ou `cd /C/laragon/...`.
 
 ---
 
@@ -145,6 +153,8 @@ node scripts/db-baseline.mjs
 | Sujet | Fichier |
 |---|---|
 | Produit, architecture, verifier que le cron tourne | [`README.md`](README.md) |
+| Chantier en cours : espace client, demandes de mots-cles, refonte UI/UX (lots, regles, decisions) | [`docs/cadrage.md`](docs/cadrage.md) |
+| DA CNX appliquee a l'outil : jetons, typo, composants, ecrans | [`docs/design.md`](docs/design.md) |
 | Deploiement : mise en place, quotidien, rollback, diagnostic | [`docs/deploiement.md`](docs/deploiement.md) |
 | Migrations et baseline | [`db/README.md`](db/README.md) |
 | Acces API Google Business Profile | [`docs/gbp-acces-api.md`](docs/gbp-acces-api.md) |
