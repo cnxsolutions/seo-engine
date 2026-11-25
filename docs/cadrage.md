@@ -31,7 +31,7 @@ Documents liés : [design.md](design.md) (identité visuelle, composants, écran
 | Échéance | **À fixer** (§ 7, décision 14) |
 | Cibles | Espace client : mobile d'abord, utilisable à 375 px, < 2 s · Console opérateur : desktop d'abord, utilisable sur mobile |
 | Distribution | La **même** application, le **même** conteneur, le **même** domaine (`seo.cnx-solutions.fr/espace`) |
-| Données | La base Supabase existante, trois tables et une fonction ajoutées (migrations `021`, `022`) |
+| Données | La base Supabase existante, trois tables et une fonction ajoutées (migrations `022`, `023` ; la `021` du L0 active le RLS) |
 | Environnements | **Développement, tests et recette : Supabase en local** (CLI + Docker, § 4.8) · Production : le projet Supabase hébergé, touché seulement pour appliquer une migration avant un merge (décision 16) |
 | E-mails | Expéditeur **`contact@cnx-solutions.fr`**, par le compte SMTP déjà utilisé par le site CNX ; en local, aucun envoi réel (décision 17) |
 | Contrainte qui prime | **Une seule instance** : le planificateur `node-cron` tourne dans le process (CLAUDE.md). Rien dans ce chantier ne la remet en cause |
@@ -131,13 +131,13 @@ reprendre · ❌ absent · ❓ à vérifier.
 
 | ID | Fonctionnalité | Source | État | Lot |
 |---|---|---|---|---|
-| QA-1 | **RLS activé sur toutes les tables**, sans politique (tout refusé hors clé de service), vérifié par un script — en local par un test, en production par une lecture seule — préalable à toute exposition de Supabase Auth | sécurité | ❓ la baseline ne trace pas l'état RLS | L0 |
+| QA-1 | **RLS activé sur toutes les tables**, sans politique (tout refusé hors clé de service), vérifié par un script — en local par un test, en production par une lecture seule — préalable à toute exposition de Supabase Auth | sécurité | ✅ L0a (#30) : la base reconstruite laissait les 30 tables lisibles par la clé publique ; migration `021`, et la baseline enregistre désormais l'état RLS | L0 |
 | QA-2 | Tests d'isolation, **contre le Supabase local** : pour chaque route `/api/espace`, un membre du client A n'obtient rien du client B (404, pas 403) | sécurité | ❌ | L1 |
 | QA-3 | Limites de débit (connexion, envoi de demandes), en mémoire — compatible avec l'instance unique | sécurité | ❌ | L1 · L3 |
-| QA-4 | Documentation à jour : CLAUDE.md (1 283 tests, piège Vitest sous Git Bash), README, `db/README.md`, baseline régénérée après `021`/`022` | — | 🟡 | L0 puis chaque lot |
+| QA-4 | Documentation à jour : CLAUDE.md (1 283 tests, piège Vitest sous Git Bash), README, `db/README.md`, baseline régénérée après `021`, `022`, `023` | — | 🟡 | L0 puis chaque lot |
 | QA-5 | Recette par lot sur le Supabase local : captures 375 px et 1 440 px, Lighthouse, parcours complet (codes de connexion lus dans Mailpit), écritures en base listées, puis base remise à zéro | dev-cadrage | ❌ | chaque lot |
-| QA-6 | **Supabase local** : `supabase/config.toml`, schéma reconstruit depuis la baseline et les migrations, jeu de démonstration (deux clients, trois sites fictifs), une commande pour tout remettre à zéro (§ 4.8) | décision 16 | ❌ CLI absente, aucun dossier `supabase/` | L0 |
-| QA-7 | Tests d'intégration (`*.db.test.ts`, `npm run test:db`) contre le Supabase local : isolation, RLS, `swap_plan_item` sous concurrence, idempotence des migrations ; rejoués en CI dans un job dédié (décision 18) | décision 16 | ❌ | L0 (outillage) puis chaque lot |
+| QA-6 | **Supabase local** : `supabase/config.toml`, schéma reconstruit depuis la baseline et les migrations, jeu de démonstration (deux clients, trois sites fictifs), une commande pour tout remettre à zéro (§ 4.8) | décision 16 | ✅ L0a (#30) | L0 |
+| QA-7 | Tests d'intégration (`*.db.test.ts`, `npm run test:db`) contre le Supabase local : isolation, RLS, `swap_plan_item` sous concurrence, idempotence des migrations ; rejoués en CI dans un job dédié (décision 18) | décision 16 | 🟡 outillage et 24 tests au L0a (#30) ; isolation au L1, transaction au L4 | L0 (outillage) puis chaque lot |
 
 ---
 
@@ -306,7 +306,7 @@ boucle (les verdicts d'un lot chargent inventaire, signaux et plan **une fois pa
 
 ### 4.3 Modèle de données
 
-Migration `021_client_space.sql` :
+Migration `022_client_space.sql` :
 
 ```sql
 clients          (id uuid pk, name text not null, created_at, updated_at)
@@ -317,7 +317,7 @@ index : client_members(client_id), client_members(lower(email)) unique, sites(cl
 RLS activé sur clients, client_members ; aucune politique
 ```
 
-Migration `022_keyword_requests.sql` :
+Migration `023_keyword_requests.sql` :
 
 ```sql
 keyword_requests (
@@ -389,9 +389,9 @@ isolation, RLS, transaction), et le parcours complet en recette.
 
 | Élément | Choix |
 |---|---|
-| Outils | Docker Desktop (installé, à lancer) ; Supabase CLI en **dépendance de développement épinglée** (`npx supabase …`), même version sur le poste et en CI |
+| Outils | Docker Desktop (installé, à lancer) ; Supabase CLI à une version **épinglée dans `scripts/supabase.mjs`** (2.122.1), lancée par `npx`, même version sur le poste et en CI. Pas une `devDependency` : son postinstall téléchargerait le binaire à chaque build de l'image Docker |
 | Services | API `127.0.0.1:54321` · Postgres `:54322` · Studio `:54323` · **Mailpit `:54324`**, qui reçoit les codes de connexion et les invitations : aucun SMTP en local |
-| Schéma | Source unique inchangée : `db/000_baseline.sql` puis `src/adapters/infrastructure/database/migrations/*.sql`, appliqués par un script (`npm run db:local:reset`). **Aucun** `supabase/migrations/` : deux dossiers de migrations divergeraient à la première modification |
+| Schéma | Source unique inchangée : `db/000_baseline.sql` puis `src/adapters/infrastructure/database/migrations/*.sql`, appliqués par un script (`npm run db:local:reset`). **Aucun** `supabase/migrations/` : deux dossiers de migrations divergeraient à la première modification. `001` est écartée par son nom : la baseline la contient, elle n'est pas idempotente, et une migration jouée en production ne se modifie pas |
 | Démonstration | `db/seed-local.sql` + création des membres par l'API d'administration locale : deux clients, trois sites **fictifs** (`*.test`, aucun identifiant WordPress ni jeton GitHub), campagnes **inactives**, un cycle en cours, des créneaux, des résultats Search Console, une demande dans chaque statut |
 | `.env.local` | Pointe sur le local (URL et clés données par `npx supabase status`). Les accès à la production vivent dans un fichier séparé, ignoré par git, que seuls les scripts de migration lisent, et seulement avec `--prod` (décision 19) |
 | Ce que le planificateur peut faire en local | Rien chez un vrai client : les sites de démonstration n'ont aucun identifiant de publication et les campagnes sont inactives. Une génération de test se lance à la main, et coûte des jetons d'IA réels |
@@ -420,7 +420,7 @@ Ordonnés par **risque** (sécurité d'abord, planificateur ensuite), puis par *
 
 | Lot | Contenu | Couvre | Dépend de | Taille |
 |---|---|---|---|---|
-| **L0** | Socle : **Supabase local** (CLI épinglée, `config.toml`, remise à zéro, démo, `test:db`, job CI) ; scripts de migration ciblant le local par défaut ; jetons CNX, polices, marque, composants de base rhabillés, modale de confirmation ; vérification RLS (+ activation si besoin) ; CLAUDE.md à jour. Peut se scinder en L0a (local et tests) / L0b (peau CNX) | UX-1 à UX-4, UX-9, UX-10 (bases), QA-1, QA-4, QA-6, QA-7 | — | L · 4 j |
+| **L0** | **L0a ✅ #30** (local, tests, RLS) · **L0b** (peau CNX) en cours. Socle : **Supabase local** (CLI épinglée, `config.toml`, remise à zéro, démo, `test:db`, job CI) ; scripts de migration ciblant le local par défaut ; jetons CNX, polices, marque, composants de base rhabillés, modale de confirmation ; vérification RLS (+ activation si besoin) ; CLAUDE.md à jour. Peut se scinder en L0a (local et tests) / L0b (peau CNX) | UX-1 à UX-4, UX-9, UX-10 (bases), QA-1, QA-4, QA-6, QA-7 | — | L · 4 j |
 | **L1** | Identité client : tables `clients`/`client_members`, `@supabase/ssr`, branche de `proxy.ts`, connexion par code, invitation et révocation depuis les Réglages d'un site, pages d'erreur ; tests d'isolation, limites de débit | ACC-1 à ACC-7, QA-2, QA-3 | L0 | L · 4 j |
 | **L2** | Espace client en lecture : coquille mobile, accueil, pages en ligne, prochaines pages, sélecteur de site, **résultats Google**. Se scinde en L2a (lecture) / L2b (résultats) si la PR grossit | ESP-1 à ESP-6 | L1 | L · 5 j |
 | **L3** | Demandes, saisie et verdict : table, domaine (verdict, cycle de vie), tâche d'analyse, formulaire, liste et chronologie, retrait. Les demandes recevables sont **toutes** gardées pour la période suivante (pas encore d'insertion dans le cycle en cours) | KW-1 à KW-3, KW-5 (verdict), KW-6 à KW-9 | L2 | L · 4 j |
@@ -467,7 +467,7 @@ Une recommandation non contestée s'applique par défaut. Une décision tranché
 | 16 | Où développer et tester ? | ✅ **Supabase en local** pour le développement, tous les tests et la recette ; la production n'est touchée que pour appliquer une migration avant un merge (décidé le 25/11) |
 | 17 | Quel expéditeur pour les e-mails ? | ✅ **`contact@cnx-solutions.fr`**, par le compte SMTP du site CNX (décidé le 25/11) |
 | 18 | Les tests d'intégration tournent-ils en CI ? | Oui, dans un **job séparé** de `ci.yml` (Supabase CLI + `supabase start` sur le runner, ~2 min), sur les PR seulement : le cloisonnement ne se vérifie pas qu'à la main. `deploy.yml` n'est pas alourdi, une PR n'est mergée que verte |
-| 19 | Comment un script de migration atteint-il la production ? | Il vise le **local par défaut** ; la production exige `--prod`, lit un fichier d'accès séparé (ignoré par git, comme tout `.env*`), affiche l'hôte visé et refuse de continuer sans `--dry` préalable dans la même session |
+| 19 | Comment un script de migration atteint-il la production ? | ✅ Il vise le **local par défaut** ; la production exige `--prod=<ref-du-projet>`, lit `.env.prod-db` (ignoré par git, jamais chargé par Next.js, contrairement à `.env.production.local`) et refuse si la ref tapée n'est pas celle du fichier. `db-reset-data` refuse la production, `db-baseline` n'accepte qu'elle (appliqué au L0a, #30) |
 
 ---
 
