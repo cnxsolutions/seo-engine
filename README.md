@@ -452,7 +452,9 @@ sont exposes par aucune route HTTP : ils disparaissent a chaque redemarrage.
       │  un mot-cle propose depuis l'espace client (/espace) recoit son
       │  verdict par lots de 5 (lib/keyword-requests/analyze.ts) : deja
       │  prevue, deja gagnee, deja couverte, a l'etude chez CNX, ou gardee
-      │  pour la periode suivante
+      │  pour la periode suivante ; le plan suivant la consomme en premier
+      │  (lib/planning/brief-plan.ts), puis la meme tache suit sa page jusqu'en
+      │  ligne (lib/keyword-requests/progress.ts)
 ```
 
 Le cycle est renouvelable : `cycle-manager.ts` detecte la fin d'un cycle,

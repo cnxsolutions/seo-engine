@@ -10,8 +10,9 @@
 // asked only about a request the measurements did not settle; the verdicts
 // are written in one call, each only if its request is still `received`.
 //
-// L3 places nothing in the cycle in progress: a receivable request is kept for
-// the next period (`deferred`). The current cycle takes requests from the L4.
+// Nothing is placed in the cycle in progress yet: a receivable request is kept
+// for the next period (`deferred`), whose plan consumes it first (L4b,
+// lib/planning/brief-plan.ts). The current cycle takes requests from the L4c.
 
 import { COMMUNES_AUBE } from '@/lib/geo/communes'
 import { isNationalCampaign, targetCommunes } from '@/lib/geo/scope'

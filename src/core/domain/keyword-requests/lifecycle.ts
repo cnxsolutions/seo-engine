@@ -27,12 +27,20 @@ export type RequestStatus = (typeof REQUEST_STATUSES)[number]
  */
 export const OPEN_STATUSES: readonly RequestStatus[] = ['received', 'review', 'deferred', 'scheduled', 'in_production']
 
-/** § 3.3, row by row. A terminal status has no successor. */
+/**
+ * § 3.3, row by row. A terminal status has no successor.
+ *
+ * Added at the L4, for what the engine sees happen to a planned request:
+ *  - deferred → covered: the plan wrote its brief, and the guards dropped it
+ *    (its keyword is already carried by a page of the site);
+ *  - scheduled → published | review: the production is followed every two
+ *    minutes (production.ts), and a short one can start and end in between.
+ */
 const TRANSITIONS: Readonly<Record<RequestStatus, readonly RequestStatus[]>> = {
   received: ['scheduled', 'deferred', 'covered', 'review', 'withdrawn'],
   review: ['scheduled', 'deferred', 'declined', 'withdrawn'],
-  deferred: ['scheduled', 'review', 'withdrawn'],
-  scheduled: ['in_production', 'deferred', 'withdrawn'],
+  deferred: ['scheduled', 'covered', 'review', 'withdrawn'],
+  scheduled: ['in_production', 'published', 'review', 'deferred', 'withdrawn'],
   in_production: ['published', 'review'],
   published: [],
   covered: ['scheduled', 'deferred'],

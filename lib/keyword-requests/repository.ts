@@ -1,17 +1,19 @@
 // ─────────────────────────────────────────────────────────────────────────────
-// keyword_requests, and what the analysis reads around it (L3)
+// keyword_requests, and what the analysis and the engine read around it (L3, L4)
 // ─────────────────────────────────────────────────────────────────────────────
 //
 // Named columns, bounded lists, the service key — server side only. The
 // functions that take a site id are called with the id of a ClientSiteDto
 // (lib/client-space/scope.ts) or by the scheduler, never with an id the
-// browser sent alone. Writes that must not race go through the two functions
-// of migration 024.
+// browser sent alone. Writes that must not race go through the functions of
+// migrations 024 and 025.
 
 import { createServiceClient } from '@/lib/supabase'
+import type { RequestChange } from '@/src/core/domain/keyword-requests/change'
+import type { WaitingRequest } from '@/src/core/domain/keyword-requests/consumption'
 import type { RequestStatus } from '@/src/core/domain/keyword-requests/lifecycle'
-import { WITHDRAWABLE_STATUSES } from '@/src/core/domain/keyword-requests/lifecycle'
 import { pickRequestCampaign } from '@/src/core/domain/keyword-requests/campaign'
+import type { GenerationState, ProducingRequest, SlotState } from '@/src/core/domain/keyword-requests/production'
 import type { Evidence } from '@/src/core/domain/keyword-requests/verdict'
 
 function fail(action: string, message: string): never {
@@ -88,25 +90,20 @@ export async function submitRequests(params: SubmitParams): Promise<SubmitOutcom
 
 // ── Withdrawing ───────────────────────────────────────────────────────────
 
-/** 'withdrawn', or why not: the request is not this site's, or it is past the point of return. */
-export async function withdrawRequest(siteId: string, requestId: string): Promise<'withdrawn' | 'not_found' | 'locked'> {
-  const supabase = createServiceClient()
-  // Conditional on the status: a request the scheduler moved on a moment ago
-  // is not dragged back.
-  const { data, error } = await supabase
-    .from('keyword_requests')
-    .update({ status: 'withdrawn' })
-    .eq('site_id', siteId)
-    .eq('id', requestId)
-    .in('status', WITHDRAWABLE_STATUSES as RequestStatus[])
-    .select('id')
-  if (error) fail('retrait', error.message)
-  if ((data ?? []).length > 0) return 'withdrawn'
+export type WithdrawOutcome = 'withdrawn' | 'not_found' | 'locked'
 
-  const { data: existing, error: readError } = await supabase
-    .from('keyword_requests').select('id').eq('site_id', siteId).eq('id', requestId).maybeSingle()
-  if (readError) fail('retrait', readError.message)
-  return existing ? 'locked' : 'not_found'
+/**
+ * 'withdrawn', or why not: the request is not this site's, or it is past the
+ * point of return. A planned request's slot is set aside in the same
+ * transaction (025): the scheduler cannot start writing the page in between.
+ */
+export async function withdrawRequest(siteId: string, requestId: string): Promise<WithdrawOutcome> {
+  const { data, error } = await createServiceClient().rpc('withdraw_keyword_request', {
+    p_site_id: siteId,
+    p_request_id: requestId,
+  })
+  if (error) fail('retrait', error.message)
+  return data === 'withdrawn' || data === 'locked' ? data : 'not_found'
 }
 
 // ── The analysis ──────────────────────────────────────────────────────────
@@ -233,4 +230,133 @@ export async function listSiteUrls(siteIds: readonly string[]): Promise<Map<stri
   const { data, error } = await createServiceClient().from('sites').select('id,url').in('id', siteIds as string[])
   if (error) fail('sites', error.message)
   return new Map(((data ?? []) as Array<{ id: string; url: string | null }>).map((row) => [row.id, row.url ?? '']))
+}
+
+// ── The requests in the engine (L4b) ──────────────────────────────────────
+
+/** Every step of a batch in one call, each only if its request is still where the engine saw it (025). */
+export async function advanceRequests(changes: readonly RequestChange[]): Promise<string[]> {
+  if (changes.length === 0) return []
+  const { data, error } = await createServiceClient().rpc('advance_keyword_requests', { p_changes: changes })
+  if (error) fail('avancement', error.message)
+  return (data ?? []) as string[]
+}
+
+const WAITING_COLUMNS = 'id,keyword,city,desired_by,created_at,deferred_cycles'
+/** More than a plan has slots (60) and than a site may have open requests (30). */
+const WAITING_PER_CAMPAIGN_MAX = 60
+
+/** A campaign's queue, in consumption order (§ 3.2). */
+export async function listWaitingRequests(campaignId: string): Promise<WaitingRequest[]> {
+  const { data, error } = await createServiceClient()
+    .from('keyword_requests')
+    .select(WAITING_COLUMNS)
+    .eq('campaign_id', campaignId)
+    .eq('status', 'deferred')
+    .order('desired_by', { ascending: true, nullsFirst: false })
+    .order('created_at', { ascending: true })
+    .order('id', { ascending: true })
+    .limit(WAITING_PER_CAMPAIGN_MAX)
+  if (error) fail('file d attente', error.message)
+  return (data ?? []) as WaitingRequest[]
+}
+
+/** The requests planned on a campaign's slots that are still waiting for their day. */
+export async function listRequestsOnPlannedSlots(campaignId: string): Promise<Array<{ id: string }>> {
+  const supabase = createServiceClient()
+  const { data: slots, error: slotError } = await supabase
+    .from('editorial_calendar')
+    .select('plan_item_id')
+    .eq('campaign_id', campaignId)
+    .eq('status', 'planned')
+    .not('plan_item_id', 'is', null)
+    .limit(SLOTS_PER_CAMPAIGN_MAX)
+  if (slotError) fail('creneaux a remplacer', slotError.message)
+  const itemIds = [...new Set(((slots ?? []) as Array<{ plan_item_id: string }>).map((slot) => slot.plan_item_id))]
+  if (itemIds.length === 0) return []
+
+  const { data, error } = await supabase
+    .from('keyword_requests')
+    .select('id')
+    .eq('campaign_id', campaignId)
+    .eq('status', 'scheduled')
+    .in('plan_item_id', itemIds)
+  if (error) fail('demandes a rendre a la file', error.message)
+  return (data ?? []) as Array<{ id: string }>
+}
+
+/** Set aside slots whose page must not be written, as long as nobody claimed them. */
+export async function skipPlannedSlots(campaignId: string, planItemIds: readonly string[], reason: string): Promise<void> {
+  if (planItemIds.length === 0) return
+  const { error } = await createServiceClient()
+    .from('editorial_calendar')
+    .update({ status: 'skipped', error_message: reason })
+    .eq('campaign_id', campaignId)
+    .in('plan_item_id', planItemIds as string[])
+    .eq('status', 'planned')
+  if (error) fail('creneaux ecartes', error.message)
+}
+
+/** Requests followed through production per pass. Reads only: wide on purpose. */
+const PRODUCING_PER_PASS = 300
+
+export async function listProducingRequests(): Promise<ProducingRequest[]> {
+  const { data, error } = await createServiceClient()
+    .from('keyword_requests')
+    .select('id,status,campaign_id,cycle_plan_id,plan_item_id,scheduled_for')
+    .in('status', ['scheduled', 'in_production'])
+    .not('plan_item_id', 'is', null)
+    .order('scheduled_for', { ascending: true })
+    .order('id', { ascending: true })
+    .limit(PRODUCING_PER_PASS)
+  if (error) fail('demandes en production', error.message)
+  return (data ?? []) as ProducingRequest[]
+}
+
+export interface ProductionView {
+  /** The slot of each plan item, the most recent when an item has several. */
+  slots: Map<string, SlotState>
+  generations: Map<string, GenerationState>
+  /** Each campaign's running plan. */
+  currentPlans: Map<string, string | null>
+}
+
+/** What the slots, their generations and the campaigns say about these requests: three reads. */
+export async function readProduction(requests: readonly ProducingRequest[]): Promise<ProductionView> {
+  const view: ProductionView = { slots: new Map(), generations: new Map(), currentPlans: new Map() }
+  if (requests.length === 0) return view
+
+  const supabase = createServiceClient()
+  const itemIds = [...new Set(requests.map((request) => request.plan_item_id))]
+  const campaignIds = [...new Set(requests.map((request) => request.campaign_id).filter((id): id is string => id !== null))]
+
+  const [slots, campaigns] = await Promise.all([
+    supabase
+      .from('editorial_calendar')
+      .select('plan_item_id,status,scheduled_date,generation_id,error_message,created_at')
+      .in('plan_item_id', itemIds)
+      .order('created_at', { ascending: true }),
+    campaignIds.length > 0
+      ? supabase.from('campaigns').select('id,current_cycle_id').in('id', campaignIds)
+      : Promise.resolve({ data: [], error: null }),
+  ])
+  if (slots.error) fail('creneaux des demandes', slots.error.message)
+  if (campaigns.error) fail('campagnes des demandes', campaigns.error.message)
+
+  // Ascending: the last one written wins.
+  for (const slot of (slots.data ?? []) as Array<SlotState & { plan_item_id: string }>) view.slots.set(slot.plan_item_id, slot)
+  for (const campaign of (campaigns.data ?? []) as Array<{ id: string; current_cycle_id: string | null }>) {
+    view.currentPlans.set(campaign.id, campaign.current_cycle_id)
+  }
+
+  const generationIds = [...new Set([...view.slots.values()].map((slot) => slot.generation_id).filter((id): id is string => id !== null))]
+  if (generationIds.length > 0) {
+    const { data, error } = await supabase
+      .from('generations')
+      .select('id,status,published_url,published_at,error_message')
+      .in('id', generationIds)
+    if (error) fail('generations des demandes', error.message)
+    for (const row of (data ?? []) as Array<GenerationState & { id: string }>) view.generations.set(row.id, row)
+  }
+  return view
 }

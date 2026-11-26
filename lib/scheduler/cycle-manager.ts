@@ -9,6 +9,7 @@ import {
   upsertSitePages,
 } from '@/lib/db'
 import { indexSitePages } from '@/src/adapters/rag/VectorIndexingService'
+import { applyStartedPlan, releaseReplacedSlots } from '@/lib/keyword-requests/progress'
 import { deleteEditorialSlots, saveEditorialSlots, slotsFromPlan } from './editorial'
 import { generatePlanPreview } from './plan-preview'
 import type { Campaign, CyclePlan, PlanPreviewItem } from '@/lib/types'
@@ -148,33 +149,66 @@ export async function endCycleAndStartNew(campaign: Campaign, currentCycle: Cycl
   })
 
   // 4. Create editorial slots from plan
-  await deleteEditorialSlots(campaign.id)
-  const slots = slotsFromPlan(campaign.id, planItems)
-  await saveEditorialSlots(slots)
+  await installPlanSlots(campaign, newPlan, planItems)
 
   // 5. Update campaign
   await updateCampaign(campaign.id, { current_cycle_id: newPlan.id })
 }
 
-export async function startCycle(campaign: Campaign, planId: string, planItems: PlanPreviewItem[]) {
+/**
+ * The slots of the plan that starts replace the campaign's unproduced ones, and
+ * the client requests learn what became of them (docs/cadrage.md § 3.5). Both
+ * ways a cycle starts come through here — confirmed by hand (startCycle) and
+ * renewed (endCycleAndStartNew) — so neither can forget the requests.
+ *
+ * The requests never stop a cycle: a failed step is journalled, and the next
+ * pass of the requests task catches what it left behind (a slot gone with its
+ * plan sends its request back to the queue from there too).
+ */
+async function installPlanSlots(
+  campaign: Campaign,
+  plan: Pick<CyclePlan, 'id' | 'created_at'>,
+  planItems: PlanPreviewItem[],
+): Promise<void> {
+  // BEFORE the delete: a request planned on a slot nobody produced keeps its place.
+  await releaseReplacedSlots(campaign.id).catch((error: unknown) => {
+    console.error(`[cycle] demandes des creneaux remplaces non rendues a la file (campagne ${campaign.id}) :`,
+      error instanceof Error ? error.message : error)
+  })
+
+  await deleteEditorialSlots(campaign.id)
+  await saveEditorialSlots(slotsFromPlan(campaign.id, planItems))
+
+  // AFTER the save: a request withdrawn while the plan was a draft has its slot set aside.
+  await applyStartedPlan({ campaignId: campaign.id, planId: plan.id, plannedAt: plan.created_at, items: planItems })
+    .then(({ written, setAside }) => {
+      if (written > 0 || setAside > 0) {
+        console.log(`[cycle] demandes du client : ${written} mise(s) a jour, ${setAside} creneau(x) ecarte(s) (campagne ${campaign.id})`)
+      }
+    })
+    .catch((error: unknown) => {
+      console.error(`[cycle] demandes du client non mises a jour (campagne ${campaign.id}) :`,
+        error instanceof Error ? error.message : error)
+    })
+}
+
+export async function startCycle(campaign: Campaign, plan: Pick<CyclePlan, 'id' | 'created_at'>, planItems: PlanPreviewItem[]) {
   const cycleDays = campaign.cycle_duration_days || 14
   const now = new Date()
   const endsAt = new Date(now.getTime() + cycleDays * 24 * 60 * 60 * 1000)
 
   // Update plan to executing
-  await updateCyclePlan(planId, {
+  await updateCyclePlan(plan.id, {
     status: 'executing',
     cycle_started_at: now.toISOString(),
     cycle_ends_at: endsAt.toISOString(),
   })
 
   // Create editorial calendar slots
-  await deleteEditorialSlots(campaign.id)
-  const slots = slotsFromPlan(campaign.id, planItems)
-  await saveEditorialSlots(slots)
+  await installPlanSlots(campaign, plan, planItems)
 
   // Update campaign
-  await updateCampaign(campaign.id, { current_cycle_id: planId })
+  await updateCampaign(campaign.id, { current_cycle_id: plan.id })
 }
 
 export async function getCycleStatus(campaignId: string) {

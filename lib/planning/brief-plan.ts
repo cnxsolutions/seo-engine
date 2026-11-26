@@ -12,7 +12,9 @@ import { buildSerpEvidence, type SerpEvidence } from '@/lib/serp'
 import { fetchSuggestionsFor, type QuerySuggestions } from '@/lib/serp/suggest'
 import { loadSiteInventory } from '@/lib/existing/inventory'
 import { generateEditorialCalendar } from '@/lib/scheduler/editorial'
-import { campaignDepartment, isNationalCampaign, resolveTargetCity, targetCommunes } from '@/lib/geo/scope'
+import { campaignDepartment, isNationalCampaign, plannablePageTypes, resolveTargetCity, targetCommunes } from '@/lib/geo/scope'
+import { listWaitingRequests } from '@/lib/keyword-requests/repository'
+import { seedWaitingRequests, type WaitingRequest } from '@/src/core/domain/keyword-requests/consumption'
 import {
   decideEditorialAction,
   WITHOUT_SEARCH_CONSOLE,
@@ -63,6 +65,13 @@ export interface GenerateBriefPlanOptions {
    * queries. Asked when omitted; pass `null` or `[]` to plan without it.
    */
   searchSuggestions?: QuerySuggestions[] | null
+  /**
+   * The client requests kept for this campaign's next period (docs/cadrage.md
+   * § 3.5). Read from the campaign when omitted — so that no path to a plan
+   * (by hand, renewed, from an analysis) can forget them; pass `null` or `[]`
+   * to plan without them.
+   */
+  clientRequests?: WaitingRequest[] | null
 }
 
 /**
@@ -165,6 +174,17 @@ export async function generateBriefPlanWithSignals(opts: GenerateBriefPlanOption
 
   if (calendarSlots.length === 0) return { items: [], signals, serpEvidence, suggestions }
 
+  // LES DEMANDES DU CLIENT D'ABORD (docs/cadrage.md § 3.5) : les premiers
+  // creneaux du calendrier portent leurs recherches, avant la rotation des
+  // mots-cles de la campagne — un tiers des creneaux au plus, jamais le pilier.
+  // Elles passent ensuite par la MEME decision et les MEMES gardes que tout
+  // sujet : une demande que l'existant couvre deja sort ecartee, avec son motif.
+  const seeded = seedWaitingRequests(calendarSlots, await resolveClientRequests(opts), {
+    national: isNationalCampaign(campaign),
+    pageType: plannablePageTypes(campaign).includes('child') ? 'child' : null,
+    communes: targetCommunes(campaign.communes),
+  })
+
   // Les requetes Search Console ne sont plus distribuees comme cibles des
   // creneaux. Une requete en position 5-20 est, par definition, deja portee par
   // une page du site : y envoyer une page neuve la concurrencerait, et la
@@ -177,10 +197,31 @@ export async function generateBriefPlanWithSignals(opts: GenerateBriefPlanOption
   // ouvert. Ce qui en sort 'skip' ne lui est PAS soumis : le moteur cesse de
   // payer une page pour decouvrir ensuite qu'il ne fallait pas l'ecrire. Un
   // sujet deja couvert lui est soumis AVEC la page a ne pas concurrencer.
-  const subjects = calendarSlots.map(slot => decideForSlot(slot, knowledge))
+  const subjects = seeded.slots.map((slot, index) => {
+    const subject = decideForSlot(slot, knowledge)
+    const requestId = seeded.requestIds[index]
+    return requestId ? { ...subject, requestId } : subject
+  })
   const items = await writePlanBriefs(knowledge, subjects)
 
   return { items, signals, serpEvidence, suggestions }
+}
+
+/**
+ * The campaign's waiting requests. Never blocks a plan: unreadable, the plan is
+ * written without them — they stay waiting, nothing is lost.
+ */
+async function resolveClientRequests(opts: GenerateBriefPlanOptions): Promise<WaitingRequest[]> {
+  if (opts.clientRequests !== undefined) return opts.clientRequests ?? []
+  if (!opts.campaign.id) return []
+  try {
+    const waiting = await listWaitingRequests(opts.campaign.id)
+    if (waiting.length > 0) console.log(`[plan] ${waiting.length} demande(s) du client en attente`)
+    return waiting
+  } catch (error) {
+    console.warn(`[plan] demandes du client illisibles, plan ecrit sans elles : ${error instanceof Error ? error.message : error}`)
+    return []
+  }
 }
 
 /** What `loadPlanningKnowledge` reads: a plan's options, without its length. */
@@ -440,6 +481,8 @@ export interface PlannedSubject {
   action: Exclude<EditorialAction, { kind: 'refresh' }>
   /** La page existante qui couvre deja le sujet seme ; null quand rien ne le couvre. */
   avoid: AvoidedPage | null
+  /** La demande du client que ce creneau porte (§ 3.5) ; absente d'un sujet de la rotation. */
+  requestId?: string
 }
 
 /**
@@ -744,6 +787,7 @@ export function buildPrompt(opts: {
     target_keyword_seed: subject.slot.target_keyword,
     target_city: subject.slot.target_city,
     ...(subject.avoid ? { deja_couvert_par: subject.avoid.url } : {}),
+    ...(subject.requestId ? { demande_client: true } : {}),
   }))
 
   const avoidLines = opts.subjects.flatMap((subject, index) =>
@@ -785,7 +829,7 @@ ${buildSerpSection(opts.serpEvidence)}
 ${buildSuggestionSection(opts.suggestions ?? [])}
 Slots a transformer en briefs (les sujets bloques par Search Console ont deja ete retires avant cet appel) :
 ${JSON.stringify(slots, null, 1)}
-${avoidSection}
+${avoidSection}${requestSection(opts.subjects)}
 Objectif:
 Pour chaque slot, produire un brief SEO complet pour une page NEUVE. Ce brief servira le jour J a rediger
 la page avec une autre IA. Reponds avec exactement un item par slot, dans l'ordre de la liste.
@@ -852,6 +896,20 @@ Reponds avec ce JSON:
     }
   ]
 }`.trim()
+}
+
+/**
+ * Ce que le modele doit savoir d'un creneau porte par une demande du client —
+ * rien du tout quand aucun ne l'est : le prompt d'un plan sans demande reste
+ * celui d'avant (brief-plan.flow.test.ts le fige).
+ */
+function requestSection(subjects: readonly PlannedSubject[]): string {
+  if (!subjects.some((subject) => subject.requestId)) return ''
+  return `
+Creneaux marques "demande_client" : la recherche a ete demandee par le client lui-meme, qui suit cette page
+jusqu'en ligne. Garde target_keyword_seed comme target_keyword (corrige au plus l'orthographe, ou ajoute la
+ville du creneau) et ne le remplace jamais par une suggestion ni une formulation voisine.
+`
 }
 
 /**
@@ -1387,6 +1445,7 @@ function buildBrief(draft: {
       action.kind === 'skip' ? 0 : item.estimated_word_count || estimatedWords(pageType, campaign.target_length),
     rationale: draft.rationale,
     action,
+    ...(subject.requestId ? { client_request_id: subject.requestId } : {}),
   }
 }
 
