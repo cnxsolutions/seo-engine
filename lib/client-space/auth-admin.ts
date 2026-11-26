@@ -43,6 +43,10 @@ const USER_SCAN_PER_PAGE = 1000
  * account was made, a member deleted by hand — so it is found by scanning the
  * user list: the admin API of supabase-js has no lookup by address. Bounded:
  * ten thousand accounts is far beyond what this space will hold.
+ *
+ * Confirming an account this code did not create is safe: whatever password
+ * someone may have set on it outside this space opens nothing here — the space
+ * only accepts sessions opened by a code (`judgeSession`, the `amr` claim).
  */
 export async function ensureConfirmedUser(email: string): Promise<string> {
   const admin = createServiceClient().auth.admin

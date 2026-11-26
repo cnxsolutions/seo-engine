@@ -76,7 +76,7 @@ reprendre · ❌ absent · ❓ à vérifier.
 | ACC-1 | L'opérateur invite un client depuis les **Réglages** d'un site (nom du client, e-mail) ; le client reçoit un e-mail d'invitation | demande | ✅ L1 (invitation = compte confirmé + code, voir § 4.4) | L1 |
 | ACC-2 | Connexion **sans mot de passe** : code à 6 chiffres reçu par e-mail (lien en secours), seuls les e-mails invités reçoivent un code | décision 3 | ✅ L1 | L1 |
 | ACC-3 | **Cloisonnement** : un membre ne lit et n'écrit que sur les sites de son client, vérifié côté serveur à chaque requête | règles dev | ✅ L1 (`scope.ts`, 3 contrôles) | L1 |
-| ACC-4 | Révocation d'un accès par l'opérateur (effet immédiat), déconnexion, session qui expire | règles dev | ✅ L1 (révocation + blocage du compte ; session de 30 jours) | L1 |
+| ACC-4 | Révocation d'un accès par l'opérateur (effet immédiat), déconnexion, session qui expire | règles dev | ✅ L1 (révocation + blocage du compte ; 30 jours comptés depuis le code de LA session — claim `amr` —, sessions antérieures à une révocation refusées) | L1 |
 | ACC-5 | Barrière : `/espace`, `/api/espace`, `/auth` sortent de la barrière Basic et passent par la session client ; tout le reste reste derrière `APP_ACCESS_SECRET`, fermé par défaut | `proxy.ts` | ✅ L1 (`lib/client-space/gate.ts`) | L1 |
 | ACC-6 | Pages connexion, code expiré, accès révoqué, 403/404/500 de l'espace, en français, à la DA CNX | règles dev | ✅ L1 (accès retiré = page de connexion qui le dit ; 404 pour un site d'un autre client) | L1 |
 | ACC-7 | L'opérateur voit qui a accès à chaque site et la dernière connexion | — | ✅ L1 (section « Accès client » des Réglages) | L1 |

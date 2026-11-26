@@ -28,7 +28,7 @@ import { inviteMember, loadSiteAccess, revokeMember } from './access'
 const SITE = { id: 'site-1', name: 'Plomberie Martin', client_id: null as string | null }
 const member = (values: Partial<MemberRow> = {}): MemberRow => ({
   id: 'member-1', client_id: 'client-a', user_id: 'user-1', email: 'marie@martin.test',
-  last_login_at: null, revoked_at: null, created_at: '2026-11-01T09:00:00Z', ...values,
+  last_login_at: null, revoked_at: null, sessions_valid_after: null, created_at: '2026-11-01T09:00:00Z', ...values,
 })
 
 beforeEach(() => {
@@ -69,13 +69,14 @@ describe('inviteMember', () => {
     expect(repository.insertMember).not.toHaveBeenCalled()
   })
 
-  it('rouvre un acces revoque : debloque le compte, efface la revocation', async () => {
+  it('rouvre un acces revoque : efface la revocation, ecarte les anciennes sessions, puis debloque le compte', async () => {
     repository.findSiteLink.mockResolvedValue({ ...SITE, client_id: 'client-a' })
     repository.findMemberByEmail.mockResolvedValue(member({ revoked_at: '2026-11-25T10:00:00Z' }))
 
     expect(await inviteMember({ siteId: 'site-1', email: 'marie@martin.test', client: null })).toEqual({ status: 'reopened' })
+    expect(repository.updateMember).toHaveBeenCalledWith('member-1', { revoked_at: null, sessions_valid_after: expect.any(String) })
     expect(admin.setUserBanned).toHaveBeenCalledWith('user-1', false)
-    expect(repository.updateMember).toHaveBeenCalledWith('member-1', { revoked_at: null })
+    expect(repository.updateMember.mock.invocationCallOrder[0]).toBeLessThan(admin.setUserBanned.mock.invocationCallOrder[0])
   })
 
   it('dit quand Supabase refuse un second e-mail dans la minute', async () => {
@@ -105,7 +106,7 @@ describe('revokeMember', () => {
     repository.findMemberOfClient.mockResolvedValue(member())
 
     expect(await revokeMember('site-1', 'member-1')).toBe('revoked')
-    expect(repository.updateMember).toHaveBeenCalledWith('member-1', { revoked_at: expect.any(String) })
+    expect(repository.updateMember).toHaveBeenCalledWith('member-1', { revoked_at: expect.any(String), sessions_valid_after: expect.any(String) })
     expect(admin.setUserBanned).toHaveBeenCalledWith('user-1', true)
     expect(repository.updateMember.mock.invocationCallOrder[0]).toBeLessThan(admin.setUserBanned.mock.invocationCallOrder[0])
   })

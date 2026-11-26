@@ -11,7 +11,7 @@ function clock(start = 0) {
 describe('createRateLimiter', () => {
   it('laisse passer jusqu a la limite, puis refuse avec le delai restant', () => {
     const time = clock()
-    const limiter = createRateLimiter(RULE, time.now)
+    const limiter = createRateLimiter(RULE, { now: time.now })
 
     expect([1, 2, 3].map(() => limiter.hit('a').allowed)).toEqual([true, true, true])
     time.advance(20_000)
@@ -20,7 +20,7 @@ describe('createRateLimiter', () => {
 
   it('rouvre la fenetre une fois le delai ecoule', () => {
     const time = clock()
-    const limiter = createRateLimiter(RULE, time.now)
+    const limiter = createRateLimiter(RULE, { now: time.now })
     for (let i = 0; i < 4; i++) limiter.hit('a')
 
     time.advance(60_000)
@@ -28,21 +28,36 @@ describe('createRateLimiter', () => {
   })
 
   it('compte chaque cle a part', () => {
-    const limiter = createRateLimiter(RULE, clock().now)
+    const limiter = createRateLimiter(RULE, { now: clock().now })
     for (let i = 0; i < 4; i++) limiter.hit('a')
     expect(limiter.hit('b').allowed).toBe(true)
+  })
+
+  it('borne la memoire : plein, il refuse une cle nouvelle mais sert les cles connues', () => {
+    const time = clock()
+    const limiter = createRateLimiter(RULE, { now: time.now, maxKeys: 2 })
+    limiter.hit('a')
+    limiter.hit('b')
+
+    expect(limiter.hit('c').allowed).toBe(false)
+    expect(limiter.hit('a').allowed).toBe(true)
+
+    // Once the windows have expired, a sweep makes room again.
+    time.advance(60_000)
+    expect(limiter.hit('c').allowed).toBe(true)
   })
 })
 
 describe('hitAll', () => {
-  it('refuse des qu une des cles est pleine, et compte toutes les cles', () => {
-    const limiter = createRateLimiter(RULE, clock().now)
+  it('s arrete a la premiere cle refusee : une IP au-dela de son budget n entame pas celui de l adresse', () => {
+    const limiter = createRateLimiter(RULE, { now: clock().now })
     for (let i = 0; i < 3; i++) limiter.hit('ip:1')
 
-    expect(hitAll(limiter, ['email:x', 'ip:1']).allowed).toBe(false)
-    // email:x was counted by the refused attempt: two more fit, not three.
-    expect(hitAll(limiter, ['email:x', 'ip:2']).allowed).toBe(true)
-    expect(hitAll(limiter, ['email:x', 'ip:3']).allowed).toBe(true)
-    expect(hitAll(limiter, ['email:x', 'ip:4']).allowed).toBe(false)
+    for (let i = 0; i < 10; i++) expect(hitAll(limiter, ['ip:1', 'email:x']).allowed).toBe(false)
+    // email:x was never counted: three attempts still fit, from other IPs.
+    expect(hitAll(limiter, ['ip:2', 'email:x']).allowed).toBe(true)
+    expect(hitAll(limiter, ['ip:3', 'email:x']).allowed).toBe(true)
+    expect(hitAll(limiter, ['ip:4', 'email:x']).allowed).toBe(true)
+    expect(hitAll(limiter, ['ip:5', 'email:x']).allowed).toBe(false)
   })
 })

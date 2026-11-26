@@ -17,6 +17,12 @@
 -- REVOCATION. Un acces retire garde sa ligne (`revoked_at`) : l'operateur voit
 -- qui a eu acces, et une nouvelle invitation rouvre la meme ligne.
 --
+-- SESSIONS. Une session vaut 30 jours a partir de la saisie du code qui l'a
+-- ouverte (le claim `amr` du jeton Supabase, conserve a chaque rafraichissement),
+-- et seulement si ce code a ete saisi APRES `sessions_valid_after`, que la
+-- revocation et la reouverture reposent a maintenant : un telephone vole avant
+-- un retrait ne revient pas avec la reouverture.
+--
 -- `sites.client_id` est NULLABLE, sans backfill : un site sans client est le cas
 -- de tous les sites existants, et rien ne change pour eux.
 --
@@ -38,10 +44,12 @@ CREATE TABLE IF NOT EXISTS public.client_members (
   -- Le compte Supabase Auth. Supprime cote Auth, le membre disparait avec lui.
   user_id        uuid        NOT NULL UNIQUE REFERENCES auth.users(id) ON DELETE CASCADE,
   email          text        NOT NULL CHECK (email = lower(btrim(email)) AND email LIKE '%_@_%'),
-  -- Derniere connexion reussie (code ou lien verifie). Sert aussi de borne a la
-  -- duree d'une session : lib/client-space/session.ts.
+  -- Derniere connexion reussie (code ou lien verifie), montree a l'operateur.
+  -- Ne borne PAS la duree d'une session : c'est le jeton qui la porte.
   last_login_at  timestamptz,
   revoked_at     timestamptz,
+  -- Toute session ouverte (code saisi) avant cet instant est refusee.
+  sessions_valid_after timestamptz,
   created_at     timestamptz NOT NULL DEFAULT now()
 );
 

@@ -26,5 +26,6 @@ export type SignInNotice = keyof typeof SIGN_IN_NOTICES
 
 export function readSignInNotice(raw: string | string[] | undefined): SignInNotice | null {
   const value = Array.isArray(raw) ? raw[0] : raw
-  return value && value in SIGN_IN_NOTICES ? (value as SignInNotice) : null
+  // `hasOwn`, not `in`: `?motif=constructor` must not reach Object.prototype.
+  return value && Object.hasOwn(SIGN_IN_NOTICES, value) ? (value as SignInNotice) : null
 }

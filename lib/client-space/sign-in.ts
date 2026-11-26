@@ -34,13 +34,22 @@ export type VerificationResult =
   | { status: 'invalid' }
   | { status: 'limited'; retryAfterSeconds: number }
 
+/**
+ * Every Supabase Auth call leaves from the server's one address, so Supabase's
+ * per-IP ceilings are ceilings for the whole space. Hitting one is « too many
+ * attempts », said as such — never « wrong code » to a member whose code was right.
+ */
+const SUPABASE_BUSY_SECONDS = 300
+
 // One process, one instance: these counters are the whole truth (lib/rate-limit.ts).
+// Keys are listed IP first: an address refused by its IP is not counted against
+// the e-mail too (lib/rate-limit.ts, hitAll).
 const codeRequests: RateLimiter = createRateLimiter(SIGN_IN_CODE_REQUESTS)
 const codeVerifications: RateLimiter = createRateLimiter(SIGN_IN_CODE_VERIFICATIONS)
 
 /** `email` normalised by the caller (normalizeEmail). */
 export async function requestSignInCode(input: { email: string; ip: string; defer: Defer }): Promise<CodeRequestResult> {
-  const verdict = hitAll(codeRequests, [`email:${input.email}`, `ip:${input.ip}`])
+  const verdict = hitAll(codeRequests, [`ip:${input.ip}`, `email:${input.email}`])
   if (!verdict.allowed) return { status: 'limited', retryAfterSeconds: verdict.retryAfterSeconds }
 
   const member = await findMemberByEmail(input.email)
@@ -62,10 +71,11 @@ export async function verifySignInCode(input: {
   auth: SupabaseClient
   now?: Date
 }): Promise<VerificationResult> {
-  const verdict = hitAll(codeVerifications, [`email:${input.email}`, `ip:${input.ip}`])
+  const verdict = hitAll(codeVerifications, [`ip:${input.ip}`, `email:${input.email}`])
   if (!verdict.allowed) return { status: 'limited', retryAfterSeconds: verdict.retryAfterSeconds }
 
   const { data, error } = await input.auth.auth.verifyOtp({ email: input.email, token: input.code, type: 'email' })
+  if (error?.status === 429) return { status: 'limited', retryAfterSeconds: SUPABASE_BUSY_SECONDS }
   if (error || !data.user) return { status: 'invalid' }
   return completeSignIn(input.auth, data.user.id, input.now ?? new Date())
 }
@@ -81,6 +91,7 @@ export async function verifySignInLink(input: {
   if (!verdict.allowed) return { status: 'limited', retryAfterSeconds: verdict.retryAfterSeconds }
 
   const { data, error } = await input.auth.auth.verifyOtp({ token_hash: input.tokenHash, type: 'email' })
+  if (error?.status === 429) return { status: 'limited', retryAfterSeconds: SUPABASE_BUSY_SECONDS }
   if (error || !data.user) return { status: 'invalid' }
   return completeSignIn(input.auth, data.user.id, input.now ?? new Date())
 }

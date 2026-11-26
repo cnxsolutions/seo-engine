@@ -194,8 +194,12 @@ describe('espace client — cloisonnement (QA-2)', () => {
 })
 
 describe('espace client — revocation et expiration (ACC-4)', () => {
+  /** A session of B opened BEFORE the revocation, to check it never comes back. */
+  let jarBeforeRevocation: MemoryJar
+
   it('un acces retire ferme la session tout de suite, et plus aucun code ne part', async () => {
     const jar = await signInFresh(EMAIL_B)
+    jarBeforeRevocation = jar
     const session = await activeSession(jar)
 
     expect(await revokeMember(siteIds.a1, session.memberId)).toBe('not_found')
@@ -207,16 +211,21 @@ describe('espace client — revocation et expiration (ACC-4)', () => {
     expect(deferred).toHaveLength(0)
   })
 
-  it('une nouvelle invitation rouvre l acces', async () => {
+  it('une nouvelle invitation rouvre l acces, avec un nouveau code seulement', async () => {
     await pause(1100)
     expect(await inviteMember({ siteId: siteIds.b, email: EMAIL_B, client: null })).toEqual({ status: 'reopened' })
     const session = await activeSession(await signIn(EMAIL_B))
     expect(session.email).toBe(EMAIL_B)
+
+    // The phone that was signed in before the revocation stays out.
+    expect((await resolveClientSession(authOn(jarBeforeRevocation))).status).toBe('expired')
   })
 
-  it('une session plus vieille que 30 jours est refusee', async () => {
+  it('une session ouverte avant la borne du membre est refusee, meme rafraichie', async () => {
     const jar = await signInFresh(EMAIL_A)
-    await db.query(`update public.client_members set last_login_at = now() - interval '31 days' where email = $1`, [EMAIL_A])
+    await pause(1100)
+    await db.query(`update public.client_members set sessions_valid_after = now() where email = $1`, [EMAIL_A])
+    await authOn(jar).auth.refreshSession()
     expect((await resolveClientSession(authOn(jar))).status).toBe('expired')
   })
 })

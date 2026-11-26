@@ -10,7 +10,7 @@
 import { createServiceClient } from '@/lib/supabase'
 import { CLIENT_SITE_COLUMNS, type ClientSiteRow } from './dto'
 
-const MEMBER_COLUMNS = 'id,client_id,user_id,email,last_login_at,revoked_at,created_at'
+const MEMBER_COLUMNS = 'id,client_id,user_id,email,last_login_at,revoked_at,sessions_valid_after,created_at'
 const CLIENT_COLUMNS = 'id,name'
 
 /** More members than this on one client is not a list a screen can show. */
@@ -27,6 +27,7 @@ export interface MemberRow {
   email: string
   last_login_at: string | null
   revoked_at: string | null
+  sessions_valid_after: string | null
   created_at: string
 }
 
@@ -86,7 +87,7 @@ export async function insertMember(values: { client_id: string; user_id: string;
 
 export async function updateMember(
   id: string,
-  values: Partial<Pick<MemberRow, 'last_login_at' | 'revoked_at'>>,
+  values: Partial<Pick<MemberRow, 'last_login_at' | 'revoked_at' | 'sessions_valid_after'>>,
 ): Promise<void> {
   const { error } = await createServiceClient().from('client_members').update(values).eq('id', id)
   if (error) fail('mise a jour du membre', error.message)

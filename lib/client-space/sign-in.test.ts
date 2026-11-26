@@ -21,6 +21,7 @@ const MEMBER: MemberRow = {
   email: 'marie@martin.test',
   last_login_at: null,
   revoked_at: null,
+  sessions_valid_after: null,
   created_at: '2026-11-01T09:00:00Z',
 }
 
@@ -28,13 +29,13 @@ let n = 0
 /** The limiters are module-wide: every test asks from its own address and IP. */
 const fresh = () => ({ email: `m${++n}@martin.test`, ip: `ip-${n}` })
 
-function auth(verify: { userId?: string; error?: boolean }) {
+function auth(verify: { userId?: string; error?: boolean; status?: number }) {
   const signOut = vi.fn(async () => ({ error: null }))
   const client = {
     auth: {
       verifyOtp: vi.fn(async () => ({
         data: { user: verify.userId ? { id: verify.userId } : null },
-        error: verify.error ? { message: 'Token has expired or is invalid' } : null,
+        error: verify.error ? { message: 'Token has expired or is invalid', status: verify.status ?? 403 } : null,
       })),
       signOut,
     },
@@ -106,6 +107,12 @@ describe('verifySignInCode', () => {
     expect(await verifySignInCode({ email, code: '123456', ip, auth: client })).toEqual({ status: 'invalid' })
     expect(signOut).toHaveBeenCalledWith({ scope: 'local' })
     expect(repository.updateMember).not.toHaveBeenCalled()
+  })
+
+  it('dit « trop de tentatives », pas « code faux », quand Supabase sature', async () => {
+    const { email, ip } = fresh()
+    const result = await verifySignInCode({ email, code: '123456', ip, auth: auth({ error: true, status: 429 }).client })
+    expect(result.status).toBe('limited')
   })
 
   it('freine au-dela de 10 essais par adresse', async () => {

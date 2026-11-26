@@ -118,8 +118,10 @@ export async function inviteMember(input: { siteId: string; email: string; clien
     const userId = await ensureConfirmedUser(input.email)
     await insertMember({ client_id: clientId, user_id: userId, email: input.email })
   } else if (plan === 'reopen' && existing) {
+    // Sessions from before the revocation stay dead: only a code typed from
+    // now on opens the space again.
+    await updateMember(existing.id, { revoked_at: null, sessions_valid_after: new Date().toISOString() })
     await setUserBanned(existing.user_id, false)
-    await updateMember(existing.id, { revoked_at: null })
   }
 
   // Awaited, unlike the sign-in page: the operator is waiting to know whether
@@ -179,7 +181,8 @@ export async function revokeMember(siteId: string, memberId: string): Promise<'r
   const member = await findMemberOfClient(site.client_id, memberId)
   if (!member) return 'not_found'
 
-  if (!member.revoked_at) await updateMember(member.id, { revoked_at: new Date().toISOString() })
+  const now = new Date().toISOString()
+  if (!member.revoked_at) await updateMember(member.id, { revoked_at: now, sessions_valid_after: now })
   await setUserBanned(member.user_id, true)
   return 'revoked'
 }

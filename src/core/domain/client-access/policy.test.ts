@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest'
 import {
   CLIENT_SESSION_MAX_DAYS,
   SIGN_IN_CODE_PATTERN,
-  isSessionExpired,
+  codeSignInTime,
+  judgeSession,
   memberState,
   normalizeEmail,
   normalizeSignInCode,
@@ -12,6 +13,9 @@ import {
 
 const NOW = new Date('2026-11-26T12:00:00Z')
 const daysAgo = (days: number) => new Date(NOW.getTime() - days * 24 * 60 * 60 * 1000).toISOString()
+
+/** The `amr` claim of a session whose code was typed `days` ago. */
+const codeAmr = (days: number) => [{ method: 'otp', timestamp: Math.floor(Date.parse(daysAgo(days)) / 1000) }]
 
 describe('normalizeEmail', () => {
   it('ramene une adresse a une seule ecriture', () => {
@@ -38,18 +42,41 @@ describe('memberState', () => {
   })
 })
 
-describe('isSessionExpired', () => {
-  it('garde une session ouverte depuis moins de la duree maximale', () => {
-    expect(isSessionExpired(daysAgo(CLIENT_SESSION_MAX_DAYS - 1), NOW)).toBe(false)
+describe('codeSignInTime', () => {
+  it('lit l instant du code, le plus recent s il y en a plusieurs', () => {
+    expect(codeSignInTime([...codeAmr(5), ...codeAmr(2)])).toBe(Math.floor(Date.parse(daysAgo(2)) / 1000) * 1000)
   })
 
-  it('ferme une session plus vieille que la duree maximale', () => {
-    expect(isSessionExpired(daysAgo(CLIENT_SESSION_MAX_DAYS + 1), NOW)).toBe(true)
+  it('ne connait pas d autre porte que le code', () => {
+    expect(codeSignInTime([{ method: 'password', timestamp: 1 }])).toBeNull()
+    expect(codeSignInTime(undefined)).toBeNull()
+  })
+})
+
+describe('judgeSession', () => {
+  it('garde une session ouverte par un code depuis moins de la duree maximale', () => {
+    expect(judgeSession(codeAmr(CLIENT_SESSION_MAX_DAYS - 1), null, NOW)).toBe('valid')
   })
 
-  it('ne fait confiance ni a une connexion absente ni a une date illisible', () => {
-    expect(isSessionExpired(null, NOW)).toBe(true)
-    expect(isSessionExpired('pas une date', NOW)).toBe(true)
+  it('ferme une session plus vieille que la duree maximale, quoi que disent les rafraichissements', () => {
+    expect(judgeSession(codeAmr(CLIENT_SESSION_MAX_DAYS + 1), null, NOW)).toBe('expired')
+  })
+
+  it('ferme une session ouverte avant une revocation ou une reouverture', () => {
+    expect(judgeSession(codeAmr(3), daysAgo(1), NOW)).toBe('expired')
+    expect(judgeSession(codeAmr(1), daysAgo(3), NOW)).toBe('valid')
+    expect(judgeSession(codeAmr(1), 'pas une date', NOW)).toBe('expired')
+  })
+
+  it('compte a la seconde, comme le jeton : un code saisi dans la seconde de la reouverture passe', () => {
+    const typed = [{ method: 'otp', timestamp: Date.parse('2026-11-26T10:00:00Z') / 1000 }]
+    expect(judgeSession(typed, '2026-11-26T10:00:00.700Z', NOW)).toBe('valid')
+    expect(judgeSession(typed, '2026-11-26T10:00:01.000Z', NOW)).toBe('expired')
+  })
+
+  it('refuse une session ouverte autrement que par un code', () => {
+    expect(judgeSession([{ method: 'password', timestamp: Math.floor(NOW.getTime() / 1000) }], null, NOW)).toBe('refused')
+    expect(judgeSession(undefined, null, NOW)).toBe('refused')
   })
 })
 
@@ -73,14 +100,27 @@ describe('planInvitation', () => {
 })
 
 describe('safeNextPath', () => {
+  const BACKSLASH = String.fromCharCode(92)
+
   it('garde un chemin de l espace client', () => {
     expect(safeNextPath('/espace')).toBe('/espace')
     expect(safeNextPath('/espace/demandes?site=1')).toBe('/espace/demandes?site=1')
   })
 
   it('ne redirige jamais hors de l espace client', () => {
-    for (const raw of [null, '', 'https://evil.test', '//evil.test', '/dashboard', '/espacex', '/espace//evil.test', '/espace\\evil']) {
+    for (const raw of [null, '', 'espace', 'https://evil.test', '//evil.test', `/${BACKSLASH}evil.test`, '/dashboard', '/espacex']) {
       expect(safeNextPath(raw)).toBe('/espace')
     }
+  })
+
+  it('resout les segments « .. », encodes ou non, avant de juger', () => {
+    for (const raw of ['/espace/../sites', '/espace/%2e%2e/api/sites', '/espace/%2E%2e/dashboard', `/espace${BACKSLASH}..${BACKSLASH}sites`]) {
+      expect(safeNextPath(raw)).toBe('/espace')
+    }
+    expect(safeNextPath('/espace/a/../b')).toBe('/espace/b')
+  })
+
+  it('garde un double trait oblique DANS le chemin : il reste sur le meme site', () => {
+    expect(safeNextPath('/espace//evil.test')).toBe('/espace//evil.test')
   })
 })

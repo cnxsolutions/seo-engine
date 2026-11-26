@@ -34,10 +34,45 @@ export const InvitationBody = z.object({
     .optional(),
 })
 
-/** A JSON body, or `null` when the request carries something else. */
+/** Every body these routes accept fits in far less: an address, a code, a client name. */
+const MAX_BODY_BYTES = 4096
+
+/**
+ * A JSON body, or `null` — which the route answers with a 400 — when:
+ *
+ * - it is not declared `application/json`: an HTML form cannot send that type,
+ *   so a cross-site form post is refused even by a browser that sends no
+ *   `Sec-Fetch-Site` (the proxy's own check);
+ * - it is larger than MAX_BODY_BYTES: read in chunks and dropped at the limit,
+ *   never buffered whole — these routes are public, and parse before any limit.
+ */
 export async function readJson(req: Request): Promise<unknown> {
+  const type = req.headers.get('content-type')?.split(';')[0]?.trim().toLowerCase()
+  if (type !== 'application/json') return null
+  if (Number(req.headers.get('content-length') ?? 0) > MAX_BODY_BYTES) return null
+  if (!req.body) return null
+
+  const reader = req.body.getReader()
+  const chunks: Uint8Array[] = []
+  let size = 0
   try {
-    return await req.json()
+    for (;;) {
+      const { done, value } = await reader.read()
+      if (done) break
+      size += value.byteLength
+      if (size > MAX_BODY_BYTES) {
+        await reader.cancel()
+        return null
+      }
+      chunks.push(value)
+    }
+    const bytes = new Uint8Array(size)
+    let offset = 0
+    for (const chunk of chunks) {
+      bytes.set(chunk, offset)
+      offset += chunk.byteLength
+    }
+    return JSON.parse(new TextDecoder().decode(bytes)) as unknown
   } catch {
     return null
   }

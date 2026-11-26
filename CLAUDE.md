@@ -39,7 +39,7 @@ production n'est touchee que pour appliquer une migration avant un merge.
 npm run dev          # http://localhost:3000
 npm run lint         # ESLint          — 0 erreur attendue (33 warnings tolerees)
 npm run typecheck    # tsc --noEmit    — 0 erreur attendue
-npm test             # Vitest          — 1 339 tests (87 fichiers), tous verts
+npm test             # Vitest          — 1 360 tests (89 fichiers), tous verts
 npm run build        # build local (sans sortie standalone, voir next.config.ts)
 ```
 
@@ -179,9 +179,13 @@ Auth). Une fuite d'un client vers un autre est LE risque du chantier :
   de la session et jamais d'un identifiant envoye par le navigateur. Un site
   d'un autre client repond **404**, pas 403.
 - **Trois controles, aucun ne suffit seul** : `proxy.ts` (une session existe),
-  le layout `app/(espace)/espace/(membre)` (un membre non revoque, connecte il
-  y a moins de 30 jours), puis chaque route ou page (le site appartient a son
-  client).
+  le layout `app/(espace)/espace/(membre)` (un membre non revoque, une session
+  ouverte PAR UN CODE il y a moins de 30 jours et apres sa derniere revocation —
+  le claim `amr` du jeton, jamais `last_login_at`), puis chaque route ou page
+  (le site appartient a son client).
+- Les limites de debit (`lib/rate-limit.ts`) sont bornees en memoire et
+  listent l'IP AVANT l'adresse : un limiteur ne doit pas devenir l'attaque, le
+  meme processus fait tourner le planificateur.
 - **Jamais `select('*')`** sur `sites` cote client : DTO a colonnes nommees
   (`lib/client-space/dto.ts`), sans secret, teste.
 - La cle **publique** ne sert qu'a Supabase Auth (`auth-client.ts`) ; toute
@@ -214,7 +218,7 @@ Auth). Une fuite d'un client vers un autre est LE risque du chantier :
 - **Cache GitHub Actions cloisonne par branche** : `main` ne lit pas le cache
   cree sur une branche de PR. Le premier build apres un merge repart de zero.
 - **Vitest echoue en bloc sous Git Bash** quand le chemin courant commence par
-  un lecteur en minuscule (`c:/laragon/...`) : les 87 fichiers tombent avec
+  un lecteur en minuscule (`c:/laragon/...`) : les 89 fichiers tombent avec
   « Cannot read properties of undefined (reading 'config') », zero test lance.
   Ce n'est pas le code : lancer `npm test` depuis PowerShell, ou `cd /C/laragon/...`.
 
