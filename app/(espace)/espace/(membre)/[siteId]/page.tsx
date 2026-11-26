@@ -7,7 +7,7 @@ import { readOnlinePages, readPeriod } from '@/lib/client-space/overview'
 import { readSiteRequests } from '@/lib/client-space/requests'
 import { currentSite } from './current-site'
 import { OnlineList, UpcomingList } from './PageLists'
-import { PeriodThread } from './PeriodThread'
+import { PeriodThread } from '@/components/PeriodThread'
 import { RequestItem } from './demandes/RequestItem'
 
 export const metadata: Metadata = { title: 'Accueil' }

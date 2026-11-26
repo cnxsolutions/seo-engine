@@ -36,7 +36,7 @@ export async function releaseReplacedSlots(campaignId: string): Promise<number> 
   return written.length
 }
 
-export const WITHDRAWN_BEFORE_START = 'Demande retiree par le client avant le debut du cycle : aucune page a produire.'
+export const WITHDRAWN_BEFORE_START = 'Demande retirée par le client avant le début du cycle : aucune page à produire.'
 
 /**
  * A plan that starts — its slots are saved — and the campaign's waiting

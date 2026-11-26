@@ -6,22 +6,28 @@
 // words for the same statuses live in lib/client-space/labels.ts. Never a
 // status name, a reason code or a table name on screen.
 
+import { REQUEST_STATUS_TERMS } from '@/lib/glossary'
 import type { DecisionProblem, OperatorAction } from '@/src/core/domain/keyword-requests/arbitration'
 import type { RequestStatus } from '@/src/core/domain/keyword-requests/lifecycle'
 
 export type QueueTone = 'neutral' | 'info' | 'good' | 'warning'
 
-export const OPERATOR_STATUS_LABELS: Readonly<Record<RequestStatus, { label: string; tone: QueueTone }>> = {
-  received: { label: 'Reçue — analyse en cours', tone: 'neutral' },
-  review: { label: 'À examiner', tone: 'warning' },
-  deferred: { label: 'Reportée au cycle suivant', tone: 'info' },
-  scheduled: { label: 'Planifiée', tone: 'good' },
-  in_production: { label: 'En rédaction', tone: 'good' },
-  published: { label: 'Publiée', tone: 'good' },
-  covered: { label: 'Couverte', tone: 'neutral' },
-  declined: { label: 'Refusée', tone: 'neutral' },
-  withdrawn: { label: 'Retirée par le client', tone: 'neutral' },
+const STATUS_TONES: Readonly<Record<RequestStatus, QueueTone>> = {
+  received: 'neutral',
+  review: 'warning',
+  deferred: 'info',
+  scheduled: 'good',
+  in_production: 'good',
+  published: 'good',
+  covered: 'neutral',
+  declined: 'neutral',
+  withdrawn: 'neutral',
 }
+
+/** The words from the glossary (lib/glossary.ts), the tone from the console. */
+export const OPERATOR_STATUS_LABELS = Object.fromEntries(
+  (Object.keys(STATUS_TONES) as RequestStatus[]).map((status) => [status, { label: REQUEST_STATUS_TERMS[status].operator, tone: STATUS_TONES[status] }]),
+) as Readonly<Record<RequestStatus, { label: string; tone: QueueTone }>>
 
 /** What decided the current status, in a few words. Every code the engine and the console write. */
 export const REASON_LABELS: Readonly<Record<string, string>> = {

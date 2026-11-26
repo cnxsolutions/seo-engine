@@ -57,7 +57,7 @@ export default async function DashboardLayout({
   ])
 
   return (
-    <div style={{ display: 'flex', minHeight: '100vh', width: '100%' }}>
+    <div className="app-frame">
       {/* Every keyboard pass through the app had to walk the whole rail before
           reaching the page. `.sr-only` hides it until it takes focus. */}
       <a href="#contenu" className="sr-only skip-link">Aller au contenu</a>

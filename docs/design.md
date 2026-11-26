@@ -304,8 +304,10 @@ un nom de table, de tâche ou de colonne.
 | `deferred` | Reportée au cycle suivant | Gardée pour la période suivante |
 | `review` | À examiner | À l'étude chez CNX |
 
-Les libellés client vivent dans **un** module (`lib/keyword-requests/labels.ts`, à côté de
-`lib/publishing/refusal-labels.ts`), jamais en dur dans un écran.
+Chaque terme vit **une** fois dans `lib/glossary.ts` (L5b), avec sa lecture opérateur et sa lecture client ; les
+modules de libellés en dérivent (`lib/client-space/labels.ts`, `lib/keyword-requests/operator-labels.ts`), et un
+test vérifie qu'aucun libellé client ne contient un mot du moteur. Les libellés client vivent dans **un** module
+(`lib/client-space/labels.ts`, à côté de `lib/publishing/refusal-labels.ts`), jamais en dur dans un écran.
 
 ## 11. Accessibilité
 

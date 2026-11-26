@@ -110,7 +110,7 @@ export function ProductionTab({
             />
             <StatTile
               icon={ShieldAlert}
-              label="Rejetées par le gate"
+              label="Bloquées au contrôle qualité"
               value={counts.rejected}
               hint="Refusées avant publication par le contrôle qualité"
             />

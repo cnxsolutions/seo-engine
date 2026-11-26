@@ -136,7 +136,7 @@ describe('demandes — cloisonnement (QA-2)', () => {
     const { requests, total } = await readSiteRequests(site, { offset: 0, limit: 50 })
     expect(total).toBeGreaterThanOrEqual(9)
     const serialized = JSON.stringify(requests)
-    expect(serialized).not.toContain('Deja visee par un brief')
+    expect(serialized).not.toContain('Déjà visée par un brief')
     expect(serialized).not.toContain('Search Console')
     for (const request of requests) {
       expect(Object.keys(request).sort()).toEqual(['canWithdraw', 'city', 'desiredBy', 'detail', 'id', 'keyword', 'note', 'state', 'timeline'])

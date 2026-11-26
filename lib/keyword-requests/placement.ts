@@ -167,8 +167,8 @@ async function placeOne(
       newItem: { ...brief, scheduled_date: candidate.scheduledDate },
       requestId: request.id,
       reasons: [
-        `Integree au cycle en cours, creneau du ${candidate.scheduledDate}` +
-          (previous ? `, a la place de « ${previous.target_keyword} ».` : '.'),
+        `Intégrée au cycle en cours, créneau du ${candidate.scheduledDate}` +
+          (previous ? `, à la place de « ${previous.target_keyword} ».` : '.'),
       ],
     })
     if (outcome === 'placed') return { outcome: 'placed', reason: null }
@@ -183,11 +183,11 @@ export const OPERATOR_PLACEMENT_BATCH = 5
 const KEPT_REASONS: Readonly<Record<KeptReason, string>> = {
   NO_CYCLE: "Aucun cycle ne tourne sur ce site : la demande attend le prochain plan.",
   NO_RUNNING_CYCLE: "Aucun cycle ne tourne sur ce site : la demande attend le prochain plan.",
-  CYCLE_ENDING: 'Le cycle en cours finit dans moins de 3 jours : la demande passe en tete du prochain plan.',
-  QUOTA_REACHED: "Un tiers des pages du cycle viennent deja de demandes : la demande passe en tete du prochain plan.",
-  NO_FREE_SLOT: "Aucune page prevue n'est remplacable (toutes entamees, trop proches ou piliers) : la demande passe en tete du prochain plan.",
-  BRIEF_UNAVAILABLE: "Le brief n'a pas pu etre redige (modele indisponible) : la demande passe en tete du prochain plan.",
-  SLOTS_TAKEN: 'Les pages remplacables ont ete prises pendant la redaction : la demande passe en tete du prochain plan.',
+  CYCLE_ENDING: 'Le cycle en cours finit dans moins de 3 jours : la demande passe en tête du prochain plan.',
+  QUOTA_REACHED: "Un tiers des pages du cycle viennent déjà de demandes : la demande passe en tête du prochain plan.",
+  NO_FREE_SLOT: "Aucune page prévue n'est remplaçable (toutes entamées, trop proches ou piliers) : la demande passe en tête du prochain plan.",
+  BRIEF_UNAVAILABLE: "Le brief n'a pas pu être rédigé (modèle indisponible) : la demande passe en tête du prochain plan.",
+  SLOTS_TAKEN: 'Les pages remplaçables ont été prises pendant la rédaction : la demande passe en tête du prochain plan.',
 }
 
 /**

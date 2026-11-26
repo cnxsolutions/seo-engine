@@ -3,6 +3,7 @@
 // docs/design.md § 10 — the tone of the CNX site, never a technical term.
 // ─────────────────────────────────────────────────────────────────────────────
 
+import { REQUEST_STATUS_TERMS } from '@/lib/glossary'
 import type { SubmissionProblem } from '@/src/core/domain/keyword-requests/normalize'
 
 export const SIGN_IN_TEXT = {
@@ -155,15 +156,15 @@ export function requestProblemMessage(problem: SubmissionProblem): string {
 
 /** A request's state, in the client's words (src/core/domain/keyword-requests/client-view.ts). */
 export const REQUEST_STATE_LABELS = {
-  analysing: { label: 'Reçue — analyse en cours', tone: 'neutral' },
-  review: { label: 'À l’étude chez CNX', tone: 'info' },
-  deferred: { label: 'Gardée pour la période suivante', tone: 'info' },
-  scheduled: { label: 'Prévue', tone: 'good' },
-  in_production: { label: 'En rédaction', tone: 'good' },
-  published: { label: 'En ligne', tone: 'good' },
-  covered: { label: 'Déjà couverte', tone: 'neutral' },
-  declined: { label: 'Non retenue', tone: 'neutral' },
-  withdrawn: { label: 'Retirée', tone: 'neutral' },
+  analysing: { label: REQUEST_STATUS_TERMS.received.client, tone: 'neutral' },
+  review: { label: REQUEST_STATUS_TERMS.review.client, tone: 'info' },
+  deferred: { label: REQUEST_STATUS_TERMS.deferred.client, tone: 'info' },
+  scheduled: { label: REQUEST_STATUS_TERMS.scheduled.client, tone: 'good' },
+  in_production: { label: REQUEST_STATUS_TERMS.in_production.client, tone: 'good' },
+  published: { label: REQUEST_STATUS_TERMS.published.client, tone: 'good' },
+  covered: { label: REQUEST_STATUS_TERMS.covered.client, tone: 'neutral' },
+  declined: { label: REQUEST_STATUS_TERMS.declined.client, tone: 'neutral' },
+  withdrawn: { label: REQUEST_STATUS_TERMS.withdrawn.client, tone: 'neutral' },
 } as const
 
 /** The one sentence under a request: what was found, what happens next. */

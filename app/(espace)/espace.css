@@ -262,50 +262,6 @@
   line-height: var(--lh-normal);
 }
 
-.thread {
-  display: block;
-  overflow: visible;
-}
-
-.thread__stop-start {
-  stop-color: var(--brand-grad-start);
-}
-
-.thread__stop-end {
-  stop-color: var(--brand-grad-end);
-}
-
-.thread__track {
-  stroke: var(--hero-glass);
-  stroke-width: 6;
-  stroke-linecap: round;
-}
-
-.thread__fill {
-  stroke-width: 6;
-  stroke-linecap: round;
-  transform-box: fill-box;
-  transform-origin: left center;
-  animation: thread-draw var(--dur-slow) ease-in-out both;
-}
-
-.thread__dot {
-  fill: var(--hero-ink);
-  stroke: var(--brand-grad-end);
-  stroke-width: 3;
-}
-
-@keyframes thread-draw {
-  from { transform: scaleX(0); }
-  to { transform: scaleX(1); }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .thread__fill {
-    animation: none;
-  }
-}
-
 /* ── Sections and lists ── */
 
 .espace-page-title {
