@@ -2,12 +2,12 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { FileText, Home, type LucideIcon } from 'lucide-react'
+import { ChartLine, FileText, Home, type LucideIcon } from 'lucide-react'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // The navigation of a site's space (docs/design.md § 9.1): a bottom bar on a
 // phone, a slim rail from 1 024 px. Entries arrive with their screens —
-// « Résultats » with the L2b, « Demandes » with the L3.
+// « Demandes » with the L3.
 // ─────────────────────────────────────────────────────────────────────────────
 
 interface NavEntry {
@@ -20,6 +20,7 @@ interface NavEntry {
 const ENTRIES: NavEntry[] = [
   { section: '', label: 'Accueil', icon: Home },
   { section: '/pages', label: 'Pages', icon: FileText },
+  { section: '/resultats', label: 'Résultats', icon: ChartLine },
 ]
 
 export function SpaceNav({ siteId }: { siteId: string }) {

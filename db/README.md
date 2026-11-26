@@ -127,7 +127,9 @@ RLS ; la cle publique, elle, ne lit plus rien. Une nouvelle table active son RLS
 dans sa propre migration — `db/rls.db.test.ts` echoue sinon. Enfin
 `022_client_space.sql` (L1) : tables `clients` et `client_members` (RLS active,
 sans politique ; `client_members.user_id` reference `auth.users`) et colonne
-nullable `sites.client_id`, sans backfill.
+nullable `sites.client_id`, sans backfill. Puis `023_client_search_summary.sql` (L2b) :
+la fonction qui agrege les resultats Search Console d'un site pour l'espace
+client, en SQL ; `EXECUTE` retire a `anon` et `authenticated`.
 
 Tous ses CHECK sont poses `NOT VALID` : ils s'appliquent aux ecritures futures
 sans jamais faire echouer la migration sur une ligne historique. Une ligne
