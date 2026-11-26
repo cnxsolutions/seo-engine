@@ -17,6 +17,7 @@
 export const SITE_TABS = [
   { slug: '', label: 'Vue d’ensemble' },
   { slug: 'strategie', label: 'Stratégie' },
+  { slug: 'demandes', label: 'Demandes' },
   { slug: 'calendrier', label: 'Calendrier' },
   { slug: 'publication', label: 'Publication' },
   { slug: 'performances', label: 'Performances' },

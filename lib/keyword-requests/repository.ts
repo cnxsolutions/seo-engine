@@ -9,6 +9,8 @@
 // migrations 024 and 025.
 
 import { createServiceClient } from '@/lib/supabase'
+import type { OperatorDecision } from '@/src/core/domain/keyword-requests/arbitration'
+import { INTEGRATE_REASON_CODE } from '@/src/core/domain/keyword-requests/arbitration'
 import type { RequestChange } from '@/src/core/domain/keyword-requests/change'
 import type { WaitingRequest } from '@/src/core/domain/keyword-requests/consumption'
 import type { RequestStatus } from '@/src/core/domain/keyword-requests/lifecycle'
@@ -434,4 +436,116 @@ export async function swapPlanItem(params: {
   })
   if (error) fail('integration au cycle', error.message)
   return data === 'placed' || data === 'request_gone' || data === 'plan_gone' ? data : 'slot_taken'
+}
+
+// ── The operator's console (L5a) ──────────────────────────────────────────
+
+export const OPERATOR_REQUEST_COLUMNS =
+  'id,site_id,campaign_id,keyword,city,note,desired_by,status,reason_code,reasons,created_at,updated_at,decided_by,decided_at,scheduled_for,published_url,deferred_cycles,site:sites(name)'
+
+export interface OperatorRequestRow {
+  id: string
+  site_id: string
+  campaign_id: string | null
+  keyword: string
+  city: string | null
+  note: string | null
+  desired_by: string | null
+  status: RequestStatus
+  reason_code: string | null
+  reasons: string[]
+  created_at: string
+  updated_at: string
+  decided_by: 'engine' | 'operator' | null
+  decided_at: string | null
+  scheduled_for: string | null
+  published_url: string | null
+  deferred_cycles: number
+  site: { name: string } | null
+}
+
+export interface OperatorFilter {
+  /** Null: every status. */
+  statuses: readonly RequestStatus[] | null
+  siteId: string | null
+  /** The queue to arbitrate reads oldest first; the history, newest first. */
+  order: 'oldest' | 'newest'
+}
+
+export async function listOperatorRequests(
+  filter: OperatorFilter,
+  page: { offset: number; limit: number },
+): Promise<{ rows: OperatorRequestRow[]; total: number }> {
+  let query = createServiceClient().from('keyword_requests').select(OPERATOR_REQUEST_COLUMNS, { count: 'exact' })
+  if (filter.statuses) query = query.in('status', filter.statuses as RequestStatus[])
+  if (filter.siteId) query = query.eq('site_id', filter.siteId)
+  const { data, error, count } = await query
+    .order('created_at', { ascending: filter.order === 'oldest' })
+    .order('id', { ascending: true })
+    .range(page.offset, page.offset + page.limit - 1)
+  if (error) fail('file des demandes', error.message)
+  return { rows: (data ?? []) as unknown as OperatorRequestRow[], total: count ?? 0 }
+}
+
+/** The rail's counter, and the console's first filter. */
+export async function countRequestsToReview(siteId: string | null = null): Promise<number> {
+  let query = createServiceClient().from('keyword_requests').select('id', { count: 'exact', head: true }).eq('status', 'review')
+  if (siteId) query = query.eq('site_id', siteId)
+  const { count, error } = await query
+  if (error) fail('demandes a examiner', error.message)
+  return count ?? 0
+}
+
+export async function getRequestForArbitration(id: string): Promise<{ id: string; site_id: string; campaign_id: string | null; status: RequestStatus } | null> {
+  const { data, error } = await createServiceClient()
+    .from('keyword_requests')
+    .select('id,site_id,campaign_id,status')
+    .eq('id', id)
+    .maybeSingle()
+  if (error) fail('demande', error.message)
+  return (data ?? null) as { id: string; site_id: string; campaign_id: string | null; status: RequestStatus } | null
+}
+
+/**
+ * CNX's decision, written only if the request is still where the console saw
+ * it: a request the client withdrew, or the engine moved, a moment ago is not
+ * dragged back.
+ */
+export async function applyOperatorDecision(id: string, decision: OperatorDecision, campaignId: string | null): Promise<boolean> {
+  const { data, error } = await createServiceClient()
+    .from('keyword_requests')
+    .update({
+      status: decision.status,
+      reason_code: decision.reason_code,
+      reasons: decision.reasons,
+      decided_by: 'operator',
+      decided_at: new Date().toISOString(),
+      ...(decision.detach ? { cycle_plan_id: null, plan_item_id: null, scheduled_for: null } : {}),
+      ...(campaignId ? { campaign_id: campaignId } : {}),
+    })
+    .eq('id', id)
+    .eq('status', decision.from)
+    .select('id')
+  if (error) fail('decision', error.message)
+  return (data ?? []).length > 0
+}
+
+/** The requests CNX asked into the cycle in progress, oldest decision first. */
+export async function listRequestsToPlace(limit: number): Promise<Array<{
+  id: string
+  campaign_id: string | null
+  keyword: string
+  city: string | null
+  desired_by: string | null
+}>> {
+  const { data, error } = await createServiceClient()
+    .from('keyword_requests')
+    .select('id,campaign_id,keyword,city,desired_by')
+    .eq('status', 'deferred')
+    .eq('reason_code', INTEGRATE_REASON_CODE)
+    .order('decided_at', { ascending: true })
+    .order('id', { ascending: true })
+    .limit(limit)
+  if (error) fail('demandes a integrer', error.message)
+  return (data ?? []) as Array<{ id: string; campaign_id: string | null; keyword: string; city: string | null; desired_by: string | null }>
 }

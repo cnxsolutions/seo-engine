@@ -4,7 +4,7 @@ import { CLIENT_SPACE_TEXT } from '@/lib/client-space/labels'
 import { ONLINE_PAGES_PER_SCREEN, readOnlinePages, readPeriod } from '@/lib/client-space/overview'
 import { currentSite } from '../current-site'
 import { OnlineList, UpcomingList } from '../PageLists'
-import { readPageNumber } from '../page-number'
+import { readPageNumber } from '@/lib/page-number'
 
 export const metadata: Metadata = { title: 'Pages' }
 

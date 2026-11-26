@@ -105,7 +105,7 @@ reprendre · ❌ absent · ❓ à vérifier.
 | KW-7 | Verdict « À l'étude chez CNX » : hors zone, hors métier, ambigu | demande | ✅ L3 (+ site sans campagne, avis du modèle indisponible) | L3 |
 | KW-8 | Suivi : chronologie reçue → analysée → prévue (date) → en rédaction → en ligne (lien) | demande | ✅ L3 : chronologie affichée, rafraîchie toutes les 10 s pendant l'analyse ; L4b : « en rédaction » et « en ligne » (lien), suivis toutes les 2 min depuis le créneau et sa génération | L3 · L4 |
 | KW-9 | Le client retire une demande tant qu'elle n'est pas en rédaction | — | ✅ L3 (modale de confirmation ; retrait conditionnel au statut, jamais écrasé par l'analyse) | L3 |
-| KW-10 | Console opérateur : file de toutes les demandes, filtres, arbitrage (intégrer maintenant, reporter, refuser avec motif, rouvrir), compteur « à examiner » dans le rail | demande | ❌ | L5 |
+| KW-10 | Console opérateur : file de toutes les demandes, filtres, arbitrage (intégrer maintenant, reporter, refuser avec motif, rouvrir), compteur « à examiner » dans le rail | demande | ✅ L5a (`/demandes`, onglet « Demandes » de chaque site, compteur du rail ; « intégrer » est répondu par la tâche des demandes en 2 min au plus) | L5 |
 | KW-11 | Report sans perte : une demande non consommée (plan plein, quota atteint) reste en tête au plan suivant ; au-delà de 3 cycles d'attente, elle passe « à examiner » | demande | ✅ L4b (`deferred_cycles`, compté au démarrage d'un plan ; un créneau remplacé rend sa demande à la file) | L4 |
 | KW-12 | E-mails : au client (verdict, mise en ligne), à l'opérateur (demande à examiner) — par une file d'envoi asynchrone | — | ❌ | L7 |
 | KW-13 | Planification : les demandes en attente entrent dans **les deux** chemins de plan (manuel et renouvellement automatique) ; chaque brief issu d'une demande porte `client_request_id` et un repère « Demande du client » dans l'onglet Stratégie | `lib/planning/brief-plan.ts`, `lib/scheduler/cycle-manager.ts` | ✅ L4b | L4 |
@@ -213,6 +213,22 @@ Une machine à états dans le domaine, dont chaque transition est testée.
 | `withdrawn` | Retirée | Retirée par le client | — |
 
 Le mot « refusé » n'apparaît jamais côté client : il lit ce que le moteur a constaté et ce qui va se passer.
+
+**L'arbitrage de CNX (L5a, `src/core/domain/keyword-requests/arbitration.ts`)** — quatre gestes, chacun permis
+seulement depuis les statuts du tableau ci-dessus, et écrit seulement si la demande est encore dans le statut que
+la console a vu :
+
+| Geste | Depuis | Vers | Ce qui se passe |
+|---|---|---|---|
+| Intégrer | `review`, `deferred`, `covered` | `deferred` marquée « intégration demandée » | la tâche des demandes (2 min) tente le cycle en cours (§ 3.2) ; sans place, la demande reste en tête du prochain plan, la raison écrite pour CNX |
+| Reporter | `review`, `covered` | `deferred` | le prochain plan la prend en premier |
+| Refuser | `review` | `declined` | motif **obligatoire** (10 à 500 caractères), montré tel quel au client |
+| Rouvrir | `declined` | `review` | de nouveau à examiner |
+
+Écarts assumés : « intégrer » ne rédige pas le brief dans le clic de l'opérateur — un appel au modèle de 10 à
+30 s n'a pas sa place dans une requête HTTP ; la console montre « le moteur cherche une place » et se relit toutes
+les 10 s jusqu'à la réponse. Une demande sans campagne (site qui n'en avait pas à son arrivée) reçoit celle du site
+au moment où CNX l'intègre ou la reporte, et le geste est refusé si le site n'en a toujours pas.
 
 ### 3.4 Intégrer au cycle en cours sans course avec le planificateur
 
@@ -486,7 +502,7 @@ Ordonnés par **risque** (sécurité d'abord, planificateur ensuite), puis par *
 | **L2** | Espace client en lecture : coquille mobile, accueil, pages en ligne, prochaines pages, sélecteur de site, **résultats Google**. Se scinde en L2a (lecture) / L2b (résultats) si la PR grossit | ESP-1 à ESP-6 | L1 | ✅ L2a (#33), L2b (#34) |
 | **L3** | Demandes, saisie et verdict : table, domaine (verdict, cycle de vie), tâche d'analyse, formulaire, liste et chronologie, retrait. Les demandes recevables sont **toutes** gardées pour la période suivante (pas encore d'insertion dans le cycle en cours) | KW-1 à KW-3, KW-5 (verdict), KW-6 à KW-9 | L2 | ✅ L3 (#35) |
 | **L4** | Demandes dans le moteur, en trois PR : **L4a** (#37) extraction de la rédaction des briefs **sans changement de comportement** ; **L4b** (#38) consommation au plan suivant, report, suivi de production et retour de publication (migration `025`) ; **L4c** (#39) `swap_plan_item` (migration `026`) et placement dans le cycle en cours | KW-4, KW-5, KW-8, KW-11, KW-13 | L3 | ✅ L4a (#37), L4b (#38) ; L4c en revue |
-| **L5** | Console opérateur des demandes et coquille : file, arbitrage, compteur dans le rail, onglet « Demandes » d'un site, rail et en-tête de site refaits, glossaire | KW-10, UX-5, UX-6 | L3 | M · 3 j |
+| **L5** | Console opérateur des demandes et coquille, en deux PR : **L5a** (#40) file, arbitrage, compteur dans le rail, onglet « Demandes » d'un site ; **L5b** rail et en-tête de site refaits (tiroir sous 1 024 px), glossaire | KW-10, UX-5, UX-6 | L3 | M · 3 j — L5a en revue |
 | **L6** | Refonte des écrans opérateur, un par un : tableau de bord, vue d'ensemble, stratégie, calendrier, publication, performances, pages, réglages — styles en ligne retirés, états, mouvement, graphiques, écrans hérités. Peut se scinder en L6a / L6b | UX-6 à UX-12 | L0, L5 | L · 5-6 j |
 | **L7** | E-mails : file d'envoi asynchrone traitée par le planificateur, modèles à la DA, désinscription des notifications | KW-12 | L3, SMTP | S · 2 j |
 
