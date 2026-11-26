@@ -228,6 +228,12 @@ suivant, puis reporte la demande. Migration idempotente (`CREATE OR REPLACE FUNC
 Le brief d'une demande est rédigé par **la même** fonction que les briefs d'un plan : `writeBriefs` est extraite
 pour accepter un seul sujet (`writeBriefForSubject`), sans copie de prompt.
 
+**Fait au L4a** : `generateBriefPlanWithSignals` se compose désormais de `loadPlanningKnowledge` (l'existant, Search
+Console, SERP et suggestions, lus une fois) et de `writePlanBriefs` (le modèle pour les sujets à écrire, puis les
+gardes de `normalizeBriefs`). Un brief seul s'écrira `writePlanBriefs(knowledge, [sujet])`. Comportement inchangé,
+verrouillé par `lib/planning/brief-plan.flow.test.ts` : le plan entier, modèle et inventaire simulés, prompt et
+briefs figés avant l'extraction.
+
 ### 3.5 Consommer les demandes au cycle suivant
 
 `generateBriefPlanWithSignals` reçoit les demandes en attente (`clientRequests`) : les premiers créneaux du

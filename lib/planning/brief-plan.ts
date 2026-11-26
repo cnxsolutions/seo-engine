@@ -135,29 +135,9 @@ export async function generateBriefPlan(opts: GenerateBriefPlanOptions): Promise
  * 'create', et chaque item porte la degradation en toutes lettres.
  */
 export async function generateBriefPlanWithSignals(opts: GenerateBriefPlanOptions): Promise<BriefPlanResult> {
-  const { campaign, cycleDays, analysisRun } = opts
-
-  // L'existant D'ABORD. Tout ce qui suit — le verdict de chaque sujet, l'adresse
-  // de chaque page, le brief lui-meme — se prend contre cette lecture, et elle
-  // est faite une seule fois.
-  const inventory = await resolveInventory(campaign)
-  const takenPaths = new Set<string>(inventory.takenPaths)
-
-  // Occupation et couverture sont deux faits : une generation 'failed' garde son
-  // adresse (existingSlugs, takenPaths) mais ne couvre pas son sujet. Ses
-  // mots-cles restent donc libres — la garde finale de normalizeBriefs refuse
-  // tout mot-cle de cette liste, elle ne doit pas refuser un sujet jamais ecrit.
-  const existingSlugs = opts.existingSlugs ?? inventory.entries.map(entry => entry.path.replace(/^\//, ''))
-  const existingKeywords =
-    opts.existingKeywords ??
-    dedupe(
-      inventory.entries
-        .filter(entry => entry.coversTopic)
-        .map(entry => (entry.focusKeyword ?? '').toLowerCase())
-    )
-
-  const signals = await resolveSignals(opts)
-  const [serpEvidence, suggestions] = await Promise.all([resolveSerpEvidence(opts), resolveSuggestions(opts)])
+  const { cycleDays } = opts
+  const knowledge = await loadPlanningKnowledge(opts)
+  const { campaign, signals, serpEvidence, suggestions } = knowledge
 
   const frequency = campaign.schedule_frequency || 'daily'
   const frequencyDays: Record<string, number> = {
@@ -197,17 +177,96 @@ export async function generateBriefPlanWithSignals(opts: GenerateBriefPlanOption
   // ouvert. Ce qui en sort 'skip' ne lui est PAS soumis : le moteur cesse de
   // payer une page pour decouvrir ensuite qu'il ne fallait pas l'ecrire. Un
   // sujet deja couvert lui est soumis AVEC la page a ne pas concurrencer.
-  const decisionContext = {
+  const subjects = calendarSlots.map(slot => decideForSlot(slot, knowledge))
+  const items = await writePlanBriefs(knowledge, subjects)
+
+  return { items, signals, serpEvidence, suggestions }
+}
+
+/** What `loadPlanningKnowledge` reads: a plan's options, without its length. */
+export type PlanningKnowledgeOptions = Omit<GenerateBriefPlanOptions, 'cycleDays'>
+
+/**
+ * Ce que le planificateur sait du site et de ses recherches, lu UNE fois.
+ *
+ * Un plan entier et un brief seul (la demande d'un client, docs/cadrage.md
+ * § 3.4) s'ecrivent contre la meme connaissance : la meme lecture de l'existant,
+ * les memes signaux, les memes gardes. Deux chargements auraient fait diverger,
+ * au premier correctif, ce qu'un plan et une demande voient.
+ *
+ * `takenPaths` est MUTE par la redaction : chaque brief retenu y reserve son
+ * adresse pour les suivants (normalizeBriefs).
+ */
+export interface PlanningKnowledge {
+  campaign: Campaign
+  analysisRun?: AnalysisRun | null
+  inventory: SiteInventory
+  takenPaths: Set<string>
+  existingSlugs: string[]
+  existingKeywords: string[]
+  signals: GscPlanningSignals | null
+  serpEvidence: SerpEvidence[]
+  suggestions: QuerySuggestions[]
+  /**
+   * Les communes desservies, resolues UNE fois : c'est ce qui permet au
+   * comparateur d'identite de voir que « Taxi Troyes » et « Taxi Reims » sont le
+   * meme titre a la ville pres.
+   */
+  cityTokens: string[]
+}
+
+export async function loadPlanningKnowledge(opts: PlanningKnowledgeOptions): Promise<PlanningKnowledge> {
+  const { campaign } = opts
+
+  // L'existant D'ABORD. Tout ce qui suit — le verdict de chaque sujet, l'adresse
+  // de chaque page, le brief lui-meme — se prend contre cette lecture, et elle
+  // est faite une seule fois.
+  const inventory = await resolveInventory(campaign)
+  const takenPaths = new Set<string>(inventory.takenPaths)
+
+  // Occupation et couverture sont deux faits : une generation 'failed' garde son
+  // adresse (existingSlugs, takenPaths) mais ne couvre pas son sujet. Ses
+  // mots-cles restent donc libres — la garde finale de normalizeBriefs refuse
+  // tout mot-cle de cette liste, elle ne doit pas refuser un sujet jamais ecrit.
+  const existingSlugs = opts.existingSlugs ?? inventory.entries.map(entry => entry.path.replace(/^\//, ''))
+  const existingKeywords =
+    opts.existingKeywords ??
+    dedupe(
+      inventory.entries
+        .filter(entry => entry.coversTopic)
+        .map(entry => (entry.focusKeyword ?? '').toLowerCase())
+    )
+
+  const signals = await resolveSignals(opts)
+  const [serpEvidence, suggestions] = await Promise.all([resolveSerpEvidence(opts), resolveSuggestions(opts)])
+
+  return {
     campaign,
+    analysisRun: opts.analysisRun,
     inventory,
+    takenPaths,
+    existingSlugs,
+    existingKeywords,
     signals,
-    // Les communes desservies, resolues UNE fois : c'est ce qui permet au
-    // comparateur d'identite de voir que « Taxi Troyes » et « Taxi Reims » sont
-    // le meme titre a la ville pres.
+    serpEvidence,
+    suggestions,
     cityTokens: campaignCityNames(campaign),
   }
+}
 
-  const subjects = calendarSlots.map(slot => decideForSlot(slot, decisionContext))
+/**
+ * Les briefs de ces sujets : le modele pour ceux a ecrire, puis les gardes.
+ *
+ * Un sujet 'skip' n'atteint jamais le modele ; il sort tel quel, avec son motif.
+ * Les autres lui sont soumis en UN appel, puis repassent devant normalizeBriefs
+ * (adresse libre, mot-cle non porte, angle distinct) : un brief qui echoue la
+ * garde devient un creneau ecarte, motif ecrit.
+ */
+export async function writePlanBriefs(
+  knowledge: PlanningKnowledge,
+  subjects: readonly PlannedSubject[],
+): Promise<PlanItemBrief[]> {
+  const { campaign, inventory, signals, serpEvidence, suggestions, existingKeywords } = knowledge
 
   const toWrite = subjects.filter(subject => subject.action.kind === 'create')
   const distinctCount = toWrite.filter(subject => subject.avoid !== null).length
@@ -224,8 +283,8 @@ export async function generateBriefPlanWithSignals(opts: GenerateBriefPlanOption
     ? []
     : await writeBriefs({
         campaign,
-        analysisRun,
-        existingSlugs,
+        analysisRun: knowledge.analysisRun,
+        existingSlugs: knowledge.existingSlugs,
         existingKeywords,
         subjects: toWrite,
         signals,
@@ -234,8 +293,8 @@ export async function generateBriefPlanWithSignals(opts: GenerateBriefPlanOption
       })
 
   const items = attachSearchEvidence(
-    normalizeBriefs({ subjects, rawItems, campaign, takenPaths, inventory, signals, existingKeywords }),
-    { suggestions, serpEvidence, cityTokens: decisionContext.cityTokens }
+    normalizeBriefs({ subjects, rawItems, campaign, takenPaths: knowledge.takenPaths, inventory, signals, existingKeywords }),
+    { suggestions, serpEvidence, cityTokens: knowledge.cityTokens }
   )
 
   // Le modele a pu rendre un sujet qui ne se distingue pas de la page a eviter,
@@ -250,7 +309,7 @@ export async function generateBriefPlanWithSignals(opts: GenerateBriefPlanOption
     )
   }
 
-  return { items, signals, serpEvidence, suggestions }
+  return items
 }
 
 /**
@@ -472,7 +531,7 @@ export function campaignCityNames(campaign: Pick<Campaign, 'communes' | 'departm
  * the prompt then omits the section entirely rather than claiming measurements
  * it does not have.
  */
-async function resolveSerpEvidence(opts: GenerateBriefPlanOptions): Promise<SerpEvidence[]> {
+async function resolveSerpEvidence(opts: PlanningKnowledgeOptions): Promise<SerpEvidence[]> {
   if (opts.serpEvidence !== undefined) return opts.serpEvidence ?? []
 
   const { campaign } = opts
@@ -527,7 +586,7 @@ function rootQueries(campaign: Campaign): string[] {
  * Ask Google's and Bing's search boxes what follows each root query. Never
  * throws: lib/serp/suggest degrades to empty lists, and so does this.
  */
-async function resolveSuggestions(opts: GenerateBriefPlanOptions): Promise<QuerySuggestions[]> {
+async function resolveSuggestions(opts: PlanningKnowledgeOptions): Promise<QuerySuggestions[]> {
   if (opts.searchSuggestions !== undefined) return opts.searchSuggestions ?? []
 
   const queries = rootQueries(opts.campaign).slice(0, SUGGESTION_QUERIES_PER_PLAN)
@@ -628,7 +687,7 @@ function hostOfSite(siteUrl: string | undefined): string | null {
  * condition to test, and so an empty Search Console history can never be read as
  * "this site performs badly".
  */
-async function resolveSignals(opts: GenerateBriefPlanOptions): Promise<GscPlanningSignals | null> {
+async function resolveSignals(opts: PlanningKnowledgeOptions): Promise<GscPlanningSignals | null> {
   const provided = opts.gscSignals !== undefined
     ? opts.gscSignals
     : opts.campaign.site_id
