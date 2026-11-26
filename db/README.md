@@ -129,7 +129,14 @@ dans sa propre migration — `db/rls.db.test.ts` echoue sinon. Enfin
 sans politique ; `client_members.user_id` reference `auth.users`) et colonne
 nullable `sites.client_id`, sans backfill. Puis `023_client_search_summary.sql` (L2b) :
 la fonction qui agrege les resultats Search Console d'un site pour l'espace
-client, en SQL ; `EXECUTE` retire a `anon` et `authenticated`.
+client, en SQL ; `EXECUTE` retire a `anon` et `authenticated`. Puis
+`024_keyword_requests.sql` (L3) : la table `keyword_requests` (RLS active, sans
+politique ; index unique partiel : deux demandes OUVERTES d'un site ne portent
+jamais la meme recherche) et deux fonctions, `submit_keyword_requests` (plafond
+et doublons sous un verrou du site) et `apply_keyword_verdicts` (les verdicts
+d'un lot, seulement sur les demandes encore `received`) ; `EXECUTE` retire a
+`anon` et `authenticated`. **La tache du planificateur lit cette table toutes
+les 2 minutes : appliquer la 024 en production AVANT le merge.**
 
 Tous ses CHECK sont poses `NOT VALID` : ils s'appliquent aux ecritures futures
 sans jamais faire echouer la migration sur une ligne historique. Une ligne

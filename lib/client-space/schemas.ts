@@ -34,7 +34,19 @@ export const InvitationBody = z.object({
     .optional(),
 })
 
-/** Every body these routes accept fits in far less: an address, a code, a client name. */
+/**
+ * A keyword submission, by shape only. What a keyword may be is the domain's
+ * (src/core/domain/keyword-requests/normalize.ts), which says it line by line;
+ * these caps only stop what no form produces.
+ */
+export const RequestSubmissionBody = z.object({
+  keywords: z.string().max(2000),
+  city: z.string().max(120).nullish(),
+  note: z.string().max(600).nullish(),
+  desiredBy: z.string().max(10).nullish(),
+})
+
+/** Every body these routes accept fits in far less: an address, a code, a client name, ten keywords and a note. */
 const MAX_BODY_BYTES = 4096
 
 /**

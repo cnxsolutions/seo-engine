@@ -1,12 +1,14 @@
 import type { Metadata } from 'next'
 import Link from 'next/link'
-import { ArrowRight } from 'lucide-react'
-import { formatDay } from '@/components/ui'
-import { CLIENT_SPACE_TEXT } from '@/lib/client-space/labels'
+import { ArrowRight, MessageSquarePlus } from 'lucide-react'
+import { Button, formatDay } from '@/components/ui'
+import { CLIENT_SPACE_TEXT, REQUEST_TEXT } from '@/lib/client-space/labels'
 import { readOnlinePages, readPeriod } from '@/lib/client-space/overview'
+import { readSiteRequests } from '@/lib/client-space/requests'
 import { currentSite } from './current-site'
 import { OnlineList, UpcomingList } from './PageLists'
 import { PeriodThread } from './PeriodThread'
+import { RequestItem } from './demandes/RequestItem'
 
 export const metadata: Metadata = { title: 'Accueil' }
 
@@ -15,17 +17,19 @@ const GLIMPSE = 3
 
 /**
  * /espace/<site> — ESP-1: the period in progress (dates, the thread, pages
- * planned and online), the next pages, the latest pages online. The client's
- * keyword requests and the « Proposer un mot-clé » button join it in the L3.
+ * planned and online), the client's latest keyword requests with the
+ * « Proposer un mot-clé » button, the next pages, the latest pages online.
  */
 export default async function SiteHomePage({ params }: { params: Promise<{ siteId: string }> }) {
   const { siteId } = await params
   const { site } = await currentSite(siteId)
-  const [period, online] = await Promise.all([
+  const [period, online, latest] = await Promise.all([
     readPeriod(site),
     readOnlinePages(site, { offset: 0, limit: GLIMPSE }),
+    readSiteRequests(site, { offset: 0, limit: GLIMPSE }),
   ])
   const pagesHref = `/espace/${site.id}/pages`
+  const requestsHref = `/espace/${site.id}/demandes`
 
   return (
     <>
@@ -47,6 +51,23 @@ export default async function SiteHomePage({ params }: { params: Promise<{ siteI
             <p className="espace-hero__text">{CLIENT_SPACE_TEXT.noPeriodBody}</p>
           </>
         )}
+      </section>
+
+      <section aria-labelledby="demandes-titre">
+        <div className="espace-section__head">
+          <h2 id="demandes-titre" className="espace-section__title">{REQUEST_TEXT.latestTitle}</h2>
+          {latest.total > GLIMPSE && (
+            <Link href={`${requestsHref}#demandes-liste`} className="espace-section__more">
+              {REQUEST_TEXT.seeAll} <ArrowRight size={14} aria-hidden="true" />
+            </Link>
+          )}
+        </div>
+        {latest.requests.length === 0
+          ? <p className="espace-empty">{REQUEST_TEXT.listEmpty}</p>
+          : <ul className="espace-list">{latest.requests.map((request) => <RequestItem key={request.id} request={request} />)}</ul>}
+        <div className="espace-section__cta">
+          <Button href={`${requestsHref}#proposer`} variant="primary" icon={MessageSquarePlus}>{REQUEST_TEXT.propose}</Button>
+        </div>
       </section>
 
       {period && (

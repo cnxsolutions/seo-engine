@@ -7,6 +7,7 @@ import {
   selectEmergingQueries,
   selectLowCtrPages,
   selectStrikingDistance,
+  selectWonQueries,
   verdictFor,
   type GscRawRow,
 } from './performance'
@@ -95,6 +96,21 @@ describe('detectCannibalization', () => {
     ])
 
     expect(detectCannibalization(stats)).toEqual([])
+  })
+})
+
+describe('selectWonQueries', () => {
+  it('keeps the queries already won, with the page that wins them', () => {
+    const stats = aggregateRows([
+      row({ page_url: 'https://a.fr/', query: 'marque', clicks: 30, impressions: 120, position: 1.2 }),
+      row({ page_url: 'https://a.fr/b', query: 'marque', clicks: 2, impressions: 40, position: 2.5 }),
+      row({ page_url: 'https://a.fr/c', query: 'trop rare', clicks: 3, impressions: 29, position: 1 }),
+      row({ page_url: 'https://a.fr/d', query: 'pas gagnee', clicks: 1, impressions: 300, position: 3.4 }),
+    ])
+
+    expect(selectWonQueries(stats)).toEqual([
+      { query: 'marque', pageUrl: 'https://a.fr/', position: 1.2, impressions: 120, clicks: 30 },
+    ])
   })
 })
 

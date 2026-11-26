@@ -4,14 +4,9 @@ import { CLIENT_SPACE_TEXT } from '@/lib/client-space/labels'
 import { ONLINE_PAGES_PER_SCREEN, readOnlinePages, readPeriod } from '@/lib/client-space/overview'
 import { currentSite } from '../current-site'
 import { OnlineList, UpcomingList } from '../PageLists'
+import { readPageNumber } from '../page-number'
 
 export const metadata: Metadata = { title: 'Pages' }
-
-/** `?page=` read as a positive integer; anything else is page 1. */
-function readPageNumber(raw: string | string[] | undefined): number {
-  const value = Number(Array.isArray(raw) ? raw[0] : raw)
-  return Number.isInteger(value) && value > 1 ? value : 1
-}
 
 /**
  * /espace/<site>/pages — ESP-2 and ESP-3: every page still to come in the
