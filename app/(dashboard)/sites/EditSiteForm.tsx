@@ -16,6 +16,7 @@ import { Eye, EyeOff, Save } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { Button, FormField, Notice } from '@/components/ui'
 import type { SiteType } from '@/lib/types'
+import './sites.css'
 
 /**
  * Everything the form needs, and NOTHING the page must not have.
@@ -133,7 +134,7 @@ export function EditSiteForm({ site }: { site: EditableSite }) {
   return (
     <>
       <div className="panel">
-        <div className="panel__body" style={{ display: 'grid', gap: 'var(--space-4)' }}>
+        <div className="panel__body site-form__fields">
           <FormField label="Nom du site" required htmlFor="site-name">
             <input suppressHydrationWarning id="site-name" name="name" value={form.name} onChange={handle} className="input" placeholder="BoxnFit – Site principal" />
           </FormField>
@@ -143,7 +144,7 @@ export function EditSiteForm({ site }: { site: EditableSite }) {
           </FormField>
 
           <FormField label="État" htmlFor="site-active">
-            <label htmlFor="site-active" style={{ display: 'flex', gap: 'var(--space-2)', alignItems: 'flex-start', cursor: 'pointer' }}>
+            <label htmlFor="site-active" className="check-row">
               <input
                 suppressHydrationWarning
                 id="site-active"
@@ -151,13 +152,13 @@ export function EditSiteForm({ site }: { site: EditableSite }) {
                 type="checkbox"
                 checked={form.is_active}
                 onChange={handle}
-                style={{ marginTop: 3 }}
+                className="choice-box"
               />
               <span>Site actif</span>
             </label>
             {/* The consequence, not the label: « inactif » reads as a flag;
                 « rien n’y sera publié » is what the operator is deciding. */}
-            <p className="meta" style={{ marginTop: 'var(--space-2)' }}>
+            <p className="meta site-form__note">
               {form.is_active
                 ? 'Le planificateur génère et publie sur ce site selon ses campagnes.'
                 : 'Désactivé, le planificateur ignore ce site : rien n’y sera généré ni publié, les campagnes restent en place.'}
@@ -174,7 +175,7 @@ export function EditSiteForm({ site }: { site: EditableSite }) {
                 htmlFor="wp-password"
                 hint="WordPress → Utilisateurs → Profil → Application Passwords"
               >
-                <div style={{ position: 'relative' }}>
+                <div className="secret-input">
                   <input
                     suppressHydrationWarning
                     id="wp-password"
@@ -182,28 +183,26 @@ export function EditSiteForm({ site }: { site: EditableSite }) {
                     type={showPassword ? 'text' : 'password'}
                     value={form.wp_app_password}
                     onChange={handle}
-                    className="input"
+                    className="input secret-input__field"
                     placeholder="inchangé si vide"
                     autoComplete="new-password"
-                    style={{ paddingRight: '2.5rem' }}
                   />
                   <button
                     type="button"
-                    className="btn-icon"
+                    className="btn-icon secret-input__toggle"
                     onClick={() => setShowPassword((prev) => !prev)}
                     aria-label={showPassword ? 'Masquer le mot de passe' : 'Afficher le mot de passe'}
-                    style={{ position: 'absolute', right: 4, top: '50%', transform: 'translateY(-50%)', border: 0 }}
                   >
                     {showPassword ? <EyeOff size={15} /> : <Eye size={15} />}
                   </button>
                 </div>
-                <p className="meta" style={{ marginTop: 'var(--space-2)' }}>
+                <p className="meta site-form__note">
                   Le mot de passe enregistré n’est jamais renvoyé par le serveur. Laissez ce champ vide pour le conserver.
                 </p>
               </FormField>
               <FormField label="Modèle de page" htmlFor="wp-template" hint="facultatif">
                 <input suppressHydrationWarning id="wp-template" name="wp_page_template" value={form.wp_page_template} onChange={handle} className="input" placeholder="page-landing.php" />
-                <p className="meta" style={{ marginTop: 'var(--space-2)' }}>
+                <p className="meta site-form__note">
                   Nom du fichier de modèle WordPress appliqué aux pages publiées. Vide, le thème choisit son modèle par défaut.
                 </p>
               </FormField>
@@ -227,13 +226,13 @@ export function EditSiteForm({ site }: { site: EditableSite }) {
                   placeholder="inchangé si vide"
                   autoComplete="new-password"
                 />
-                <p className="meta" style={{ marginTop: 'var(--space-2)' }}>
+                <p className="meta site-form__note">
                   Le jeton enregistré n’est jamais renvoyé par le serveur. Laissez ce champ vide pour le conserver.
                 </p>
               </FormField>
               <FormField label="Branche cible" htmlFor="gh-branch" hint="recommandé">
                 <input suppressHydrationWarning id="gh-branch" name="github_branch" value={form.github_branch} onChange={handle} className="input" placeholder="seo-engine" />
-                <p className="meta" style={{ marginTop: 'var(--space-2)' }}>
+                <p className="meta site-form__note">
                   Laissée vide, les pages sont commitées sur la branche par défaut — en production, sans relecture ni
                   vérification de build. Une branche dédiée permet de relire avant de fusionner.
                 </p>
@@ -241,10 +240,7 @@ export function EditSiteForm({ site }: { site: EditableSite }) {
 
               {form.github_branch.trim() !== '' && (
                 <FormField label="Mise en ligne" htmlFor="auto-promote">
-                  <label
-                    htmlFor="auto-promote"
-                    style={{ display: 'flex', gap: 'var(--space-2)', alignItems: 'flex-start', cursor: 'pointer' }}
-                  >
+                  <label htmlFor="auto-promote" className="check-row">
                     <input
                       suppressHydrationWarning
                       id="auto-promote"
@@ -252,13 +248,13 @@ export function EditSiteForm({ site }: { site: EditableSite }) {
                       type="checkbox"
                       checked={form.auto_promote}
                       onChange={handle}
-                      style={{ marginTop: 3 }}
+                      className="choice-box"
                     />
                     <span>Fusionner automatiquement dans la branche de production après publication</span>
                   </label>
                   {/* Same two sentences as the creation form: the choice has the
                       same consequence whether it is made at creation or later. */}
-                  <p className="meta" style={{ marginTop: 'var(--space-2)' }}>
+                  <p className="meta site-form__note">
                     {form.auto_promote
                       ? `Chaque page publiée sera reportée sur la branche par défaut, donc déployée. La branche « ${form.github_branch.trim()} » garde la trace et permet de revenir en arrière.`
                       : `Les pages resteront sur « ${form.github_branch.trim()} » jusqu’à une fusion manuelle. Tant qu’elle n’a pas lieu, elles ne sont visibles nulle part.`}
@@ -272,7 +268,7 @@ export function EditSiteForm({ site }: { site: EditableSite }) {
           {saved && <Notice inline tone="good" title="Modifications enregistrées" body="Le site a été mis à jour." />}
         </div>
 
-        <div className="panel__footer" style={{ display: 'flex', gap: 'var(--space-3)', alignItems: 'center', flexWrap: 'wrap' }}>
+        <div className="panel__footer site-form__actions">
           {/* « Annuler » revient aux valeurs enregistrées au lieu de quitter la
               page : le formulaire est une section parmi d'autres, partir
               ferait perdre la connexion Google et le schéma affichés autour. */}
@@ -287,7 +283,7 @@ export function EditSiteForm({ site }: { site: EditableSite }) {
           >
             Annuler les changements
           </Button>
-          <div style={{ flex: 1 }} />
+          <div className="site-form__spacer" />
           <Button icon={Save} loading={saving} onClick={submit} disabled={!complete}>
             Enregistrer les modifications
           </Button>

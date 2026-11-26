@@ -26,6 +26,7 @@ import { freshnessOf, type BlindReason, type InventoryFreshness } from '@/src/co
 import { AnalyzeRepoButton } from './AnalyzeRepoButton'
 import { RefreshPagesButton } from './RefreshPagesButton'
 import { DeleteSiteButton } from './SiteActions'
+import './sites.css'
 
 export const dynamic = 'force-dynamic'
 
@@ -327,7 +328,7 @@ export default async function SitesPage() {
           action={{ label: 'Connecter mon premier site', href: '/sites/new', icon: Plus }}
         />
       ) : (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', gap: 'var(--space-4)' }}>
+        <div className="site-grid">
           {sites.map((site) => (
             <SiteCard key={site.id} site={site} facts={facts.get(site.id) ?? null} />
           ))}
@@ -345,22 +346,21 @@ function SiteCard({ site, facts }: { site: SiteRow; facts: SiteFacts | null }) {
   const described = site.type === 'nextjs' ? Boolean(site.repo_profile) : Boolean(site.has_credentials)
 
   return (
-    <section className="panel" style={{ display: 'flex', flexDirection: 'column' }}>
+    <section className="panel site-card">
       <div className="panel__header">
-        <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)', minWidth: 0 }}>
+        <div className="site-card__identity">
           <IconBox icon={connector.icon} color={connector.color} boxSize={32} size={16} />
-          <div style={{ minWidth: 0 }}>
+          <div className="site-card__names">
             {/* The title is the way into the site's own page — the five-step
                 path, scoped to this site, lives there and nowhere else. */}
-            <Link href={`/sites/${site.id}`} className="card-title truncate" style={{ display: 'block', textDecoration: 'none' }}>
+            <Link href={`/sites/${site.id}`} className="card-title truncate site-card__name">
               {site.name}
             </Link>
             <a
               href={site.url}
               target="_blank"
               rel="noopener noreferrer"
-              className="meta truncate"
-              style={{ display: 'block', color: 'var(--ink-muted)' }}
+              className="meta truncate site-card__url"
             >
               {site.url}
             </a>
@@ -369,22 +369,22 @@ function SiteCard({ site, facts }: { site: SiteRow; facts: SiteFacts | null }) {
         <StatusBadge status={site.is_active ? 'active' : 'inactive'} />
       </div>
 
-      <div className="panel__body" style={{ display: 'grid', gap: 'var(--space-4)', flex: 1 }}>
+      <div className="panel__body site-card__body">
         {!site.is_active && (
-          <p className="meta" style={{ display: 'flex', gap: 'var(--space-2)', alignItems: 'flex-start', color: 'var(--status-warning-text)' }}>
-            <TriangleAlert size={14} style={{ flexShrink: 0, marginTop: 1 }} />
+          <p className="meta site-card__inactive">
+            <TriangleAlert size={14} className="site-card__inactive-icon" />
             Site désactivé : le planificateur l’ignore, rien n’y sera généré ni publié.
           </p>
         )}
 
-        <div style={{ display: 'grid', gap: 'var(--space-2)' }}>
+        <div className="site-card__facts">
           <FactRow label="Connecteur" value={<span className="chip">{connector.label}</span>} />
           {site.type === 'wordpress' ? <WordPressFacts site={site} /> : <NextJsFacts site={site} />}
           <FactRow label="Pages connues" value={<KnownPages siteId={site.id} facts={facts} />} />
           <FactRow
             label="Google"
             value={
-              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+              <span className="site-fact__actions">
                 <StatusBadge status={site.google_connected ? 'connected' : 'disconnected'} />
                 {site.google_connected
                   ? <Link href={`/sites/${site.id}/reglages#google`} className="btn-link">Détail</Link>
@@ -394,7 +394,7 @@ function SiteCard({ site, facts }: { site: SiteRow; facts: SiteFacts | null }) {
           />
         </div>
 
-        <div className="inset" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 'var(--space-3)' }}>
+        <div className="inset site-card__counters">
           <Counter icon={Target} label="Campagnes" value={facts?.campaigns ?? null} />
           <Counter icon={FileText} label="Pages publiées" value={facts?.publishedPages ?? null} />
           <Counter icon={CalendarDays} label="Créneaux à venir" value={facts?.plannedSlots ?? null} />
@@ -407,7 +407,7 @@ function SiteCard({ site, facts }: { site: SiteRow; facts: SiteFacts | null }) {
         {/* Lifecycle, not workflow: the footer below says what to do NEXT for
             this site; these two say what can be done TO it. Kept apart so a
             red « Supprimer » never sits where the eye looks for the next step. */}
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 'var(--space-2)', flexWrap: 'wrap' }}>
+        <div className="site-card__manage">
           <Link href={`/sites/${site.id}/reglages`} className="btn-ghost btn-sm" title="Réglages de ce site">
             <Pencil size={13} /> Réglages
           </Link>
@@ -417,13 +417,13 @@ function SiteCard({ site, facts }: { site: SiteRow; facts: SiteFacts | null }) {
 
       <div className="panel__footer">
         {step ? (
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 'var(--space-3)' }}>
-            <span style={{ minWidth: 0 }}>
-              <strong style={{ color: 'var(--ink-primary)', display: 'block' }}>À faire : {step.label}</strong>
+          <div className="site-card__next">
+            <span className="site-card__next-text">
+              <strong className="site-card__next-title">À faire : {step.label}</strong>
               {step.why}
             </span>
             {step.href && (
-              <Link href={step.href} className="btn-primary btn-sm" style={{ flexShrink: 0 }}>
+              <Link href={step.href} className="btn-primary btn-sm site-card__next-cta">
                 {step.label} <ArrowRight size={13} />
               </Link>
             )}
@@ -432,7 +432,7 @@ function SiteCard({ site, facts }: { site: SiteRow; facts: SiteFacts | null }) {
           <span>
             {site.is_active
               ? 'Compteurs indisponibles : la suite du parcours ne peut pas être déduite pour ce site.'
-              : 'Site désactivé : réactivez-le depuis « Modifier » pour le remettre dans le parcours.'}
+              : 'Site désactivé : réactivez-le depuis « Réglages » pour le remettre dans le parcours.'}
           </span>
         )}
       </div>
@@ -533,7 +533,7 @@ function freshnessTitle(freshness: InventoryFreshness): string {
  */
 function KnownPages({ siteId, facts }: { siteId: string; facts: SiteFacts | null }) {
   return (
-    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 'var(--space-2)', justifyContent: 'flex-end' }}>
+    <span className="site-fact__actions site-fact__actions--end">
       {facts === null ? (
         <span className="meta">comptage indisponible</span>
       ) : (
@@ -558,9 +558,9 @@ function KnownPages({ siteId, facts }: { siteId: string; facts: SiteFacts | null
 
 function FactRow({ label, value }: { label: string; value: ReactNode }) {
   return (
-    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 'var(--space-3)' }}>
-      <span className="meta" style={{ flexShrink: 0 }}>{label}</span>
-      <span className="truncate" style={{ fontSize: 'var(--fs-sm)', textAlign: 'right' }}>{value}</span>
+    <div className="site-fact">
+      <span className="meta site-fact__label">{label}</span>
+      <span className="truncate site-fact__value">{value}</span>
     </div>
   )
 }
@@ -568,9 +568,9 @@ function FactRow({ label, value }: { label: string; value: ReactNode }) {
 function Counter({ icon: Icon, label, value }: { icon: LucideIcon; label: string; value: number | null }) {
   return (
     <div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-1)' }}>
+      <div className="site-counter__row">
         <Icon size={12} color="var(--ink-faint)" />
-        <span style={{ fontSize: 'var(--fs-lg)', fontWeight: 700, color: 'var(--ink-primary)' }} className="num">
+        <span className="num site-counter__value">
           {value === null ? '—' : formatMetric(value, 'compact')}
         </span>
       </div>

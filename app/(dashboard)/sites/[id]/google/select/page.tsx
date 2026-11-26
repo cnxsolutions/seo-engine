@@ -27,6 +27,7 @@ import { listAllLocations, type GbpAccount, type GbpLocation } from '@/lib/googl
 import { listProperties, type GscProperty } from '@/lib/google/gsc'
 import { GBP_QUOTA_MESSAGE, probeGbpAccess } from '@/lib/google/sync'
 import { createServiceClient } from '@/lib/supabase'
+import '../../../sites.css'
 
 export const dynamic = 'force-dynamic'
 
@@ -76,7 +77,7 @@ export default async function GoogleSelectPage({ params }: { params: Promise<{ i
 
   return (
     <div>
-      <Link href={`/sites/${id}/reglages#google`} className="btn-link" style={{ marginBottom: 'var(--space-2)' }}>
+      <Link href={`/sites/${id}/reglages#google`} className="btn-link google-select__back">
         <ArrowLeft size={12} aria-hidden="true" /> Retour aux réglages
       </Link>
       <TabIntro
@@ -84,12 +85,12 @@ export default async function GoogleSelectPage({ params }: { params: Promise<{ i
         subtitle={`Ce que le moteur interrogera pour ${site.name} : la propriété Search Console, et la fiche d’établissement s’il y en a une.`}
       />
 
-      <form action="/api/google/select" method="POST" style={{ display: 'grid', gap: 'var(--space-5)' }}>
+      <form action="/api/google/select" method="POST" className="google-select">
         <input type="hidden" name="site_id" value={id} />
 
         <section className="panel">
           <div className="panel__header">
-            <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+            <div className="google-panel__title">
               <Search size={15} color="var(--accent)" />
               <h3 className="card-title">Search Console</h3>
               <span className="badge badge-info">Requis</span>
@@ -106,7 +107,7 @@ export default async function GoogleSelectPage({ params }: { params: Promise<{ i
                 action={{ label: 'Reconnecter Google', href: `/api/google/auth?site_id=${id}` }}
               />
             ) : (
-              <div style={{ display: 'grid', gap: 'var(--space-2)' }}>
+              <div className="google-choices">
                 {gscProperties.map((property: GscProperty) => (
                   <RadioRow
                     key={property.siteUrl}
@@ -114,7 +115,7 @@ export default async function GoogleSelectPage({ params }: { params: Promise<{ i
                     value={property.siteUrl}
                     defaultChecked={property.siteUrl === preselectedGsc}
                     title={property.siteUrl}
-                    detail={`Accès ${property.permissionLevel}`}
+                    detail={permissionLabel(property.permissionLevel)}
                     recommended={matchesSite(property.siteUrl, site.url)}
                   />
                 ))}
@@ -130,7 +131,7 @@ export default async function GoogleSelectPage({ params }: { params: Promise<{ i
 
         <section className="panel">
           <div className="panel__header">
-            <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+            <div className="google-panel__title">
               <Store size={15} color="var(--ink-secondary)" />
               <h3 className="card-title">Business Profile</h3>
               <span className="badge badge-muted">Facultatif</span>
@@ -139,36 +140,36 @@ export default async function GoogleSelectPage({ params }: { params: Promise<{ i
 
           <div className="panel__body">
             {!hasGbpScope ? (
-              <p className="meta" style={{ margin: 0 }}>
+              <p className="meta">
                 Cette connexion Google n&apos;a pas demandé l&apos;autorisation Business Profile. Reconnectez le compte si vous
                 souhaitez rattacher une fiche d&apos;établissement à ce site.
               </p>
             ) : gbpProbe && !gbpProbe.available ? (
-              <div className="inset" style={{ display: 'grid', gap: 'var(--space-3)' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+              <div className="inset google-quota">
+                <div className="google-quota__head">
                   <AlertTriangle size={15} color="var(--status-warning)" />
-                  <strong style={{ fontSize: 'var(--fs-sm)' }}>
+                  <strong className="google-quota__title">
                     {gbpProbe.status === 'quota_exhausted'
                       ? 'Quota Google à zéro — démarche administrative, pas un bug'
                       : 'Business Profile injoignable'}
                   </strong>
                 </div>
-                <p style={{ fontSize: 'var(--fs-sm)', color: 'var(--ink-secondary)', margin: 0, lineHeight: 1.55 }}>
+                <p className="google-quota__text">
                   {gbpProbe.status === 'quota_exhausted' ? GBP_QUOTA_MESSAGE : gbpProbe.message}
                 </p>
                 {gbpProbe.status === 'quota_exhausted' && (
-                  <a href={GBP_QUOTA_DOC} target="_blank" rel="noreferrer" className="btn-secondary" style={{ justifySelf: 'start' }}>
+                  <a href={GBP_QUOTA_DOC} target="_blank" rel="noreferrer" className="btn-secondary google-quota__doc">
                     Documentation Google — quotas et formulaire de demande
                   </a>
                 )}
               </div>
             ) : gbpLocations.length === 0 ? (
-              <p className="meta" style={{ margin: 0 }}>
+              <p className="meta">
                 Aucune fiche d&apos;établissement trouvée sur ce compte. Vous devez en être propriétaire ou administrateur dans
                 Google Business Profile Manager. Ce site peut fonctionner sans.
               </p>
             ) : (
-              <div style={{ display: 'grid', gap: 'var(--space-2)' }}>
+              <div className="google-choices">
                 {gbpLocations.map(({ account, location }: { account: GbpAccount; location: GbpLocation }) => {
                   const locationId = location.name.split('/')[3]
                   const accountId = account.name.split('/')[1]
@@ -195,7 +196,7 @@ export default async function GoogleSelectPage({ params }: { params: Promise<{ i
           </div>
         </section>
 
-        <div style={{ display: 'flex', gap: 'var(--space-2)', justifyContent: 'flex-end' }}>
+        <div className="google-select__submit">
           <button type="submit" className="btn-primary">Enregistrer et synchroniser</button>
         </div>
       </form>
@@ -223,24 +224,33 @@ function RadioRow({
   children?: ReactNode
 }) {
   return (
-    <label
-      className="card card--interactive"
-      style={{ display: 'flex', alignItems: 'flex-start', gap: 'var(--space-3)', padding: 'var(--space-4)' }}
-    >
-      <input type="radio" name={name} value={value} defaultChecked={defaultChecked} style={{ marginTop: 3 }} />
+    <label className="card card--interactive radio-row">
+      <input type="radio" name={name} value={value} defaultChecked={defaultChecked} className="choice-box" />
       {children}
-      <span style={{ minWidth: 0 }}>
-        <span style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', flexWrap: 'wrap' }}>
-          <strong style={{ fontSize: 'var(--fs-sm)', wordBreak: 'break-word' }}>{title}</strong>
+      <span className="radio-row__text">
+        <span className="radio-row__head">
+          <strong className="radio-row__title">{title}</strong>
           {recommended && <span className="badge badge-success">Correspond au domaine</span>}
         </span>
-        {detail && <span className="meta" style={{ display: 'block', marginTop: 2 }}>{detail}</span>}
+        {detail && <span className="meta radio-row__detail">{detail}</span>}
       </span>
     </label>
   )
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
+
+/** Search Console's permission levels, as the operator reads them. An unknown level is shown as Google sent it. */
+const PERMISSION_LABELS: Record<string, string> = {
+  siteOwner: 'Accès propriétaire',
+  siteFullUser: 'Accès complet',
+  siteRestrictedUser: 'Accès restreint',
+  siteUnverifiedUser: 'Accès non vérifié',
+}
+
+function permissionLabel(level: string): string {
+  return PERMISSION_LABELS[level] ?? `Accès ${level}`
+}
 
 async function loadGoogleClient(siteId: string) {
   try {

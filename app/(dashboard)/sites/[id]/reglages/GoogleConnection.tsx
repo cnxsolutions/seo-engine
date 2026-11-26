@@ -43,6 +43,7 @@ import {
 } from '@/lib/google/sync'
 import { readGbpPostStats, type GbpPostStats } from '../gbp-stats'
 import { DisconnectGoogleButton } from './DisconnectGoogleButton'
+import '../../sites.css'
 
 /** Google's own documentation for Business Profile quotas — it carries the request form. */
 const GBP_QUOTA_DOC = 'https://developers.google.com/my-business/content/limits'
@@ -112,7 +113,9 @@ export async function GoogleConnectionSection({
         <Notice
           tone="warning"
           title="Historique de synchronisation indisponible"
-          body="La migration 013 n'a pas été appliquée : les synchronisations tournent, mais rien n'enregistre leur résultat. Jouez src/adapters/infrastructure/database/migrations/013_google_sync_observability.sql pour retrouver la date, le nombre de lignes et les erreurs."
+          // The cause is migration 013 (google_sync_observability), missing from
+          // this database. The screen says what it means, not which file to run.
+          body="Les synchronisations tournent, mais la base n'enregistre pas leur résultat : ni la date, ni le nombre de lignes, ni les erreurs. Une mise à jour de la base est nécessaire."
         />
       )}
 
@@ -148,7 +151,7 @@ export async function GoogleConnectionSection({
           icon={Database}
           hint={
             !coverage.readable
-              ? 'Table gsc_performance illisible'
+              ? 'Données Search Console illisibles'
               : coverage.firstDate && coverage.lastDate
                 ? `Du ${formatDayLong(coverage.firstDate)} au ${formatDayLong(coverage.lastDate)}`
                 : 'Aucune donnée conservée'
@@ -156,10 +159,10 @@ export async function GoogleConnectionSection({
         />
       </div>
 
-      <div style={{ display: 'grid', gap: 'var(--space-5)' }}>
+      <div className="google-panels">
         <section className="panel">
           <div className="panel__header">
-            <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', minWidth: 0 }}>
+            <div className="google-panel__title">
               <Search size={15} color="var(--accent)" aria-hidden="true" />
               <h4 className="card-title">Search Console</h4>
               <span className={`badge ${gscStatus.badge}`}>{gscStatus.label}</span>
@@ -173,7 +176,7 @@ export async function GoogleConnectionSection({
             </form>
           </div>
 
-          <div className="panel__body" style={{ display: 'grid', gap: 'var(--space-4)' }}>
+          <div className="panel__body google-panel__body">
             {!state.gscProperty ? (
               <EmptyState
                 bare
@@ -254,18 +257,18 @@ export async function GoogleConnectionSection({
             verbs sit together, whatever the state of the sync. */}
         <section className="panel">
           <div className="panel__header">
-            <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', minWidth: 0 }}>
+            <div className="google-panel__title">
               <Link2 size={15} color="var(--ink-secondary)" aria-hidden="true" />
               <h4 className="card-title">Compte Google relié</h4>
             </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+            <div className="google-panel__actions">
               <Link href={`/api/google/auth?site_id=${id}`} className="btn-secondary">
                 <RefreshCw size={14} /> Reconnecter Google
               </Link>
               <DisconnectGoogleButton siteId={id} />
             </div>
           </div>
-          <div className="panel__body" style={{ display: 'grid', gap: 'var(--space-4)' }}>
+          <div className="panel__body google-panel__body">
             <DetailRow label="Compte" value={state.email ?? 'inconnu'} />
             <DetailRow
               label="Autorisations"
@@ -310,14 +313,14 @@ function GbpPanel({
   return (
     <section className="panel">
       <div className="panel__header">
-        <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', minWidth: 0 }}>
+        <div className="google-panel__title">
           <Store size={15} color="var(--ink-secondary)" aria-hidden="true" />
           <h4 className="card-title">Business Profile</h4>
           <span className={`badge ${quotaBlocked ? 'badge-warning' : gbpBadge(status)}`}>
             {quotaBlocked ? 'Quota Google à zéro' : gbpLabel(status)}
           </span>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+        <div className="google-panel__actions">
           <Link href={`/sites/${siteId}/publication?canal=fiche`} className="btn-secondary">Piloter les posts</Link>
           <form action="/api/google/sync" method="POST">
             <input type="hidden" name="site_id" value={siteId} />
@@ -329,7 +332,7 @@ function GbpPanel({
         </div>
       </div>
 
-      <div className="panel__body" style={{ display: 'grid', gap: 'var(--space-4)' }}>
+      <div className="panel__body google-panel__body">
         <DetailRow label="Dernière tentative" value={formatDateTime(lastSyncAt)} />
 
         {/* « Aucune fiche rattachée » et « aucun post publié » sont deux faits
@@ -343,7 +346,7 @@ function GbpPanel({
             !located
               ? <UnknownValue why="Aucune fiche d’établissement n’est rattachée à ce site." />
               : !posts
-                ? <UnknownValue why="Le comptage des posts n’a pas pu être établi — la migration 019 n’est peut-être pas appliquée." />
+                ? <UnknownValue why="Le comptage des posts n’a pas pu être établi : la base n’est peut-être pas à jour." />
                 : posts.published === 0
                   ? 'Aucun'
                   : `${posts.published} — dernier le ${posts.lastPublishedAt ? formatDayLong(posts.lastPublishedAt) : 'date inconnue'}`
@@ -351,7 +354,7 @@ function GbpPanel({
         />
 
         {located && posts && (posts.published > 0 || waiting > 0 || posts.remoteKnown > 0) && (
-          <div className="inset" style={{ fontSize: 'var(--fs-sm)', color: 'var(--ink-secondary)', lineHeight: 1.55 }}>
+          <div className="inset google-panel__posts">
             {posts.pending} en attente · {posts.remoteKnown} écrit{posts.remoteKnown > 1 ? 's' : ''} à la main
             {posts.remoteKnown > 1 ? ' connus' : ' connu'}. Les posts que le propriétaire a tapés lui-même entrent dans
             le même contrôle anti-duplication que les nôtres : le moteur ne redit pas ce qui vient d’être écrit.
@@ -381,23 +384,23 @@ function GbpPanel({
         )}
 
         {quotaBlocked ? (
-          <div className="inset" style={{ display: 'grid', gap: 'var(--space-3)' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+          <div className="inset google-quota">
+            <div className="google-quota__head">
               <AlertTriangle size={15} color="var(--status-warning)" />
-              <strong style={{ fontSize: 'var(--fs-sm)' }}>Quota Google à zéro — démarche administrative, pas un bug</strong>
+              <strong className="google-quota__title">Quota Google à zéro — démarche administrative, pas un bug</strong>
             </div>
-            <p style={{ fontSize: 'var(--fs-sm)', color: 'var(--ink-secondary)', margin: 0, lineHeight: 1.55 }}>
+            <p className="google-quota__text">
               {GBP_QUOTA_MESSAGE}
             </p>
             {/* Ce que le quota retient est un fait mesurable, pas une menace :
                 aucun post n'est perdu, ils attendent. */}
             {waiting > 0 && (
-              <p style={{ fontSize: 'var(--fs-sm)', color: 'var(--ink-secondary)', margin: 0, lineHeight: 1.55 }}>
+              <p className="google-quota__text">
                 {waiting} post{waiting > 1 ? 's' : ''} attend{waiting > 1 ? 'ent' : ''} que ce quota soit débloqué.
                 Aucun n&apos;est perdu.
               </p>
             )}
-            <a href={GBP_QUOTA_DOC} target="_blank" rel="noreferrer" className="btn-secondary" style={{ justifySelf: 'start' }}>
+            <a href={GBP_QUOTA_DOC} target="_blank" rel="noreferrer" className="btn-secondary google-quota__doc">
               Documentation Google — quotas et formulaire de demande
             </a>
           </div>
@@ -409,7 +412,7 @@ function GbpPanel({
           // c'est faux depuis. Une phrase de l'interface qui devient fausse à
           // cause d'une fonctionnalité nouvelle se corrige dans le même lot —
           // sinon le produit se met à mentir sur lui-même.
-          <p className="meta" style={{ margin: 0 }}>
+          <p className="meta">
             Aucune fiche d&apos;établissement rattachée à ce site. Sans fiche rattachée, les pages continuent d&apos;être
             générées et publiées normalement. En revanche, les posts de fiche en dépendent entièrement&nbsp;: ce canal
             reste inactif.
@@ -417,7 +420,7 @@ function GbpPanel({
         ) : error ? (
           <Notice tone="critical" title="Dernière synchronisation en échec" body={error} inline />
         ) : (
-          <p className="meta" style={{ margin: 0 }}>
+          <p className="meta">
             Fiche d&apos;établissement synchronisée&nbsp;: avis, horaires, catégories et photos alimentent le contexte local des
             pages générées.
           </p>
@@ -444,9 +447,9 @@ function GbpPanel({
  */
 function DetailRow({ label, value }: { label: string; value: ReactNode }) {
   return (
-    <div style={{ display: 'flex', gap: 'var(--space-4)', justifyContent: 'space-between', alignItems: 'baseline' }}>
-      <span className="meta" style={{ flexShrink: 0 }}>{label}</span>
-      <span style={{ fontSize: 'var(--fs-sm)', fontWeight: 600, textAlign: 'right', wordBreak: 'break-word' }}>{value}</span>
+    <div className="google-detail">
+      <span className="meta google-detail__label">{label}</span>
+      <span className="google-detail__value">{value}</span>
     </div>
   )
 }

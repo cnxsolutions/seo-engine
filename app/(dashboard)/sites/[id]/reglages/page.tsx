@@ -27,6 +27,7 @@ import { TabIntro } from '../TabIntro'
 import { ClientAccessSection } from './ClientAccess'
 import { GoogleConnectionSection } from './GoogleConnection'
 import { SchemaPanel } from './SchemaPanel'
+import '../../sites.css'
 
 export const dynamic = 'force-dynamic'
 
@@ -73,7 +74,7 @@ export default async function SiteSettingsPage({
         <div className="settings-section__head">
           <h3 id="h-site" className="settings-section__title">Identité et accès</h3>
         </div>
-        <p className="meta" style={{ margin: 0 }}>
+        <p className="meta settings-section__lead">
           Un champ secret laissé vide reste inchangé.
         </p>
         <EditSiteForm site={editable} />
@@ -93,7 +94,7 @@ export default async function SiteSettingsPage({
               </div>
             )}
           </div>
-          <p className="meta" style={{ margin: 0 }}>
+          <p className="meta settings-section__lead">
             {!site.github_repo
               ? 'Aucun dépôt configuré : renseignez-le ci-dessus pour que le moteur puisse l’analyser.'
               : site.repo_profile

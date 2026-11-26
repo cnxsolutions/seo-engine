@@ -1,0 +1,688 @@
+/* ─────────────────────────────────────────────────────────────────────────────
+   Sites — the list, the creation form, a site's settings and its Google
+   screens: their own classes (L6c, UX-7)
+   ─────────────────────────────────────────────────────────────────────────────
+
+   These rules were inline styles. They render as those did (pixel comparison
+   before/after), with deliberate exceptions:
+     · what broke on a phone (UX-12): in the list's cards, a value wider than
+       its row now drops under its label, and « À faire » no longer squeezes
+       its sentence into one word per line beside its button; in the creation
+       form, the two connectors stack and the footer's buttons wrap;
+     · the CMS schema panel, whose raw sizes (0.9rem, 0.7rem, 1.5rem) had no
+       token and now take the nearest one.
+   ───────────────────────────────────────────────────────────────────────────── */
+
+/* ── The list of sites ── */
+
+.site-grid {
+  display: grid;
+  /* min(): a phone narrower than a card gets one full-width column, never a
+     sideways scroll. */
+  grid-template-columns: repeat(auto-fill, minmax(min(340px, 100%), 1fr));
+  gap: var(--space-4);
+}
+
+.panel.site-card {
+  display: flex;
+  flex-direction: column;
+}
+
+.site-card__identity {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.site-card__names {
+  min-width: 0;
+}
+
+.card-title.site-card__name {
+  display: block;
+  text-decoration: none;
+}
+
+.meta.site-card__url {
+  display: block;
+  color: var(--ink-muted);
+}
+
+.panel__body.site-card__body {
+  display: grid;
+  /* minmax(0, …): a long value shrinks inside the card instead of widening the
+     track past the card's padding — what clipped « Rafraîchir » on a phone. */
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-4);
+  flex: 1;
+}
+
+.meta.site-card__inactive {
+  display: flex;
+  gap: var(--space-2);
+  align-items: flex-start;
+  color: var(--status-warning-text);
+}
+
+.site-card__inactive-icon {
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.site-card__facts {
+  display: grid;
+  gap: var(--space-2);
+}
+
+/* A label and its value. When both do not fit on one line, the value drops
+   under its label, still aligned right. */
+.site-fact {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-1) var(--space-3);
+}
+
+.meta.site-fact__label {
+  flex-shrink: 0;
+}
+
+.truncate.site-fact__value {
+  margin-left: auto;
+  max-width: 100%;
+  font-size: var(--fs-sm);
+  text-align: right;
+}
+
+.site-fact__actions {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.site-fact__actions.site-fact__actions--end {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.inset.site-card__counters {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--space-3);
+}
+
+.site-counter__row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.num.site-counter__value {
+  font-size: var(--fs-lg);
+  font-weight: 700;
+  color: var(--ink-primary);
+}
+
+.site-card__manage {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+/* « À faire » and its button: side by side when both fit, the button under
+   the sentence otherwise — never a sentence squeezed to one word per line. */
+.site-card__next {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.site-card__next-text {
+  flex: 1 1 16rem;
+  min-width: 0;
+}
+
+.site-card__next-title {
+  display: block;
+  color: var(--ink-primary);
+}
+
+.btn-primary.site-card__next-cta {
+  flex-shrink: 0;
+}
+
+/* ── Creating and editing a site ── */
+
+.site-form {
+  max-width: 680px;
+}
+
+/* Two choices side by side; one above the other on a phone, where two columns
+   broke « Publication par commit GitHub » into one word per line. */
+.site-types {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr));
+  gap: var(--space-3);
+  margin-bottom: var(--space-5);
+}
+
+/* Three classes: the border of the chosen connector must hold under
+   .card--interactive:hover, as the inline style it replaces did. */
+.card.card--interactive.site-type {
+  display: flex;
+  gap: var(--space-3);
+  align-items: center;
+  text-align: left;
+  padding: var(--space-4);
+  border-color: var(--line);
+  box-shadow: var(--shadow-xs);
+}
+
+.card.card--interactive.site-type.site-type--selected {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent-wash);
+}
+
+.site-type__text {
+  min-width: 0;
+}
+
+.site-type__label {
+  display: block;
+  font-weight: 600;
+  color: var(--ink-primary);
+  font-size: var(--fs-md);
+}
+
+.site-type__check {
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.panel__body.site-form__fields {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.meta.site-form__note {
+  margin-top: var(--space-2);
+}
+
+.panel__footer.site-form__actions {
+  display: flex;
+  gap: var(--space-3);
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.site-form__spacer {
+  flex: 1;
+}
+
+/* The saving button stays on the right when a phone sends it to a line of its own. */
+.site-form__spacer + * {
+  margin-left: auto;
+}
+
+/* A secret field and the eye that reveals it. */
+.secret-input {
+  position: relative;
+}
+
+.input.secret-input__field {
+  padding-right: var(--space-10);
+}
+
+.btn-icon.secret-input__toggle {
+  position: absolute;
+  right: var(--space-1);
+  top: 50%;
+  transform: translateY(-50%);
+  border: 0;
+}
+
+/* A checkbox and its sentence. */
+.check-row {
+  display: flex;
+  gap: var(--space-2);
+  align-items: flex-start;
+  cursor: pointer;
+}
+
+/* A checkbox or a radio, lined up with the first line of its text. */
+.choice-box {
+  margin-top: 3px;
+}
+
+/* ── Deleting a site ── */
+
+.panel.danger-zone {
+  border-color: var(--status-critical);
+}
+
+.danger-zone__title-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.panel__body.danger-zone__body {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.danger-zone__text {
+  font-size: var(--fs-sm);
+  color: var(--ink-secondary);
+  line-height: var(--lh-normal);
+}
+
+.inset.danger-zone__confirm {
+  display: grid;
+  gap: var(--space-3);
+  border-left: 3px solid var(--status-critical);
+}
+
+.meta.danger-zone__error {
+  color: var(--status-critical-text);
+}
+
+.danger-zone__actions {
+  display: flex;
+  gap: var(--space-3);
+  align-items: center;
+}
+
+/* ── Repository analysis, page refresh: a button and its verdict ── */
+
+.repo-analysis {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.meta.repo-analysis__result {
+  display: flex;
+  gap: var(--space-2);
+  align-items: flex-start;
+  color: var(--status-good-text);
+}
+
+.meta.repo-analysis__result.repo-analysis__result--failed {
+  color: var(--status-critical-text);
+}
+
+.repo-analysis__icon {
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.repo-analysis__message {
+  word-break: break-word;
+}
+
+.refresh-pages {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-1);
+}
+
+.refresh-pages.refresh-pages--compact {
+  align-items: flex-end;
+}
+
+.meta.refresh-pages__message {
+  display: flex;
+  gap: var(--space-1);
+  align-items: flex-start;
+  max-width: 360px;
+  color: var(--status-good-text);
+}
+
+.meta.refresh-pages__message.refresh-pages__message--failed {
+  color: var(--status-critical-text);
+}
+
+.refresh-pages__icon {
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+/* ── Settings: the CMS schema ── */
+
+.meta.schema-panel__error {
+  color: var(--status-critical-text);
+}
+
+.glass-card.schema-panel__empty {
+  text-align: center;
+  padding: var(--space-12) var(--space-8);
+}
+
+.schema-panel__empty-icon {
+  margin: 0 auto var(--space-4);
+  color: var(--ink-faint);
+}
+
+.schema-panel__empty-icon.schema-panel__empty-icon--failed {
+  color: var(--status-critical-text);
+}
+
+.schema-panel__empty-title {
+  font-weight: 650;
+  margin-bottom: var(--space-2);
+}
+
+.schema-panel__empty-text {
+  color: var(--ink-muted);
+  font-size: var(--fs-sm);
+  max-width: 520px;
+  margin: 0 auto var(--space-5);
+  line-height: var(--lh-normal);
+}
+
+.schema-panel__empty-text.schema-panel__empty-text--failed {
+  color: var(--status-critical-text);
+}
+
+.glass-card.schema-panel__card {
+  padding: var(--space-5);
+}
+
+.schema-panel__summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+}
+
+.schema-panel__card-title {
+  font-size: var(--fs-md);
+  font-weight: 600;
+  color: var(--ink-primary);
+  margin-bottom: var(--space-2);
+}
+
+.schema-panel__card-title.schema-panel__card-title--spaced {
+  margin-bottom: var(--space-4);
+}
+
+.schema-panel__counts {
+  display: flex;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+}
+
+.schema-panel__count {
+  text-align: center;
+}
+
+.schema-panel__count-value {
+  font-size: var(--fs-xl);
+  font-weight: 700;
+  color: var(--ink-primary);
+}
+
+.schema-panel__count-label {
+  font-size: var(--fs-2xs);
+  color: var(--ink-muted);
+}
+
+.schema-panel__filters {
+  display: flex;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
+.schema-panel__search {
+  flex: 1;
+  min-width: min(250px, 100%);
+  position: relative;
+}
+
+.schema-panel__search-icon {
+  position: absolute;
+  left: var(--space-3);
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--ink-muted);
+}
+
+.input.schema-panel__search-input {
+  padding-left: var(--space-10);
+}
+
+.input.schema-panel__filter {
+  width: auto;
+  min-width: 180px;
+}
+
+.schema-panel__types {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.schema-panel__taxonomies {
+  margin-bottom: var(--space-4);
+  padding: var(--space-3);
+  background: var(--surface-inset);
+  border-radius: var(--radius-sm);
+}
+
+.schema-panel__eyebrow {
+  font-size: var(--fs-2xs);
+  font-weight: 600;
+  color: var(--ink-muted);
+  text-transform: uppercase;
+  margin-bottom: var(--space-2);
+}
+
+.schema-panel__chips {
+  display: flex;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.schema-panel__fields {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.badge.schema-panel__acf {
+  margin-left: var(--space-2);
+}
+
+.schema-panel__copy {
+  margin-left: auto;
+  background: transparent;
+  border: none;
+  color: var(--ink-muted);
+  cursor: pointer;
+  padding: var(--space-1);
+  font-size: var(--fs-2xs);
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.schema-panel__copy.schema-panel__copy--done {
+  color: var(--status-good-text);
+}
+
+.schema-panel__copy.schema-panel__copy--failed {
+  color: var(--status-critical-text);
+}
+
+.schema-panel__options {
+  margin-top: var(--space-2);
+  font-size: var(--fs-2xs);
+  color: var(--ink-muted);
+}
+
+.schema-panel__no-match {
+  text-align: center;
+  padding: var(--space-12) var(--space-8);
+  background: var(--surface-card);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--line);
+}
+
+.schema-panel__no-match-icon {
+  color: var(--ink-muted);
+  margin-bottom: var(--space-4);
+}
+
+.schema-panel__no-match-text {
+  color: var(--ink-muted);
+}
+
+.schema-panel__seo-fields {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.schema-panel__seo-field {
+  display: flex;
+  align-items: center;
+  padding: var(--space-2) var(--space-3);
+  background: var(--surface-inset);
+  border-radius: var(--radius-xs);
+}
+
+.schema-panel__seo-key {
+  font-size: var(--fs-sm);
+  color: var(--ink-primary);
+}
+
+/* ── Settings: the Google connection, and choosing what it reads ── */
+
+.google-panels {
+  display: grid;
+  gap: var(--space-5);
+}
+
+.google-panel__title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.google-panel__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.panel__body.google-panel__body {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.inset.google-panel__posts {
+  font-size: var(--fs-sm);
+  color: var(--ink-secondary);
+  line-height: var(--lh-normal);
+}
+
+.inset.google-quota {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.google-quota__head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.google-quota__title {
+  font-size: var(--fs-sm);
+}
+
+.google-quota__text {
+  font-size: var(--fs-sm);
+  color: var(--ink-secondary);
+  line-height: var(--lh-normal);
+}
+
+.btn-secondary.google-quota__doc {
+  justify-self: start;
+}
+
+.google-detail {
+  display: flex;
+  gap: var(--space-4);
+  justify-content: space-between;
+  align-items: baseline;
+}
+
+.meta.google-detail__label {
+  flex-shrink: 0;
+}
+
+.google-detail__value {
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  text-align: right;
+  word-break: break-word;
+}
+
+.btn-link.google-select__back {
+  margin-bottom: var(--space-2);
+}
+
+.google-select {
+  display: grid;
+  gap: var(--space-5);
+}
+
+.google-choices {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.card.radio-row {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding: var(--space-4);
+}
+
+.radio-row__text {
+  min-width: 0;
+}
+
+.radio-row__head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.radio-row__title {
+  font-size: var(--fs-sm);
+  word-break: break-word;
+}
+
+.meta.radio-row__detail {
+  display: block;
+  margin-top: 2px;
+}
+
+.google-select__submit {
+  display: flex;
+  gap: var(--space-2);
+  justify-content: flex-end;
+}
