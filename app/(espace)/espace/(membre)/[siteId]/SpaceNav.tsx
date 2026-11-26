@@ -2,12 +2,11 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { ChartLine, FileText, Home, type LucideIcon } from 'lucide-react'
+import { ChartLine, FileText, Home, MessageSquarePlus, type LucideIcon } from 'lucide-react'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // The navigation of a site's space (docs/design.md § 9.1): a bottom bar on a
-// phone, a slim rail from 1 024 px. Entries arrive with their screens —
-// « Demandes » with the L3.
+// phone, a slim rail from 1 024 px. One entry per screen of the site.
 // ─────────────────────────────────────────────────────────────────────────────
 
 interface NavEntry {
@@ -19,6 +18,7 @@ interface NavEntry {
 
 const ENTRIES: NavEntry[] = [
   { section: '', label: 'Accueil', icon: Home },
+  { section: '/demandes', label: 'Demandes', icon: MessageSquarePlus },
   { section: '/pages', label: 'Pages', icon: FileText },
   { section: '/resultats', label: 'Résultats', icon: ChartLine },
 ]

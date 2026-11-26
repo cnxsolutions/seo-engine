@@ -391,7 +391,7 @@ export interface PlannedSubject {
  * porter WITHOUT_SEARCH_CONSOLE dans sa preuve, au lieu de lire une absence de
  * donnee comme une absence de concurrence.
  */
-const NO_SEARCH_CONSOLE: GscPlanningSignals = {
+export const NO_SEARCH_CONSOLE: GscPlanningSignals = {
   available: false,
   windowStart: '',
   windowEnd: '',
@@ -460,7 +460,7 @@ export function decideForSlot(
 }
 
 /** Les communes de la campagne et son departement : ce qu'on retire d'un mot-cle pour en lire le sujet. */
-function campaignCityNames(campaign: Campaign): string[] {
+export function campaignCityNames(campaign: Pick<Campaign, 'communes' | 'department'>): string[] {
   return dedupe([...targetCommunes(campaign.communes), campaignDepartment(campaign)])
 }
 

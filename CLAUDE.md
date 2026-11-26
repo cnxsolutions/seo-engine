@@ -39,7 +39,7 @@ production n'est touchee que pour appliquer une migration avant un merge.
 npm run dev          # http://localhost:3000
 npm run lint         # ESLint          — 0 erreur attendue (33 warnings tolerees)
 npm run typecheck    # tsc --noEmit    — 0 erreur attendue
-npm test             # Vitest          — 1 375 tests (91 fichiers), tous verts
+npm test             # Vitest          — 1 428 tests (99 fichiers), tous verts
 npm run build        # build local (sans sortie standalone, voir next.config.ts)
 ```
 
@@ -53,7 +53,7 @@ La base de developpement est un **Supabase local** (Docker Desktop doit tourner)
 ```bash
 npm run db:local:start   # API :54321 · Postgres :54322 · Studio :54323 · Mailpit :54324
 npm run db:local:reset   # baseline + migrations + demonstration (sites fictifs, campagnes inactives)
-npm run test:db          # tests d'integration *.db.test.ts (46) — rejoues en CI dans le job « base »
+npm run test:db          # tests d'integration *.db.test.ts (63) — rejoues en CI dans le job « base »
 ```
 
 `.env.local` pointe sur cette base ; il ne contient **aucun** acces a la
@@ -114,7 +114,7 @@ Sans `--prod`, les scripts ne touchent **que** la base locale. `.env.prod-db`
 chaine de connexion de production.
 
 Les fichiers vivent dans `src/adapters/infrastructure/database/migrations/`
-(`001` a `023`), **jamais** dans `db/` ni dans `supabase/migrations/`. Ils
+(`001` a `024`), **jamais** dans `db/` ni dans `supabase/migrations/`. Ils
 doivent etre idempotents (`IF NOT EXISTS`, `CREATE OR REPLACE`) : la base
 elle-meme fait office de journal, il n'y a pas de table de suivi. Toute nouvelle
 table active son RLS dans sa propre migration (`db/rls.db.test.ts`).
@@ -221,9 +221,21 @@ Auth). Une fuite d'un client vers un autre est LE risque du chantier :
 - **Cache GitHub Actions cloisonne par branche** : `main` ne lit pas le cache
   cree sur une branche de PR. Le premier build apres un merge repart de zero.
 - **Vitest echoue en bloc sous Git Bash** quand le chemin courant commence par
-  un lecteur en minuscule (`c:/laragon/...`) : les 91 fichiers tombent avec
+  un lecteur en minuscule (`c:/laragon/...`) : les 99 fichiers tombent avec
   « Cannot read properties of undefined (reading 'config') », zero test lance.
   Ce n'est pas le code : lancer `npm test` depuis PowerShell, ou `cd /C/laragon/...`.
+
+- **La tache des demandes consulte le modele, en local aussi.** Toutes les
+  2 min, `npm run dev` analyse les demandes `received` de la base locale ; une
+  demande que les mesures ne reglent pas part au modele avec la cle OpenAI de
+  `.env.local` (quelques centaines de jetons). Sans credit ou sans cle, la
+  demande passe « A l'etude chez CNX » (`OPINION_UNAVAILABLE`) : c'est voulu,
+  pas une panne du code.
+
+- **Horloge de Docker Desktop** : la machine virtuelle a quelques dixiemes de
+  seconde d'avance sur Windows. Un test qui compare l'heure de connexion de
+  Supabase Auth (a la seconde) a une borne posee par Node garde au moins deux
+  secondes de marge (`db/client-space.db.test.ts`).
 
 - **Supabase CLI : `[auth.email] enable_signup` reste a `true`** dans
   `supabase/config.toml`. Pour la CLI, ce drapeau allume le fournisseur e-mail

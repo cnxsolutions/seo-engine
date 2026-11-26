@@ -160,7 +160,27 @@ export interface GscPlanningSignals {
    * from signals built before 2026-11-08.
    */
   emergingQueries?: EmergingQuery[]
+  /**
+   * The already-won half of `blockedQueries`, with what proves it: the page
+   * and its position. What a client reads when the keyword they propose is
+   * one their site already holds (docs/cadrage.md § 3.1, rule 4). Absent from
+   * signals built before 2026-11-26.
+   */
+  wonQueries?: WonQuery[]
 }
+
+/** A query the site already owns the top of: position ≤ 3 with ≥ 30 impressions over the window. */
+export interface WonQuery {
+  query: string
+  /** The page that wins it — most clicks, then most impressions, then best position. */
+  pageUrl: string
+  position: number
+  impressions: number
+  clicks: number
+}
+
+export const WON_MAX_POSITION = 3
+export const WON_MIN_IMPRESSIONS = 30
 
 export interface EmergingQuery {
   query: string
@@ -312,7 +332,8 @@ export async function getGscPlanningSignals(
   const lowCtrPages = selectLowCtrPages(stats)
   const [generations, site] = await Promise.all([fetchPublishedGenerations(siteId, 300), fetchSiteIdentity(siteId)])
   const deadPages = findDeadPages(generations, rows, now, windowStart)
-  const blockedQueries = blockedQueriesFrom(stats, cannibalized)
+  const wonQueries = selectWonQueries(stats)
+  const blockedQueries = blockedQueriesFrom(wonQueries, cannibalized)
 
   return {
     available: true,
@@ -323,6 +344,7 @@ export async function getGscPlanningSignals(
     deadPages,
     cannibalized,
     blockedQueries,
+    wonQueries,
     emergingQueries: selectEmergingQueries(stats, {
       brands: site ? brandForms(site) : [],
       pages: generations.map((generation) => ({
@@ -817,16 +839,26 @@ async function fetchSiteIdentity(siteId: string): Promise<{ name: string | null;
  * Queries the next cycle must not open a new page on: either the site already
  * has too many pages on them, or it already owns the top of the results.
  */
-function blockedQueriesFrom(stats: QueryPageStat[], cannibalized: CannibalizedQuery[]): string[] {
+function blockedQueriesFrom(won: WonQuery[], cannibalized: CannibalizedQuery[]): string[] {
   const blocked = new Set(cannibalized.map((entry) => entry.query.toLowerCase()))
-
-  for (const stat of stats) {
-    if (stat.position > 0 && stat.position <= 3 && stat.impressions >= 30) {
-      blocked.add(stat.query.toLowerCase())
-    }
-  }
-
+  for (const entry of won) blocked.add(entry.query.toLowerCase())
   return [...blocked]
+}
+
+/**
+ * The queries the site already wins, one entry per query: the (page, query)
+ * couples at position ≤ 3 with ≥ 30 impressions, the best page kept when
+ * several qualify (comparePages).
+ */
+export function selectWonQueries(stats: QueryPageStat[]): WonQuery[] {
+  const best = new Map<string, QueryPageStat>()
+  for (const stat of stats) {
+    if (!(stat.position > 0 && stat.position <= WON_MAX_POSITION && stat.impressions >= WON_MIN_IMPRESSIONS)) continue
+    const key = stat.query.toLowerCase()
+    const current = best.get(key)
+    if (!current || comparePages(stat, current) < 0) best.set(key, stat)
+  }
+  return [...best.values()].map(({ query, pageUrl, position, impressions, clicks }) => ({ query, pageUrl, position, impressions, clicks }))
 }
 
 function groupRowsByNormalizedUrl(rows: GscRawRow[]): Map<string, GscRawRow[]> {

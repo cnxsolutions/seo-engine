@@ -3,6 +3,8 @@
 // docs/design.md § 10 — the tone of the CNX site, never a technical term.
 // ─────────────────────────────────────────────────────────────────────────────
 
+import type { SubmissionProblem } from '@/src/core/domain/keyword-requests/normalize'
+
 export const SIGN_IN_TEXT = {
   codeSent: 'Si cette adresse a accès à un espace, un code vient d’y être envoyé. Pensez à regarder dans les indésirables.',
   invalidEmail: 'Saisissez une adresse e-mail valide.',
@@ -72,4 +74,120 @@ export const RESULTS_TEXT = {
   waitingTitle: 'Les premières données sont en route',
   waitingBody: 'Votre site est relié à Google. Les premiers chiffres arrivent sous quelques jours : Google les publie avec un peu de retard.',
   emptyList: 'Pas encore de visite sur cette période.',
+} as const
+
+/**
+ * The « Demandes » screen (KW-1 to KW-9). What the engine concluded, said as
+ * what it found and what happens next — « refusé » never appears (§ 3.3).
+ * To be proofread by CNX (docs/cadrage.md § 5).
+ */
+export const REQUEST_TEXT = {
+  eyebrow: 'Vos demandes',
+  title: 'Proposer un mot-clé',
+  intro: 'Une recherche que vos clients tapent sur Google, et sur laquelle vous voulez être trouvé ? Proposez-la : nous la comparons à votre site et à votre programme, en quelques minutes.',
+  keywordsLabel: 'Mot-clé',
+  keywordsHint: 'Un par ligne, 10 au plus. Par exemple : débouchage canalisation.',
+  cityLabel: 'Ville',
+  cityHint: 'Facultatif : une des communes de votre zone.',
+  cityHintNational: 'Facultatif : laissez vide si la recherche ne vise pas une ville.',
+  noteLabel: 'Pourquoi ce mot-clé ?',
+  noteHint: 'Facultatif : un service nouveau, une question de vos clients… CNX Solutions le lira.',
+  desiredByLabel: 'Pour quand ?',
+  desiredByHint: 'Facultatif : la date à laquelle vous aimeriez la voir en ligne.',
+  submit: 'Envoyer',
+  submitted: (count: number) =>
+    count === 1 ? 'Demande reçue : l’analyse prend quelques minutes.' : `${count} demandes reçues : l’analyse prend quelques minutes.`,
+  // No final period: the day (« 26 nov. ») brings its own.
+  duplicate: (keyword: string, day: string) => `« ${keyword} » : vous l’avez déjà demandé le ${day}`,
+  full: 'Vous avez déjà 30 demandes en cours sur ce site : CNX Solutions vous recontacte pour en parler.',
+  tooMany: (seconds: number) => `Beaucoup d’envois en peu de temps. Réessayez dans ${Math.max(1, Math.ceil(seconds / 60))} min.`,
+  unavailable: 'L’envoi n’a pas abouti. Réessayez dans quelques minutes.',
+  unreachable: 'Impossible de joindre le serveur. Vérifiez votre connexion.',
+  problems: {
+    none: 'Saisissez au moins un mot-clé.',
+    tooMany: '10 mots-clés au plus par envoi.',
+    line: (line: number, problem: 'empty' | 'too_long' | 'too_many_words' | 'url') =>
+      `Ligne ${line} : ${
+        {
+          empty: 'ce mot-clé est vide.',
+          too_long: '80 caractères au plus.',
+          too_many_words: '8 mots au plus.',
+          url: 'une adresse de site n’est pas un mot-clé.',
+        }[problem]
+      }`,
+    cityTooLong: 'Ce nom de ville est trop long.',
+    cityUrl: 'Saisissez un nom de ville, pas une adresse.',
+    noteTooLong: '500 caractères au plus.',
+    desiredByInvalid: 'Cette date n’existe pas.',
+    desiredByPast: 'Choisissez une date à venir.',
+    desiredByTooFar: 'Choisissez une date dans l’année qui vient.',
+  },
+  listTitle: 'Vos demandes',
+  listEmpty: 'Aucune demande pour l’instant. Proposez un premier mot-clé : CNX Solutions s’occupe du reste.',
+  latestTitle: 'Vos dernières demandes',
+  propose: 'Proposer un mot-clé',
+  seeAll: 'Voir toutes vos demandes',
+  desiredBy: (day: string) => `Souhaitée pour le ${day}`,
+  viewPage: 'Voir la page',
+  withdraw: 'Retirer',
+  withdrawTitle: 'Retirer cette demande ?',
+  withdrawBody: 'CNX Solutions ne la traitera pas. Vous pourrez la proposer de nouveau plus tard.',
+  withdrawConfirm: 'Retirer la demande',
+  withdrawLocked: 'Cette demande est déjà en rédaction : elle ne peut plus être retirée.',
+  withdrawFailed: 'Le retrait n’a pas abouti. Réessayez dans quelques minutes.',
+} as const
+
+/** Each refusal of the form, under its field (rule 1 of § 3.1: refused at input, never stored). */
+export function requestProblemMessage(problem: SubmissionProblem): string {
+  const { problems } = REQUEST_TEXT
+  switch (problem.field) {
+    case 'keywords':
+      if ('line' in problem) return problems.line(problem.line, problem.code)
+      return problem.code === 'too_many' ? problems.tooMany : problems.none
+    case 'city':
+      return problem.code === 'url' ? problems.cityUrl : problems.cityTooLong
+    case 'note':
+      return problems.noteTooLong
+    case 'desiredBy':
+      return problem.code === 'past' ? problems.desiredByPast : problem.code === 'too_far' ? problems.desiredByTooFar : problems.desiredByInvalid
+  }
+}
+
+/** A request's state, in the client's words (src/core/domain/keyword-requests/client-view.ts). */
+export const REQUEST_STATE_LABELS = {
+  analysing: { label: 'Reçue — analyse en cours', tone: 'neutral' },
+  review: { label: 'À l’étude chez CNX', tone: 'info' },
+  deferred: { label: 'Gardée pour la période suivante', tone: 'info' },
+  scheduled: { label: 'Prévue', tone: 'good' },
+  in_production: { label: 'En rédaction', tone: 'good' },
+  published: { label: 'En ligne', tone: 'good' },
+  covered: { label: 'Déjà couverte', tone: 'neutral' },
+  declined: { label: 'Non retenue', tone: 'neutral' },
+  withdrawn: { label: 'Retirée', tone: 'neutral' },
+} as const
+
+/** The one sentence under a request: what was found, what happens next. */
+export const REQUEST_DETAIL_TEXT = {
+  analysing: 'Nous la comparons à votre site et à votre programme : quelques minutes.',
+  reviewCity: (city: string) => `${city} n’est pas encore dans votre zone : CNX Solutions regarde avec vous.`,
+  review: 'CNX Solutions regarde votre demande et revient vers vous.',
+  deferred: 'Elle passera en priorité dans le programme de votre prochaine période.',
+  planned: (day: string | null) => (day ? `Elle était déjà au programme : la page est prévue le ${day}` : 'Elle était déjà au programme.'),
+  inProduction: 'La page est en cours d’écriture.',
+  published: 'La page est en ligne.',
+  won: (position: number) => `Votre site est déjà en position ${position} sur cette recherche.`,
+  covered: 'Une page de votre site y répond déjà.',
+  coveredNoPage: 'Votre site répond déjà à cette recherche.',
+  declined: 'CNX Solutions vous en dira plus.',
+  withdrawn: 'Vous avez retiré cette demande.',
+} as const
+
+export const TIMELINE_LABELS = {
+  received: 'Reçue',
+  analysed: 'Analysée',
+  planned: 'Prévue',
+  writing: 'En rédaction',
+  online: 'En ligne',
+  next_period: 'Période suivante',
+  withdrawn: 'Retirée',
 } as const

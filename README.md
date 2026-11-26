@@ -447,6 +447,12 @@ sont exposes par aucune route HTTP : ils disparaissent a chaque redemarrage.
       │  (moteur + crawl), J+2, J+4, J+7 puis chaque semaine, chaque mois
       │  une fois indexee ; sitemap + IndexNow renvoyes pour une page que
       │  Google n'a pas encore exploree (lib/indexing/check.ts)
+
+  Demandes des clients        table `keyword_requests` · cron toutes les 2 min
+      │  un mot-cle propose depuis l'espace client (/espace) recoit son
+      │  verdict par lots de 5 (lib/keyword-requests/analyze.ts) : deja
+      │  prevue, deja gagnee, deja couverte, a l'etude chez CNX, ou gardee
+      │  pour la periode suivante
 ```
 
 Le cycle est renouvelable : `cycle-manager.ts` detecte la fin d'un cycle,

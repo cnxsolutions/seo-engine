@@ -85,7 +85,7 @@ reprendre · ❌ absent · ❓ à vérifier.
 
 | ID | Fonctionnalité | Source | État | Lot |
 |---|---|---|---|---|
-| ESP-1 | Accueil : la période en cours (dates, pages prévues / publiées), ses dernières demandes, bouton « Proposer un mot-clé » | demande | 🟡 L2a : période, fil, pages prévues et en ligne ; demandes et « Proposer un mot-clé » au L3 | L2 |
+| ESP-1 | Accueil : la période en cours (dates, pages prévues / publiées), ses dernières demandes, bouton « Proposer un mot-clé » | demande | ✅ L2a (période, fil, pages prévues et en ligne) · L3 (trois dernières demandes, bouton « Proposer un mot-clé ») | L2 |
 | ESP-2 | Pages en ligne : titre, adresse, date, « visible sur Google » ou « en cours d'indexation » | `lib/google/tracking.ts`, `lib/indexing` | ✅ L2a (trois états : visible, en cours d'indexation, « CNX vérifie ») | L2 |
 | ESP-3 | Prochaines pages : sujet et date, sans type technique (« Pilier », « Enfant ») | `editorial_calendar` | ✅ L2a (titre du plan, sinon le sujet en français) | L2 |
 | ESP-4 | Sélecteur de site quand un client en a plusieurs | — | ✅ L2a | L2 |
@@ -96,15 +96,15 @@ reprendre · ❌ absent · ❓ à vérifier.
 
 | ID | Fonctionnalité | Source | État | Lot |
 |---|---|---|---|---|
-| KW-1 | Formulaire : mot-clé (obligatoire), ville (facultative, proposée parmi les communes de la campagne), « pourquoi » (facultatif), « pour quand » (facultatif) ; plusieurs mots-clés d'un coup, un par ligne, 10 au plus | demande | ❌ | L3 |
-| KW-2 | Validation serveur : longueur, nombre de mots, pas d'URL ; plafond de demandes ouvertes par site ; limite de débit | règles dev | ❌ | L3 |
-| KW-3 | Analyse **asynchrone** par une tâche du planificateur (toutes les 2 min, lots de 5) : verdict, motifs, preuves | demande | ❌ | L3 |
+| KW-1 | Formulaire : mot-clé (obligatoire), ville (facultative, proposée parmi les communes de la campagne), « pourquoi » (facultatif), « pour quand » (facultatif) ; plusieurs mots-clés d'un coup, un par ligne, 10 au plus | demande | ✅ L3 (affichage optimiste, erreurs sous chaque champ, ligne par ligne) | L3 |
+| KW-2 | Validation serveur : longueur, nombre de mots, pas d'URL ; plafond de demandes ouvertes par site ; limite de débit | règles dev | ✅ L3 (domaine `normalize.ts` rejoué par la route ; plafond et doublons dans `submit_keyword_requests`, sous verrou du site ; 30 envois / heure par membre) | L3 |
+| KW-3 | Analyse **asynchrone** par une tâche du planificateur (toutes les 2 min, lots de 5) : verdict, motifs, preuves | demande | ✅ L3 (`lib/keyword-requests/analyze.ts`, tâche `keywordRequests` ; contexte chargé une fois par site, verdicts écrits en un appel) | L3 |
 | KW-4 | Verdict « Intégrée à la période en cours » : un brief est rédigé, il **remplace** une page prévue non entamée, la date est annoncée | demande | ❌ | L4 |
-| KW-5 | Verdict « Gardée pour la période suivante » : stockée, consommée en priorité par le prochain plan | demande | ❌ | L3 (verdict) · L4 (consommation) |
-| KW-6 | Verdicts « Déjà prévue le JJ/MM », « Déjà couverte par cette page », « Vous êtes déjà en tête sur Google » — avec le lien ou la date | `decideEditorialAction` | ❌ | L3 |
-| KW-7 | Verdict « À l'étude chez CNX » : hors zone, hors métier, ambigu | demande | ❌ | L3 |
-| KW-8 | Suivi : chronologie reçue → analysée → prévue (date) → en rédaction → en ligne (lien) | demande | ❌ | L3 · L4 |
-| KW-9 | Le client retire une demande tant qu'elle n'est pas en rédaction | — | ❌ | L3 |
+| KW-5 | Verdict « Gardée pour la période suivante » : stockée, consommée en priorité par le prochain plan | demande | 🟡 L3 : verdict ; consommation au L4 | L3 (verdict) · L4 (consommation) |
+| KW-6 | Verdicts « Déjà prévue le JJ/MM », « Déjà couverte par cette page », « Vous êtes déjà en tête sur Google » — avec le lien ou la date | `decideEditorialAction` | ✅ L3 | L3 |
+| KW-7 | Verdict « À l'étude chez CNX » : hors zone, hors métier, ambigu | demande | ✅ L3 (+ site sans campagne, avis du modèle indisponible) | L3 |
+| KW-8 | Suivi : chronologie reçue → analysée → prévue (date) → en rédaction → en ligne (lien) | demande | 🟡 L3 : chronologie affichée, rafraîchie toutes les 10 s pendant l'analyse ; passages « en rédaction » et « en ligne » au L4 | L3 · L4 |
+| KW-9 | Le client retire une demande tant qu'elle n'est pas en rédaction | — | ✅ L3 (modale de confirmation ; retrait conditionnel au statut, jamais écrasé par l'analyse) | L3 |
 | KW-10 | Console opérateur : file de toutes les demandes, filtres, arbitrage (intégrer maintenant, reporter, refuser avec motif, rouvrir), compteur « à examiner » dans le rail | demande | ❌ | L5 |
 | KW-11 | Report sans perte : une demande non consommée (plan plein, quota atteint) reste en tête au plan suivant ; au-delà de 3 cycles d'attente, elle passe « à examiner » | demande | ❌ | L4 |
 | KW-12 | E-mails : au client (verdict, mise en ligne), à l'opérateur (demande à examiner) — par une file d'envoi asynchrone | — | ❌ | L7 |
@@ -132,8 +132,8 @@ reprendre · ❌ absent · ❓ à vérifier.
 | ID | Fonctionnalité | Source | État | Lot |
 |---|---|---|---|---|
 | QA-1 | **RLS activé sur toutes les tables**, sans politique (tout refusé hors clé de service), vérifié par un script — en local par un test, en production par une lecture seule — préalable à toute exposition de Supabase Auth | sécurité | ✅ L0a (#30) : la base reconstruite laissait les 30 tables lisibles par la clé publique ; migration `021`, et la baseline enregistre désormais l'état RLS | L0 |
-| QA-2 | Tests d'isolation, **contre le Supabase local** : pour chaque route `/api/espace`, un membre du client A n'obtient rien du client B (404, pas 403) | sécurité | 🟡 L1 : `db/client-space.db.test.ts` (isolation du module de portée, connexion réelle, révocation, expiration) ; une route de données `/api/espace` arrive au L3 avec son test | L1 |
-| QA-3 | Limites de débit (connexion, envoi de demandes), en mémoire — compatible avec l'instance unique | sécurité | 🟡 L1 : codes demandés et saisis (`lib/rate-limit.ts`) ; envoi de demandes au L3 | L1 · L3 |
+| QA-2 | Tests d'isolation, **contre le Supabase local** : pour chaque route `/api/espace`, un membre du client A n'obtient rien du client B (404, pas 403) | sécurité | ✅ L1 : `db/client-space.db.test.ts` (isolation du module de portée, connexion réelle, révocation, expiration) · L3 : `db/keyword-requests.db.test.ts` (envoi et retrait sur le site d'un autre client → introuvable) | L1 |
+| QA-3 | Limites de débit (connexion, envoi de demandes), en mémoire — compatible avec l'instance unique | sécurité | ✅ L1 : codes demandés et saisis (`lib/rate-limit.ts`) · L3 : envois de demandes (30 / heure par membre) | L1 · L3 |
 | QA-4 | Documentation à jour : CLAUDE.md (1 283 tests, piège Vitest sous Git Bash), README, `db/README.md`, baseline régénérée après `021`, `022`, `023`, `024` | — | 🟡 | L0 puis chaque lot |
 | QA-5 | Recette par lot sur le Supabase local : captures 375 px et 1 440 px, Lighthouse, parcours complet (codes de connexion lus dans Mailpit), écritures en base listées, puis base remise à zéro | dev-cadrage | ❌ | chaque lot |
 | QA-6 | **Supabase local** : `supabase/config.toml`, schéma reconstruit depuis la baseline et les migrations, jeu de démonstration (deux clients, trois sites fictifs), une commande pour tout remettre à zéro (§ 4.8) | décision 16 | ✅ L0a (#30) | L0 |
@@ -318,7 +318,8 @@ index : client_members(client_id), client_members(lower(email)) unique, sites(cl
 RLS activé sur clients, client_members ; aucune politique
 ```
 
-Migration `024_keyword_requests.sql` (la `023` est prise par les résultats Google du L2b) :
+Migration `024_keyword_requests.sql` (la `023` est prise par les résultats Google du L2b ; `swap_plan_item`
+passe dans la `025`, avec le L4 qui s'en sert) :
 
 ```sql
 keyword_requests (
@@ -337,9 +338,24 @@ keyword_requests (
 )
 index : (site_id, status), (campaign_id, status), (status, created_at), (client_id, created_at desc)
 unique partiel : (site_id, keyword_normalized) where status in ('received','review','deferred','scheduled','in_production')
-function swap_plan_item(...)   -- § 3.4, CREATE OR REPLACE
+function submit_keyword_requests(...)  -- plafond et doublons sous verrou du site (ajout du L3)
+function apply_keyword_verdicts(jsonb)  -- verdicts d'un lot, seulement sur les demandes `received` (ajout du L3)
 RLS activé ; aucune politique
 ```
+
+**Écarts assumés au L3** (26/11) :
+
+- `keyword_normalized` est la **recherche** (mot-clé + ville quand le mot-clé ne la nomme pas) : « plombier » à
+  Troyes et « plombier troyes » sont la même demande (règle 2).
+- Règle 5 : avant `decideEditorialAction`, un **fait** — une page en ligne dont le mot-clé principal *est* la
+  recherche la couvre, quelle que soit la fraîcheur de l'inventaire (une demande couverte ne réécrit rien).
+  `decideEditorialAction` est ensuite appelé tel quel.
+- Règle 4 : `GscPlanningSignals` porte désormais `wonQueries` (requête, page, position), la moitié « déjà gagnée »
+  de `blockedQueries`, calculée au même seuil.
+- Deux motifs « À l'étude » de plus : site **sans campagne** (`NO_CAMPAIGN`) et **avis du modèle indisponible**
+  (`OPINION_UNAVAILABLE` : panne, crédit épuisé, réponse illisible). Jamais un refus, jamais une perte.
+- La note du client (« pourquoi ») n'est **jamais** envoyée au modèle : seule la recherche, entre balises, est jugée.
+- Une demande retirée date son retrait par `updated_at` (statut terminal), sans colonne de plus.
 
 Rien ne change dans `cycle_plans` ni `editorial_calendar` : `client_request_id` vit dans l'item JSONB du plan,
 et le lien créneau → brief existe déjà (`editorial_calendar.plan_item_id`). L'historique des statuts tient dans
@@ -424,7 +440,7 @@ Ordonnés par **risque** (sécurité d'abord, planificateur ensuite), puis par *
 | **L0** | **L0a ✅ #30** (local, tests, RLS) · **L0b ✅ #31** (peau CNX). Socle : **Supabase local** (CLI épinglée, `config.toml`, remise à zéro, démo, `test:db`, job CI) ; scripts de migration ciblant le local par défaut ; jetons CNX, polices, marque, composants de base rhabillés, modale de confirmation ; vérification RLS (+ activation si besoin) ; CLAUDE.md à jour. Peut se scinder en L0a (local et tests) / L0b (peau CNX) | UX-1 à UX-4, UX-9, UX-10 (bases), QA-1, QA-4, QA-6, QA-7 | — | L · 4 j |
 | **L1** | Identité client : tables `clients`/`client_members`, `@supabase/ssr`, branche de `proxy.ts`, connexion par code, invitation et révocation depuis les Réglages d'un site, pages d'erreur ; tests d'isolation, limites de débit | ACC-1 à ACC-7, QA-2, QA-3 | L0 | ✅ L1 (#32) |
 | **L2** | Espace client en lecture : coquille mobile, accueil, pages en ligne, prochaines pages, sélecteur de site, **résultats Google**. Se scinde en L2a (lecture) / L2b (résultats) si la PR grossit | ESP-1 à ESP-6 | L1 | ✅ L2a (#33), L2b (#34) |
-| **L3** | Demandes, saisie et verdict : table, domaine (verdict, cycle de vie), tâche d'analyse, formulaire, liste et chronologie, retrait. Les demandes recevables sont **toutes** gardées pour la période suivante (pas encore d'insertion dans le cycle en cours) | KW-1 à KW-3, KW-5 (verdict), KW-6 à KW-9 | L2 | L · 4 j |
+| **L3** | Demandes, saisie et verdict : table, domaine (verdict, cycle de vie), tâche d'analyse, formulaire, liste et chronologie, retrait. Les demandes recevables sont **toutes** gardées pour la période suivante (pas encore d'insertion dans le cycle en cours) | KW-1 à KW-3, KW-5 (verdict), KW-6 à KW-9 | L2 | ✅ L3 (#35) |
 | **L4** | Demandes dans le moteur : extraction de `writeBriefForSubject` **sans changement de comportement** (PR à part), `swap_plan_item`, placement dans le cycle en cours, consommation au plan suivant, retour de publication | KW-4, KW-5, KW-8, KW-11, KW-13 | L3 | L · 4 j |
 | **L5** | Console opérateur des demandes et coquille : file, arbitrage, compteur dans le rail, onglet « Demandes » d'un site, rail et en-tête de site refaits, glossaire | KW-10, UX-5, UX-6 | L3 | M · 3 j |
 | **L6** | Refonte des écrans opérateur, un par un : tableau de bord, vue d'ensemble, stratégie, calendrier, publication, performances, pages, réglages — styles en ligne retirés, états, mouvement, graphiques, écrans hérités. Peut se scinder en L6a / L6b | UX-6 à UX-12 | L0, L5 | L · 5-6 j |

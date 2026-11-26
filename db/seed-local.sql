@@ -220,3 +220,73 @@ lateral (values
   ('',                           'plomberie martin',             ((d * 2) % 3) + 1,                                    9 + (d * 3) % 5,    1.2::real)
 ) as rows (page, query, clicks, impressions, position)
 on conflict do nothing;
+
+-- ─── Demandes de mots-cles (L3) : une par statut ────────────────────────────
+--
+-- Plomberie Martin porte une demande dans chacun des neuf statuts, pour que
+-- l'espace et la console les montrent tous. La demande `received` est reglee
+-- par la regle 3 (le brief demo-item-6 vise deja « fuite d'eau troyes ») : la
+-- tache du planificateur la conclut sans appel au modele quand `npm run dev`
+-- tourne. `keyword_normalized` est ce que rend normalizedRequest(keyword, city)
+-- (src/core/domain/keyword-requests/normalize.ts). Electricite Durand en porte
+-- une, pour les tests de cloisonnement.
+
+insert into public.keyword_requests (
+  id, client_id, site_id, campaign_id, keyword, keyword_normalized, city, note, desired_by,
+  status, reason_code, reasons, evidence, decided_by, decided_at,
+  cycle_plan_id, plan_item_id, scheduled_for, published_url, published_at, created_at, updated_at
+)
+values
+  (md5('demo-request-received')::uuid, md5('demo-client-a')::uuid, md5('demo-site-martin')::uuid, null,
+   'fuite d''eau', 'fuite d eau troyes', 'Troyes', null, null,
+   'received', null, '{}', '[]', null, null,
+   null, null, null, null, null, now() - interval '1 minute', now() - interval '1 minute'),
+  (md5('demo-request-review')::uuid, md5('demo-client-a')::uuid, md5('demo-site-martin')::uuid, md5('demo-campaign-martin')::uuid,
+   'plombier', 'plombier reims', 'Reims', 'Nous intervenons parfois à Reims.', null,
+   'review', 'CITY_OUT_OF_AREA', array['Reims n''est pas dans les communes de la campagne (Troyes, Sainte-Savine, La Chapelle-Saint-Luc, Saint-André-les-Vergers).'],
+   '[{"kind": "city", "city": "Reims"}]', 'engine', now() - interval '2 days',
+   null, null, null, null, null, now() - interval '2 days', now() - interval '2 days'),
+  (md5('demo-request-deferred')::uuid, md5('demo-client-a')::uuid, md5('demo-site-martin')::uuid, md5('demo-campaign-martin')::uuid,
+   'adoucisseur d''eau', 'adoucisseur d eau sainte savine', 'Sainte-Savine', 'Beaucoup de calcaire dans le secteur.', current_date + 30,
+   'deferred', 'NEXT_PERIOD', array['Recevable (service reconnu : traitement de l''eau). Gardee pour le plan de la periode suivante, ou elle passe en priorite.'],
+   '[{"kind": "opinion", "fit": "in", "service": "traitement de l''eau", "intent": "transactionnelle"}]', 'engine', now() - interval '3 days',
+   null, null, null, null, null, now() - interval '3 days', now() - interval '3 days'),
+  (md5('demo-request-scheduled')::uuid, md5('demo-client-a')::uuid, md5('demo-site-martin')::uuid, md5('demo-campaign-martin')::uuid,
+   'détartrage chauffe-eau', 'detartrage chauffe eau sainte savine', 'Sainte-Savine', null, null,
+   'scheduled', 'ALREADY_PLANNED', array['Deja visee par un brief de la periode en cours.'],
+   jsonb_build_array(jsonb_build_object('kind', 'planned', 'day', to_char(current_date + 6, 'YYYY-MM-DD'), 'planItemId', 'demo-item-7')),
+   'engine', now() - interval '4 days',
+   md5('demo-cycle-martin-2')::uuid, 'demo-item-7', current_date + 6, null, null, now() - interval '4 days', now() - interval '4 days'),
+  (md5('demo-request-in-production')::uuid, md5('demo-client-a')::uuid, md5('demo-site-martin')::uuid, md5('demo-campaign-martin')::uuid,
+   'débouchage canalisation', 'debouchage canalisation la chapelle saint luc', 'La Chapelle-Saint-Luc', null, null,
+   'in_production', 'ALREADY_PLANNED', array['Deja visee par un brief de la periode en cours.'],
+   jsonb_build_array(jsonb_build_object('kind', 'planned', 'day', to_char(current_date, 'YYYY-MM-DD'), 'planItemId', 'demo-item-4')),
+   'engine', now() - interval '5 days',
+   md5('demo-cycle-martin-2')::uuid, 'demo-item-4', current_date, null, null, now() - interval '5 days', now() - interval '5 days'),
+  (md5('demo-request-published')::uuid, md5('demo-client-a')::uuid, md5('demo-site-martin')::uuid, md5('demo-campaign-martin')::uuid,
+   'chauffe-eau', 'chauffe eau sainte savine', 'Sainte-Savine', null, null,
+   'published', 'ALREADY_PLANNED', array['Deja visee par un brief de la periode en cours.'],
+   '[]', 'engine', now() - interval '9 days',
+   md5('demo-cycle-martin-2')::uuid, 'demo-item-3', current_date - 2,
+   'https://plomberie-martin.test/chauffe-eau-sainte-savine', (current_date - 2)::timestamptz + interval '9 hours', now() - interval '9 days', now() - interval '9 days'),
+  (md5('demo-request-covered')::uuid, md5('demo-client-a')::uuid, md5('demo-site-martin')::uuid, md5('demo-campaign-martin')::uuid,
+   'plomberie martin', 'plomberie martin', null, null, null,
+   'covered', 'ALREADY_WON', array['Search Console : « plomberie martin » est deja en position 1.2.'],
+   '[{"kind": "position", "query": "plomberie martin", "position": 1}, {"kind": "page", "url": "https://plomberie-martin.test/"}]',
+   'engine', now() - interval '6 days',
+   null, null, null, null, null, now() - interval '6 days', now() - interval '6 days'),
+  (md5('demo-request-declined')::uuid, md5('demo-client-a')::uuid, md5('demo-site-martin')::uuid, md5('demo-campaign-martin')::uuid,
+   'climatisation', 'climatisation troyes', 'Troyes', null, null,
+   'declined', 'OUT_OF_TRADE', array['La climatisation n’est pas encore un service mis en avant sur votre site : parlons-en au prochain point.'],
+   '[{"kind": "opinion", "fit": "out", "service": null, "intent": "transactionnelle"}]', 'operator', now() - interval '7 days',
+   null, null, null, null, null, now() - interval '8 days', now() - interval '8 days'),
+  (md5('demo-request-withdrawn')::uuid, md5('demo-client-a')::uuid, md5('demo-site-martin')::uuid, null,
+   'plombier pas cher', 'plombier pas cher troyes', 'Troyes', null, null,
+   'withdrawn', null, '{}', '[]', null, null,
+   null, null, null, null, null, now() - interval '10 days', now() - interval '9 days'),
+  (md5('demo-request-durand')::uuid, md5('demo-client-b')::uuid, md5('demo-site-durand')::uuid, md5('demo-campaign-durand')::uuid,
+   'borne de recharge', 'borne de recharge reims', 'Reims', null, null,
+   'deferred', 'NEXT_PERIOD', array['Recevable. Gardee pour le plan de la periode suivante, ou elle passe en priorite.'],
+   '[]', 'engine', now() - interval '1 day',
+   null, null, null, null, null, now() - interval '1 day', now() - interval '1 day')
+on conflict do nothing;

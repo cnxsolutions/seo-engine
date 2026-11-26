@@ -37,6 +37,7 @@ import { isRegenerable } from '@/lib/pipeline/regeneration'
 import { publishPage } from '@/lib/publishing/publish'
 import type { PublishOutcome } from '@/lib/publishing/outcome'
 import { checkCycleCompletion } from './cycle-manager'
+import { analyzeReceivedRequests } from '@/lib/keyword-requests/analyze'
 import {
   claimEditorialSlot,
   claimGenerationForPublishing,
@@ -221,6 +222,20 @@ export function initScheduler(): void {
         runDueCampaigns(),
         checkCycleCompletion(),
       ])
+    })
+  })
+
+  // Client keyword requests - every 2 minutes, five at a time (KW-3)
+  //
+  // Its own job id, never 'main': a verdict is a few reads and at most one
+  // small model call, and must not wait behind a page being written. Nothing
+  // here publishes; the same single-instance rule holds all the same, since
+  // two processes would analyse the same request twice.
+  cron.schedule('*/2 * * * *', async () => {
+    await runWithConcurrencyControl('keywordRequests', async () => {
+      await analyzeReceivedRequests().catch((error) =>
+        log('ERROR', 'keywordRequests', 'Keyword request analysis failed', undefined, error instanceof Error ? error : new Error(String(error)))
+      )
     })
   })
 

@@ -212,7 +212,11 @@ describe('espace client — revocation et expiration (ACC-4)', () => {
   })
 
   it('une nouvelle invitation rouvre l acces, avec un nouveau code seulement', async () => {
-    await pause(1100)
+    // Two seconds, not one: the sign-in time comes from Supabase Auth's clock,
+    // to the second, and the reopening from this process's. Under Docker
+    // Desktop the VM runs some 0.6 s ahead of Windows, and with the rounding a
+    // 1.1 s pause sometimes left the old phone inside the same second.
+    await pause(2100)
     expect(await inviteMember({ siteId: siteIds.b, email: EMAIL_B, client: null })).toEqual({ status: 'reopened' })
     const session = await activeSession(await signIn(EMAIL_B))
     expect(session.email).toBe(EMAIL_B)
