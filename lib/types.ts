@@ -197,8 +197,6 @@ export interface Campaign {
   system_prompt?: string
   enable_external_links?: boolean
   external_link_count?: number
-  enable_images?: boolean
-  image_per_page?: number
   is_active: boolean
   last_run_at?: string
   next_run_at?: string
@@ -639,12 +637,6 @@ export interface PlanItemBrief {
   outline: string[]
   seo_rules: string[]
   required_entities: string[]
-  /**
-   * Generate a hero image for this page. Absent: the campaign decides
-   * (`enable_images`), so switching the campaign to « every page » reaches
-   * every brief nobody ticked by hand. Set from the Strategy view.
-   */
-  generate_image?: boolean
   internal_link_targets: string[]
   competitor_insights: string[]
   estimated_word_count: number

@@ -143,7 +143,7 @@ describe('le contexte de l audit atteint le gate', () => {
     await run({
       hasGoogleBusinessProfile: false,
       city: 'Troyes',
-      campaign: { target_length: 800, enable_images: false, enable_external_links: true, business_name: 'Dupont Plomberie' },
+      campaign: { target_length: 800, enable_external_links: true, business_name: 'Dupont Plomberie' },
       planBrief: { required_entities: ['Sainte-Savine', 'Bréviandes'] },
     })
 

@@ -216,7 +216,7 @@ describe('post-generation pipeline — a normal French page', () => {
     const report = await runPostGenerationPipeline({
       ...BASE,
       page: realisticPage(),
-      campaign: { target_length: 800, enable_images: false, enable_external_links: false },
+      campaign: { target_length: 800, enable_external_links: false },
     })
 
     // The whole point. If this ever goes red, the engine has stopped producing.
@@ -228,7 +228,7 @@ describe('post-generation pipeline — a normal French page', () => {
     const report = await runPostGenerationPipeline({
       ...BASE,
       page: realisticPage(),
-      campaign: { target_length: 800, enable_images: false, enable_external_links: false },
+      campaign: { target_length: 800, enable_external_links: false },
     })
 
     const readability = [...report.reasons, ...report.warnings]
@@ -241,7 +241,7 @@ describe('post-generation pipeline — a normal French page', () => {
     const report = await runPostGenerationPipeline({
       ...BASE,
       page: realisticPage(),
-      campaign: { target_length: 800, enable_images: false, enable_external_links: false },
+      campaign: { target_length: 800, enable_external_links: false },
     })
 
     expect(report.reasons.some(reason => reason.includes('IMAGE'))).toBe(false)
@@ -251,7 +251,7 @@ describe('post-generation pipeline — a normal French page', () => {
     const report = await runPostGenerationPipeline({
       ...BASE,
       page: realisticPage(),
-      campaign: { target_length: 800, enable_images: false, enable_external_links: false },
+      campaign: { target_length: 800, enable_external_links: false },
     })
 
     expect(report.measurement.declared).toBe(1800)
@@ -264,7 +264,7 @@ describe('post-generation pipeline — a normal French page', () => {
     const report = await runPrePublishGate({
       ...BASE,
       page: realisticPage(),
-      campaign: { target_length: 800, enable_images: false, enable_external_links: false },
+      campaign: { target_length: 800, enable_external_links: false },
     })
 
     expect(report.reasons).toEqual([])
@@ -281,7 +281,7 @@ describe('post-generation pipeline — what must not ship', () => {
       page: realisticPage({
         htmlContent: `<h1>Plombier a Troyes</h1><h2>Nos interventions</h2>${buildBody(2)}`,
       }),
-      campaign: { target_length: 800, enable_images: false, enable_external_links: false },
+      campaign: { target_length: 800, enable_external_links: false },
     })
 
     expect(report.publishable).toBe(false)
@@ -293,7 +293,7 @@ describe('post-generation pipeline — what must not ship', () => {
     const report = await runPostGenerationPipeline({
       ...BASE,
       page: realisticPage({ htmlContent: page.htmlContent.replace(/<\/?h1>/g, 'p>') }),
-      campaign: { target_length: 800, enable_images: false, enable_external_links: false },
+      campaign: { target_length: 800, enable_external_links: false },
     })
 
     expect(report.publishable).toBe(false)
@@ -304,7 +304,7 @@ describe('post-generation pipeline — what must not ship', () => {
     const report = await runPostGenerationPipeline({
       ...BASE,
       page: realisticPage({ schemaFaqPage: '{"@type":"FAQPage", "mainEntity": [' }),
-      campaign: { target_length: 800, enable_images: false, enable_external_links: false },
+      campaign: { target_length: 800, enable_external_links: false },
     })
 
     expect(report.publishable).toBe(false)
@@ -319,7 +319,7 @@ describe('post-generation pipeline — what must not ship', () => {
     const report = await runPostGenerationPipeline({
       ...BASE,
       page: realisticPage({ schemaBreadcrumb: '{}' }),
-      campaign: { target_length: 800, enable_images: false, enable_external_links: false },
+      campaign: { target_length: 800, enable_external_links: false },
     })
 
     expect(report.publishable).toBe(true)
@@ -330,7 +330,7 @@ describe('post-generation pipeline — what must not ship', () => {
     const report = await runPostGenerationPipeline({
       ...BASE,
       page: realisticPage({ schemaFaqPage: '{}' }),
-      campaign: { target_length: 800, enable_images: false, enable_external_links: false },
+      campaign: { target_length: 800, enable_external_links: false },
     })
 
     expect(report.publishable).toBe(false)
@@ -351,7 +351,7 @@ describe('post-generation pipeline — what must not ship', () => {
           ],
         }),
       }),
-      campaign: { target_length: 800, enable_images: false, enable_external_links: false },
+      campaign: { target_length: 800, enable_external_links: false },
     })
 
     // Reaches the gate only because `schemas` is passed to the orchestrator;
@@ -368,7 +368,7 @@ describe('post-generation pipeline — what must not ship', () => {
           { field: 'metaDescription', severity: 'blocking', reason: 'Meta description absente de la reponse IA.' },
         ],
       }),
-      campaign: { target_length: 800, enable_images: false, enable_external_links: false },
+      campaign: { target_length: 800, enable_external_links: false },
     })
 
     expect(report.publishable).toBe(false)
@@ -386,7 +386,7 @@ describe('post-generation pipeline — what must not ship', () => {
           { field: 'directAnswer', severity: 'blocking', reason: 'Reponse directe de 33 mots, hors cible 40-60.' },
         ],
       }),
-      campaign: { target_length: 800, enable_images: false, enable_external_links: false },
+      campaign: { target_length: 800, enable_external_links: false },
     })
 
     expect(report.publishable).toBe(true)
@@ -404,7 +404,7 @@ describe('post-generation pipeline — what must not ship', () => {
           { field: 'directAnswer', severity: 'blocking', reason: 'Bloc de reponse directe absent.' },
         ],
       }),
-      campaign: { target_length: 800, enable_images: false, enable_external_links: false },
+      campaign: { target_length: 800, enable_external_links: false },
     })
 
     expect(report.publishable).toBe(false)
@@ -419,7 +419,7 @@ describe('post-generation pipeline — what must not ship', () => {
       ...BASE,
       page: realisticPage(),
       hasGoogleBusinessProfile: true,
-      campaign: { target_length: 800, enable_images: false, enable_external_links: false },
+      campaign: { target_length: 800, enable_external_links: false },
     })
     expect(withProfile.publishable).toBe(true)
 
@@ -427,7 +427,7 @@ describe('post-generation pipeline — what must not ship', () => {
       ...BASE,
       page: realisticPage(),
       hasGoogleBusinessProfile: false,
-      campaign: { target_length: 800, enable_images: false, enable_external_links: false },
+      campaign: { target_length: 800, enable_external_links: false },
     })
     expect(withoutProfile.publishable).toBe(false)
     expect(withoutProfile.reasons.some(reason => reason.startsWith('INVENTED_NAP'))).toBe(true)
@@ -437,7 +437,7 @@ describe('post-generation pipeline — what must not ship', () => {
     const report = await runPrePublishGate({
       ...BASE,
       page: realisticPage(),
-      campaign: { target_length: 800, enable_images: false, enable_external_links: false, communes: ['Reims', 'Troyes'] },
+      campaign: { target_length: 800, enable_external_links: false, communes: ['Reims', 'Troyes'] },
     })
 
     expect(report.reasons.some(reason => reason.startsWith('ENTITY_CITY'))).toBe(false)
@@ -449,7 +449,7 @@ describe('post-generation pipeline — what must not ship', () => {
       ...BASE,
       page: realisticPage(),
       city: 'Reims',
-      campaign: { target_length: 800, enable_images: false, enable_external_links: false, business_name: 'Martin Sanitaire' },
+      campaign: { target_length: 800, enable_external_links: false, business_name: 'Martin Sanitaire' },
     })
 
     expect(report.reasons.some(reason => reason.startsWith('ENTITY_CITY'))).toBe(true)
@@ -471,7 +471,7 @@ describe('post-generation pipeline — what must not ship', () => {
     const report = await runPostGenerationPipeline({
       ...BASE,
       page,
-      campaign: { target_length: 800, enable_images: false, enable_external_links: true },
+      campaign: { target_length: 800, enable_external_links: true },
     })
 
     expect(report.page.htmlContent).toContain('href="https://www.service-public.fr/particuliers/vosdroits/F2061"')
@@ -481,7 +481,7 @@ describe('post-generation pipeline — what must not ship', () => {
     const uncited = await runPostGenerationPipeline({
       ...BASE,
       page: realisticPage(),
-      campaign: { target_length: 800, enable_images: false, enable_external_links: true },
+      campaign: { target_length: 800, enable_external_links: true },
     })
     expect(uncited.reasons.some(reason => reason.startsWith('SOURCES'))).toBe(true)
   })
@@ -490,7 +490,7 @@ describe('post-generation pipeline — what must not ship', () => {
     const report = await runPostGenerationPipeline({
       ...BASE,
       page: realisticPage({ htmlContent: '' }),
-      campaign: { target_length: 800, enable_images: false, enable_external_links: false },
+      campaign: { target_length: 800, enable_external_links: false },
     })
 
     expect(report.publishable).toBe(false)
