@@ -85,12 +85,12 @@ reprendre · ❌ absent · ❓ à vérifier.
 
 | ID | Fonctionnalité | Source | État | Lot |
 |---|---|---|---|---|
-| ESP-1 | Accueil : la période en cours (dates, pages prévues / publiées), ses dernières demandes, bouton « Proposer un mot-clé » | demande | ❌ | L2 |
-| ESP-2 | Pages en ligne : titre, adresse, date, « visible sur Google » ou « en cours d'indexation » | `lib/google/tracking.ts`, `lib/indexing` | 🟡 données présentes, écran opérateur seulement | L2 |
-| ESP-3 | Prochaines pages : sujet et date, sans type technique (« Pilier », « Enfant ») | `editorial_calendar` | 🟡 | L2 |
-| ESP-4 | Sélecteur de site quand un client en a plusieurs | — | ❌ | L2 |
+| ESP-1 | Accueil : la période en cours (dates, pages prévues / publiées), ses dernières demandes, bouton « Proposer un mot-clé » | demande | 🟡 L2a : période, fil, pages prévues et en ligne ; demandes et « Proposer un mot-clé » au L3 | L2 |
+| ESP-2 | Pages en ligne : titre, adresse, date, « visible sur Google » ou « en cours d'indexation » | `lib/google/tracking.ts`, `lib/indexing` | ✅ L2a (trois états : visible, en cours d'indexation, « CNX vérifie ») | L2 |
+| ESP-3 | Prochaines pages : sujet et date, sans type technique (« Pilier », « Enfant ») | `editorial_calendar` | ✅ L2a (titre du plan, sinon le sujet en français) | L2 |
+| ESP-4 | Sélecteur de site quand un client en a plusieurs | — | ✅ L2a | L2 |
 | ESP-5 | **Résultats Google** (décision 2) : clics et apparitions sur 28 jours comparés aux 28 précédents, courbe quotidienne, 5 pages et 5 recherches qui amènent le plus de visites ; source et période toujours affichées ; état vide utile si Search Console n'est pas reliée (« CNX s'en occupe ») | `gsc_performance`, `lib/google/performance.ts`, `SourceNote` | 🟡 données synchronisées chaque nuit, écran opérateur seulement | L2 |
-| ESP-6 | Mobile d'abord : tout l'espace utilisable à 375 px, chargé en < 2 s | règles dev | ❌ | L2 |
+| ESP-6 | Mobile d'abord : tout l'espace utilisable à 375 px, chargé en < 2 s | règles dev | 🟡 L2a (375 px vérifié) ; L2b à suivre | L2 |
 
 ### KW — Demandes de mots-clés
 
@@ -423,7 +423,7 @@ Ordonnés par **risque** (sécurité d'abord, planificateur ensuite), puis par *
 |---|---|---|---|---|
 | **L0** | **L0a ✅ #30** (local, tests, RLS) · **L0b ✅ #31** (peau CNX). Socle : **Supabase local** (CLI épinglée, `config.toml`, remise à zéro, démo, `test:db`, job CI) ; scripts de migration ciblant le local par défaut ; jetons CNX, polices, marque, composants de base rhabillés, modale de confirmation ; vérification RLS (+ activation si besoin) ; CLAUDE.md à jour. Peut se scinder en L0a (local et tests) / L0b (peau CNX) | UX-1 à UX-4, UX-9, UX-10 (bases), QA-1, QA-4, QA-6, QA-7 | — | L · 4 j |
 | **L1** | Identité client : tables `clients`/`client_members`, `@supabase/ssr`, branche de `proxy.ts`, connexion par code, invitation et révocation depuis les Réglages d'un site, pages d'erreur ; tests d'isolation, limites de débit | ACC-1 à ACC-7, QA-2, QA-3 | L0 | ✅ L1 (#32) |
-| **L2** | Espace client en lecture : coquille mobile, accueil, pages en ligne, prochaines pages, sélecteur de site, **résultats Google**. Se scinde en L2a (lecture) / L2b (résultats) si la PR grossit | ESP-1 à ESP-6 | L1 | L · 5 j |
+| **L2** | Espace client en lecture : coquille mobile, accueil, pages en ligne, prochaines pages, sélecteur de site, **résultats Google**. Se scinde en L2a (lecture) / L2b (résultats) si la PR grossit | ESP-1 à ESP-6 | L1 | 🟡 L2a (#33) ; L2b (résultats Google) à suivre |
 | **L3** | Demandes, saisie et verdict : table, domaine (verdict, cycle de vie), tâche d'analyse, formulaire, liste et chronologie, retrait. Les demandes recevables sont **toutes** gardées pour la période suivante (pas encore d'insertion dans le cycle en cours) | KW-1 à KW-3, KW-5 (verdict), KW-6 à KW-9 | L2 | L · 4 j |
 | **L4** | Demandes dans le moteur : extraction de `writeBriefForSubject` **sans changement de comportement** (PR à part), `swap_plan_item`, placement dans le cycle en cours, consommation au plan suivant, retour de publication | KW-4, KW-5, KW-8, KW-11, KW-13 | L3 | L · 4 j |
 | **L5** | Console opérateur des demandes et coquille : file, arbitrage, compteur dans le rail, onglet « Demandes » d'un site, rail et en-tête de site refaits, glossaire | KW-10, UX-5, UX-6 | L3 | M · 3 j |

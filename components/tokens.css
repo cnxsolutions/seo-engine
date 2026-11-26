@@ -82,6 +82,9 @@
   /* The brand gradient, SEO blue to SAP violet: the thread of the films, the
      one main action of a screen. Never behind running text. */
   --brand-grad: linear-gradient(135deg, #0b6cf9 0%, #5b3df5 100%);
+  /* Its two ends, for what a CSS gradient cannot paint: an SVG stroke (le fil). */
+  --brand-grad-start: #0b6cf9;
+  --brand-grad-end: #5b3df5;
 
   /* The LOGO's own gradient, a hair brighter than the interface's (#0C6FFF,
      #6D4AFF, cnx-solutions/brand/README.md § 2). Only the mark wears it. */

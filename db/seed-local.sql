@@ -180,6 +180,23 @@ from public.cycle_plans,
 where cycle_plans.id = md5('demo-cycle-martin-2')::uuid
 on conflict do nothing;
 
+-- ─── Google, vu de l'espace client (L2) ──────────────────────────────────────
+--
+-- La premiere page est indexee, la deuxieme pas encore decouverte, la troisieme
+-- n'a jamais ete verifiee (aucune ligne) : les trois etats que lit le client.
+
+insert into public.page_indexing (site_id, url, url_key, generation_id, priority, state, inspected_at)
+select md5('demo-site-martin')::uuid,
+       'https://plomberie-martin.test/' || slug,
+       'plomberie-martin.test/' || slug,
+       md5('demo-generation-' || n)::uuid,
+       0, state, now() - interval '1 day'
+from (values
+  (1, 'plombier-troyes',            'indexed'),
+  (2, 'depannage-plomberie-troyes', 'not_discovered')
+) as rows (n, slug, state)
+on conflict do nothing;
+
 -- ─── Resultats Search Console : Plomberie Martin, 56 jours ──────────────────
 --
 -- Deux periodes de 28 jours, la recente un peu meilleure : de quoi montrer une
