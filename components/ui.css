@@ -1,0 +1,715 @@
+/* ─────────────────────────────────────────────────────────────────────────────
+   The shared components of components/ui.tsx — their own classes (L6a, UX-7)
+   ─────────────────────────────────────────────────────────────────────────────
+
+   These rules used to be `style={{…}}` objects inside the components, and they
+   render EXACTLY as those did: the console's screens were photographed before
+   and after the move and compared pixel by pixel.
+
+   Two things replace the inline styles that could not be static:
+     - a finite set of tones → a modifier class (notice--warning, …);
+     - a value computed from props (an icon colour, a bar's length) → a CSS
+       custom property set on the element, read here. That is the one inline
+       style left, and it carries data, never presentation.
+
+   Loaded by app/layout.tsx right after globals.css, so a modifier here wins
+   over the base class it refines; where an inline style used to beat a hover
+   rule, the selector carries the specificity to keep doing so.
+   ───────────────────────────────────────────────────────────────────────────── */
+
+/* ── PageHeader ── */
+
+.page-header {
+  margin-bottom: var(--space-6);
+}
+
+.page-header__row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-6);
+}
+
+.page-header__main {
+  min-width: 0;
+}
+
+.btn-link.page-header__back {
+  margin-bottom: var(--space-2);
+}
+
+.page-header__eyebrow {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+}
+
+/* --page-header-color: the icon colour the caller chose (a token). */
+.page-header__icon {
+  width: 22px;
+  height: 22px;
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--page-header-color) 12%, transparent);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.eyebrow.page-header__badge {
+  color: var(--page-header-color);
+}
+
+.meta.page-header__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-4);
+  margin-top: var(--space-2);
+}
+
+.page-header__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-shrink: 0;
+}
+
+.page-header__children {
+  margin-top: var(--space-5);
+}
+
+/* ── FormField, FieldError ── */
+
+.form-field__required {
+  color: var(--status-critical-text);
+  margin-left: 3px;
+}
+
+.field-hint.form-field__hint {
+  margin-left: var(--space-2);
+}
+
+.field-error {
+  margin-top: var(--space-1);
+  font-size: var(--fs-xs);
+  color: var(--status-critical-text);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* ── EmptyState ── */
+
+.empty__glyph {
+  width: 44px;
+  height: 44px;
+  border-radius: var(--radius-lg);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.empty__glyph--no-data,
+.empty__glyph--no-results { background: color-mix(in srgb, var(--ink-faint) 12%, transparent); }
+.empty__glyph--not-connected { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.empty__glyph--error { background: color-mix(in srgb, var(--status-critical) 12%, transparent); }
+
+/* ── IconBox — size and colour are the caller's ── */
+
+.icon-box {
+  width: var(--icon-box-size);
+  height: var(--icon-box-size);
+  min-width: var(--icon-box-size);
+  background: color-mix(in srgb, var(--icon-box-color) 12%, transparent);
+  border-radius: var(--icon-box-radius);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* ── StatTile, HeroFigure, DeltaTag ── */
+
+.delta__period {
+  color: var(--ink-muted);
+  font-weight: 500;
+}
+
+.stat-card__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.stat-label.stat-label--flush {
+  margin-top: 0;
+}
+
+.stat-value.stat-card__value {
+  margin-top: var(--space-2);
+}
+
+.stat-card__foot {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-top: var(--space-2);
+  min-height: 20px;
+}
+
+.stat-card__notes {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.stat-card.stat-card--link {
+  display: block;
+}
+
+/* The inline style it replaces beat every hover rule: so does this. */
+.stat-card.stat-card--emphasis,
+.stat-card.stat-card--emphasis:hover {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent-wash);
+}
+
+.hero-figure__row {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--space-4);
+  margin-top: var(--space-2);
+}
+
+.hero-figure__delta {
+  padding-bottom: 6px;
+}
+
+.hero-figure__trend {
+  margin-left: auto;
+}
+
+.meta.hero-figure__caption {
+  margin-top: var(--space-2);
+}
+
+/* ── Meter — the fill's length is the value ── */
+
+.meter__head {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-bottom: var(--space-2);
+}
+
+.meta.meter__readout {
+  color: var(--ink-primary);
+  font-weight: 600;
+}
+
+.meter__fill.meter__fill--ratio {
+  width: var(--meter-fill);
+}
+
+/* ── SchemaField, ContentTypeCard, SeoConfigBadge ── */
+
+.schema-field {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  background: var(--surface-card);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--line);
+}
+
+.schema-field__body {
+  flex: 1;
+  min-width: 0;
+}
+
+.schema-field__head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.schema-field__name {
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--ink-primary);
+}
+
+.meta.schema-field__description {
+  margin-top: var(--space-1);
+}
+
+.content-type__toggle {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  background: transparent;
+  border: none;
+  text-align: left;
+}
+
+.content-type__title {
+  min-width: 0;
+}
+
+.content-type__label {
+  font-weight: 600;
+  color: var(--ink-primary);
+}
+
+.content-type__counts {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.content-type__chevron {
+  color: var(--ink-muted);
+  transition: transform var(--dur) var(--ease);
+  transform: rotate(0deg);
+  font-size: 10px;
+}
+
+.content-type__chevron--open {
+  transform: rotate(180deg);
+}
+
+.content-type__fields {
+  padding: 0 var(--space-4) var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.seo-config {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: center;
+}
+
+/* ── SimilarityScore, ComparePanel, CompareField ── */
+
+.similarity__figures {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-1);
+}
+
+.num.similarity__score {
+  font-size: var(--fs-md);
+  font-weight: 700;
+  color: var(--ink-primary);
+}
+
+.num.similarity__score--partial {
+  color: var(--ink-muted);
+}
+
+.num.similarity__scale {
+  font-size: var(--fs-sm);
+  color: var(--ink-muted);
+}
+
+.num.similarity__threshold {
+  font-size: var(--fs-xs);
+  color: var(--ink-secondary);
+}
+
+.similarity__meter {
+  margin-top: var(--space-2);
+}
+
+.similarity__partial {
+  margin-top: var(--space-1);
+  font-size: var(--fs-xs);
+  color: var(--ink-secondary);
+  line-height: var(--lh-snug);
+}
+
+.card-title.compare__title {
+  min-width: 0;
+}
+
+.compare__columns {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+}
+
+.compare__column {
+  min-width: 0;
+  padding: var(--space-4) var(--space-5);
+  border-left: 2px solid var(--line-strong);
+}
+
+.compare__column--proposed {
+  border-left-color: var(--accent);
+}
+
+.eyebrow.compare__eyebrow--proposed {
+  color: var(--accent-text);
+}
+
+.compare__path {
+  margin-top: var(--space-2);
+}
+
+.meta.compare__line {
+  margin-top: var(--space-1);
+}
+
+.compare__note {
+  margin-top: var(--space-2);
+  font-size: var(--fs-sm);
+  color: var(--ink-secondary);
+  line-height: var(--lh-snug);
+}
+
+.compare__field {
+  padding: var(--space-4) var(--space-5);
+  border-top: 1px solid var(--line);
+}
+
+.compare__values {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: var(--space-4);
+}
+
+.compare__similarity {
+  margin-top: var(--space-3);
+}
+
+.compare__value {
+  margin: 0;
+  min-width: 0;
+  padding-left: var(--space-3);
+  border-left: 2px solid var(--line-strong);
+  font-size: var(--fs-sm);
+  color: var(--ink-secondary);
+  line-height: var(--lh-snug);
+}
+
+.compare__value--proposed {
+  border-left-color: var(--accent);
+}
+
+/* ── Notice ── */
+
+.notice {
+  border-left: 3px solid var(--notice-mark);
+  margin-bottom: var(--space-5);
+  display: flex;
+  gap: var(--space-3);
+  align-items: flex-start;
+}
+
+.notice.notice--inline {
+  margin-bottom: 0;
+}
+
+.notice--good     { --notice-mark: var(--status-good);     --notice-text: var(--status-good-text); }
+.notice--warning  { --notice-mark: var(--status-warning);  --notice-text: var(--status-warning-text); }
+.notice--serious  { --notice-mark: var(--status-serious);  --notice-text: var(--status-serious-text); }
+.notice--critical { --notice-mark: var(--status-critical); --notice-text: var(--status-critical-text); }
+.notice--info     { --notice-mark: var(--accent);          --notice-text: var(--accent-text); }
+
+.notice__icon {
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.notice__content {
+  flex: 1;
+  min-width: 0;
+}
+
+.notice__title {
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--notice-text);
+}
+
+/* The bodies are error strings: an unbroken URL or token must not push the card past the viewport. */
+.notice__body {
+  font-size: var(--fs-sm);
+  color: var(--ink-secondary);
+  margin: 0.25rem 0 0;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
+/* ── ReasonList ── */
+
+.reason-list__heading {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: var(--fs-2xs);
+  font-weight: 650;
+  text-transform: uppercase;
+  letter-spacing: var(--ls-eyebrow);
+  color: var(--status-critical-text);
+  margin-bottom: var(--space-2);
+}
+
+.reason-list__heading--info {
+  color: var(--accent-text);
+}
+
+.reason-list__items {
+  margin: 0;
+  padding-left: 1.1rem;
+  font-size: var(--fs-xs);
+  color: var(--ink-secondary);
+  line-height: 1.7;
+}
+
+/* ── GbpPostPreview ── */
+
+.panel.gbp-preview {
+  max-width: 22rem;
+}
+
+.gbp-preview__identity {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.gbp-preview__who {
+  min-width: 0;
+}
+
+.gbp-preview__business {
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--ink-primary);
+}
+
+.gbp-preview__summary {
+  margin: 0;
+  font-size: var(--fs-sm);
+  color: var(--ink-secondary);
+  white-space: pre-wrap;
+  line-height: var(--lh-normal);
+}
+
+/* The wavy underline is a SHAPE: a wash alone would vanish in greyscale. */
+.gbp-preview__overflow {
+  background: var(--status-critical-wash);
+  text-decoration: underline wavy var(--status-critical);
+}
+
+.gbp-preview__cta {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  color: var(--accent-text);
+  font-weight: 600;
+  font-size: var(--fs-sm);
+}
+
+.meta.gbp-preview__url {
+  margin-top: var(--space-1);
+}
+
+.meta.gbp-preview__limits {
+  margin-top: var(--space-2);
+}
+
+/* ── RiskBadge ── */
+
+.badge.risk-badge--sm {
+  padding: 0.0625rem 0.375rem;
+}
+
+/* ── SourceNote, MagnitudeBar ── */
+
+.meta.source-note {
+  margin: 0 0 var(--space-5);
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-3);
+}
+
+.source-note__label {
+  color: var(--ink-secondary);
+  font-weight: 600;
+}
+
+.magnitude-bar {
+  height: 6px;
+  width: 100%;
+  background: var(--surface-inset);
+  border-radius: 0 3px 3px 0;
+}
+
+.magnitude-bar__fill {
+  height: 100%;
+  width: var(--magnitude);
+  background: var(--series-1);
+  border-radius: 0 3px 3px 0;
+}
+
+/* ── components/charts.tsx — frames, tooltip, legend, the site picker ── */
+
+.chart.chart__frame {
+  margin: 0;
+}
+
+.chart__titles {
+  min-width: 0;
+}
+
+.meta.chart__description {
+  margin-top: 2px;
+}
+
+.scroll-x.chart__table {
+  margin-top: var(--space-3);
+}
+
+/* Where the pointer is: computed by the chart. */
+.chart-tooltip.chart-tooltip--placed {
+  left: var(--tooltip-x);
+  top: var(--tooltip-y);
+}
+
+/* A series wears its own colour, which only the chart knows. */
+.chart-legend__rule.chart-legend__rule--series {
+  background: var(--series-color);
+}
+
+.chart-empty.chart-empty--sized {
+  height: var(--chart-height);
+}
+
+.sparkline {
+  overflow: visible;
+}
+
+.chart__plot {
+  position: relative;
+}
+
+.chart__num {
+  font-variant-numeric: tabular-nums;
+}
+
+.site-select {
+  position: relative;
+  min-width: 232px;
+}
+
+.site-select.site-select--sm {
+  min-width: 180px;
+}
+
+.btn-secondary.site-select__button {
+  width: 100%;
+  justify-content: space-between;
+  font-weight: 500;
+}
+
+.site-select__current {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.site-select__check {
+  opacity: 0;
+}
+
+.site-select__check.site-select__check--on {
+  opacity: 1;
+}
+
+.site-select__option {
+  min-width: 0;
+  flex: 1;
+}
+
+.truncate.site-select__line {
+  display: block;
+}
+
+/* ── Modal, ConfirmModal ── */
+
+.modal__scrim {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-modal);
+  background: var(--surface-scrim);
+  padding: var(--space-6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* A flex column whose body is the ONLY scroller: an overflow on the panel
+   would carry the header and the confirming button out of sight on a short
+   screen, and cancel the body's own .scroll-x. Width: the caller's. */
+.panel.modal__panel {
+  width: 100%;
+  max-width: var(--modal-width);
+  max-height: calc(100vh - var(--space-12));
+  display: flex;
+  flex-direction: column;
+  box-shadow: var(--shadow-lg);
+}
+
+.panel__header.modal__head,
+.panel__footer.modal__foot {
+  flex-shrink: 0;
+}
+
+.modal__titles {
+  min-width: 0;
+}
+
+.modal__body {
+  overflow-y: auto;
+  min-height: 0;
+  flex: 1;
+}
+
+.modal__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
+.panel__body.modal__confirm-body {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.inset.modal__danger {
+  border-left: 3px solid var(--status-critical);
+  display: flex;
+  gap: var(--space-3);
+  align-items: flex-start;
+}
+
+/* --ink-secondary, not .meta: --ink-muted on --surface-inset is 4.42:1, under AA. */
+.modal__text {
+  color: var(--ink-secondary);
+}

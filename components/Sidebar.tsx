@@ -270,8 +270,8 @@ export function Sidebar({ sites: initialSites, environment, reviewCount: initial
         <X size={20} aria-hidden="true" />
       </button>
 
-      <nav aria-label="Navigation principale" style={{ flex: 1, padding: '0.5rem 0', overflowY: 'auto' }}>
-        <div style={{ height: 8 }} />
+      <nav aria-label="Navigation principale" className="sidebar__nav">
+        <div className="sidebar__spacer" />
         {OVERVIEW.map((item) => (
           <ToolLink key={item.href} {...item} active={isActive(item.href)} count={item.href === '/demandes' ? reviewCount : null} />
         ))}
@@ -280,7 +280,7 @@ export function Sidebar({ sites: initialSites, environment, reviewCount: initial
         {sites.length === 0 ? (
           <Link href="/sites/new" className="nav-item nav-item--site">
             <span className="nav-item__dot" aria-hidden="true" />
-            <span style={{ flex: 1 }} className="meta">Aucun site actif — en ajouter un</span>
+            <span className="meta nav-item__label">Aucun site actif — en ajouter un</span>
           </Link>
         ) : (
           <ul className="nav-sites" aria-labelledby="nav-sites-label">
@@ -294,8 +294,8 @@ export function Sidebar({ sites: initialSites, environment, reviewCount: initial
                     title={site.name}
                   >
                     <span className="nav-item__dot" aria-hidden="true" />
-                    <span className="truncate" style={{ flex: 1, minWidth: 0 }}>{site.name}</span>
-                    {active && <ChevronRight size={14} style={{ opacity: 0.5, flexShrink: 0, transform: 'rotate(90deg)' }} aria-hidden="true" />}
+                    <span className="truncate nav-item__label nav-item__label--shrink">{site.name}</span>
+                    {active && <ChevronRight size={14} className="nav-item__chevron nav-item__chevron--open" aria-hidden="true" />}
                   </Link>
                   {active && <SiteSubTabs siteId={site.id} siteName={site.name} pathname={pathname} />}
                 </li>
@@ -310,7 +310,7 @@ export function Sidebar({ sites: initialSites, environment, reviewCount: initial
           publishing is for real. */}
       <div className="sidebar-env">
         <span className={`sidebar-env__dot ${environment.label === 'Production' ? 'sidebar-env__dot--prod' : ''}`} aria-hidden="true" />
-        <div style={{ minWidth: 0 }}>
+        <div className="sidebar-env__text">
           <div className="sidebar-env__label">{environment.label}</div>
           {environment.host && <div className="meta truncate" title={environment.host}>{environment.host}</div>}
         </div>
@@ -358,14 +358,14 @@ function ToolLink({
   return (
     <Link href={href} className={`nav-item ${active ? 'active' : ''}`} aria-current={active ? 'page' : undefined}>
       <Icon size={17} strokeWidth={active ? 2.2 : 1.8} />
-      <span style={{ flex: 1 }}>{label}</span>
+      <span className="nav-item__label">{label}</span>
       {count !== null && count > 0 && (
         <span className="nav-count" title={QUEUE_TEXT.railCount(count)}>
           {count}
           <span className="sr-only"> {QUEUE_TEXT.railCount(count)}</span>
         </span>
       )}
-      {active && <ChevronRight size={14} style={{ opacity: 0.5 }} />}
+      {active && <ChevronRight size={14} className="nav-item__chevron" />}
     </Link>
   )
 }

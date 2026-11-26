@@ -122,7 +122,7 @@ export function PlanBriefList({
         </div>
 
         {ordered.length === 0 ? (
-          <p className="meta" style={{ margin: 0 }}>Ce plan ne contient aucun brief.</p>
+          <p className="meta plan-brief__flush">Ce plan ne contient aucun brief.</p>
         ) : (
           <ul className="plan-brief-list__rows">
             {ordered.map(({ item, key }) => (
@@ -245,7 +245,7 @@ function BriefRow({
 function VerdictLine({ verdict }: { verdict: AddressVerdict }) {
   if (verdict.tone === 'critical') return <FieldError>{verdict.detail}</FieldError>
   return (
-    <p className={`meta verdict--${verdict.tone}`} style={{ margin: 'var(--space-1) 0 0', display: 'flex', alignItems: 'center', gap: 4 }}>
+    <p className={`meta verdict--${verdict.tone} plan-brief__verdict`}>
       {verdict.tone === 'good' && <CircleCheck size={11} aria-hidden="true" />}
       {verdict.detail}
     </p>
@@ -292,7 +292,7 @@ function BriefDetail({
   if (!row) {
     return (
       <aside className="plan-brief-detail" aria-label="Détail du brief">
-        <p className="meta" style={{ margin: 0 }}>
+        <p className="meta plan-brief__flush">
           Ouvrez un brief dans la liste pour le lire en entier{editable ? ' et le corriger' : ''}.
         </p>
       </aside>
@@ -344,13 +344,13 @@ function BriefDetail({
       {action?.kind === 'skip' ? (
         <ReadField label="Pourquoi ce sujet est écarté">
           {action.reasons.length > 0 ? <BulletList lines={action.reasons} /> : <span className="meta">Aucun motif enregistré.</span>}
-          <p className="meta" style={{ margin: 'var(--space-2) 0 0' }}>Aucune page ne sera produite pour ce créneau.</p>
+          <p className="meta plan-brief__note">Aucune page ne sera produite pour ce créneau.</p>
         </ReadField>
       ) : action?.kind === 'refresh' ? (
         <>
           <ReadField label="Page existante visée">
             <span className="mono">{action.targetPath}</span>
-            <p className="meta" style={{ margin: 'var(--space-2) 0 0' }}>
+            <p className="meta plan-brief__note">
               Mise à jour (ancien plan) — ne sera pas produite : le moteur ne met plus à jour les pages existantes.
               Aucune page ne sera écrite pour ce créneau, et cette page restera telle qu’elle est.
             </p>
@@ -402,10 +402,10 @@ function BriefDetail({
         <>
           {item.search_suggestions && item.search_suggestions.length > 0 && (
             <ReadField label="Ce que les gens tapent (Google / Bing)">
-              <span style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--space-1)' }}>
+              <span className="plan-brief__chips">
                 {item.search_suggestions.map((line) => <span key={line} className="chip">{line}</span>)}
               </span>
-              <p className="meta" style={{ margin: 'var(--space-1) 0 0' }}>
+              <p className="meta plan-brief__sub">
                 Suggestions affichées sous la barre de recherche au moment du plan — une formulation réelle, pas un volume.
               </p>
             </ReadField>
@@ -461,7 +461,7 @@ function BriefDetail({
 function KeywordMeta({ item, note }: { item: PlanItemBrief; note: ReactNode }) {
   if (!item.target_city && !note) return null
   return (
-    <p className="meta" style={{ margin: 'var(--space-1) 0 0', display: 'flex', alignItems: 'center', gap: 'var(--space-2)', flexWrap: 'wrap' }}>
+    <p className="meta plan-brief__keyword-meta">
       {item.target_city && <span>{item.target_city}</span>}
       {note}
     </p>

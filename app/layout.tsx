@@ -1,6 +1,8 @@
 import type { Metadata } from 'next'
 import { Inter, Plus_Jakarta_Sans } from 'next/font/google'
 import './globals.css'
+// After globals.css: the shared components' modifiers refine its base classes.
+import '@/components/ui.css'
 
 /**
  * The two families of the CNX Solutions site, self-hosted by next/font (no

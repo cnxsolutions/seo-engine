@@ -66,7 +66,7 @@ export default async function SiteLayout({
           calendrier ou la publication qu'on se demande pourquoi rien ne part. */}
       {!site.is_active && (
         <p className="hub-warning" role="status">
-          <TriangleAlert size={14} style={{ flexShrink: 0, marginTop: 2 }} aria-hidden="true" />
+          <TriangleAlert size={14} className="notice__icon" aria-hidden="true" />
           <span>
             Site désactivé : le planificateur l’ignore, rien n’y sera généré ni publié.{' '}
             <Link href={`/sites/${site.id}/reglages`} className="btn-link">Le réactiver dans les réglages</Link>
