@@ -191,6 +191,9 @@ describe('demandes — analyse (KW-3, KW-5 a KW-7)', () => {
     const mine = new Set(ids.values())
     const run = await analyzeReceivedRequests({
       ...defaultAnalysisPorts,
+      // The placement in the cycle in progress has its own test (keyword-request-placement.db.test.ts):
+      // here the receivable requests stay kept, as the L3 left them.
+      place: async () => ({ placed: 0, covered: 0, kept: 0 }),
       listReceived: async () => (await listReceivedRequests(50)).filter((request) => mine.has(request.id)).slice(0, 5),
       judgeFit: async (input) => {
         asked.push(input)
@@ -202,6 +205,9 @@ describe('demandes — analyse (KW-3, KW-5 a KW-7)', () => {
     // Deux lots de cinq au plus : on relance pour les suivantes.
     const rerun = await analyzeReceivedRequests({
       ...defaultAnalysisPorts,
+      // The placement in the cycle in progress has its own test (keyword-request-placement.db.test.ts):
+      // here the receivable requests stay kept, as the L3 left them.
+      place: async () => ({ placed: 0, covered: 0, kept: 0 }),
       listReceived: async () => (await listReceivedRequests(50)).filter((request) => mine.has(request.id)).slice(0, 5),
       judgeFit: async () => ({ fit: 'in', service: null, city: null, intent: null, reason: 'Service du métier.' }),
     })

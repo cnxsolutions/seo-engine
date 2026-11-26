@@ -144,7 +144,11 @@ est encore dans le statut attendu) et `withdraw_keyword_request` (le retrait
 par le client, qui ecarte le creneau d'une demande planifiee dans la meme
 transaction) ; `EXECUTE` retire a `anon` et `authenticated`. **Le retrait et la
 tache du planificateur appellent ces fonctions : appliquer la 025 en production
-AVANT le merge.**
+AVANT le merge.** Puis `026_swap_plan_item.sql` (L4c) : `swap_plan_item`, qui
+integre une demande au cycle en cours — l'item du plan, le creneau et la demande
+dans une seule transaction, sous verrous, refusee si le creneau a ete reclame
+entre-temps ; `EXECUTE` retire a `anon` et `authenticated`. **Appliquer la 026
+en production AVANT le merge.**
 
 Tous ses CHECK sont poses `NOT VALID` : ils s'appliquent aux ecritures futures
 sans jamais faire echouer la migration sur une ligne historique. Une ligne

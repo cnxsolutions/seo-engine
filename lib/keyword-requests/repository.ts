@@ -12,6 +12,8 @@ import { createServiceClient } from '@/lib/supabase'
 import type { RequestChange } from '@/src/core/domain/keyword-requests/change'
 import type { WaitingRequest } from '@/src/core/domain/keyword-requests/consumption'
 import type { RequestStatus } from '@/src/core/domain/keyword-requests/lifecycle'
+import type { OpenSlotView } from '@/src/core/domain/keyword-requests/placement'
+import type { PlanItemBrief } from '@/lib/types'
 import { pickRequestCampaign } from '@/src/core/domain/keyword-requests/campaign'
 import type { GenerationState, ProducingRequest, SlotState } from '@/src/core/domain/keyword-requests/production'
 import type { Evidence } from '@/src/core/domain/keyword-requests/verdict'
@@ -113,13 +115,14 @@ export interface ReceivedRequest {
   site_id: string
   keyword: string
   city: string | null
+  desired_by: string | null
 }
 
 /** Oldest first: a request waits at most as long as the ones before it. */
 export async function listReceivedRequests(limit: number): Promise<ReceivedRequest[]> {
   const { data, error } = await createServiceClient()
     .from('keyword_requests')
-    .select('id,site_id,keyword,city')
+    .select('id,site_id,keyword,city,desired_by')
     .eq('status', 'received')
     .order('created_at', { ascending: true })
     .order('id', { ascending: true })
@@ -359,4 +362,76 @@ export async function readProduction(requests: readonly ProducingRequest[]): Pro
     for (const row of (data ?? []) as Array<GenerationState & { id: string }>) view.generations.set(row.id, row)
   }
   return view
+}
+
+// ── A request placed in the cycle in progress (L4c) ───────────────────────
+
+export interface RunningPlan {
+  id: string
+  cycle_ends_at: string | null
+  items: PlanItemBrief[]
+}
+
+/** The plan a campaign is running, if it still is. */
+export async function getRunningPlan(planId: string): Promise<RunningPlan | null> {
+  const { data, error } = await createServiceClient()
+    .from('cycle_plans')
+    .select('id,cycle_ends_at,plan_data')
+    .eq('id', planId)
+    .eq('status', 'executing')
+    .maybeSingle()
+  if (error) fail('plan en cours', error.message)
+  if (!data) return null
+  const row = data as { id: string; cycle_ends_at: string | null; plan_data: unknown }
+  return { id: row.id, cycle_ends_at: row.cycle_ends_at, items: Array.isArray(row.plan_data) ? (row.plan_data as PlanItemBrief[]) : [] }
+}
+
+/** The campaign's page slots nobody has started. */
+export async function listCampaignPlannedSlots(campaignId: string): Promise<OpenSlotView[]> {
+  const { data, error } = await createServiceClient()
+    .from('editorial_calendar')
+    .select('id,plan_item_id,scheduled_date,status')
+    .eq('campaign_id', campaignId)
+    .eq('artifact_kind', 'page')
+    .eq('status', 'planned')
+    .not('plan_item_id', 'is', null)
+    .order('scheduled_date', { ascending: true })
+    .limit(SLOTS_PER_CAMPAIGN_MAX)
+  if (error) fail('creneaux remplacables', error.message)
+  return (data ?? []) as OpenSlotView[]
+}
+
+/** The plan items an open request already points at: never replaced under it. */
+export async function listClaimedItemIds(itemIds: readonly string[]): Promise<Set<string>> {
+  if (itemIds.length === 0) return new Set()
+  const { data, error } = await createServiceClient()
+    .from('keyword_requests')
+    .select('plan_item_id')
+    .in('plan_item_id', itemIds as string[])
+    .in('status', ['scheduled', 'in_production'])
+  if (error) fail('items deja vises', error.message)
+  return new Set(((data ?? []) as Array<{ plan_item_id: string }>).map((row) => row.plan_item_id))
+}
+
+export type SwapOutcome = 'placed' | 'request_gone' | 'plan_gone' | 'slot_taken'
+
+/** The brief takes the slot's place in the plan, the slot and the request — all or nothing (026). */
+export async function swapPlanItem(params: {
+  planId: string
+  slotId: string
+  oldItemId: string
+  newItem: PlanItemBrief
+  requestId: string
+  reasons: string[]
+}): Promise<SwapOutcome> {
+  const { data, error } = await createServiceClient().rpc('swap_plan_item', {
+    p_plan_id: params.planId,
+    p_slot_id: params.slotId,
+    p_old_item_id: params.oldItemId,
+    p_new_item: params.newItem,
+    p_request_id: params.requestId,
+    p_reasons: params.reasons,
+  })
+  if (error) fail('integration au cycle', error.message)
+  return data === 'placed' || data === 'request_gone' || data === 'plan_gone' ? data : 'slot_taken'
 }

@@ -99,7 +99,7 @@ reprendre · ❌ absent · ❓ à vérifier.
 | KW-1 | Formulaire : mot-clé (obligatoire), ville (facultative, proposée parmi les communes de la campagne), « pourquoi » (facultatif), « pour quand » (facultatif) ; plusieurs mots-clés d'un coup, un par ligne, 10 au plus | demande | ✅ L3 (affichage optimiste, erreurs sous chaque champ, ligne par ligne) | L3 |
 | KW-2 | Validation serveur : longueur, nombre de mots, pas d'URL ; plafond de demandes ouvertes par site ; limite de débit | règles dev | ✅ L3 (domaine `normalize.ts` rejoué par la route ; plafond et doublons dans `submit_keyword_requests`, sous verrou du site ; 30 envois / heure par membre) | L3 |
 | KW-3 | Analyse **asynchrone** par une tâche du planificateur (toutes les 2 min, lots de 5) : verdict, motifs, preuves | demande | ✅ L3 (`lib/keyword-requests/analyze.ts`, tâche `keywordRequests` ; contexte chargé une fois par site, verdicts écrits en un appel) | L3 |
-| KW-4 | Verdict « Intégrée à la période en cours » : un brief est rédigé, il **remplace** une page prévue non entamée, la date est annoncée | demande | ❌ | L4 |
+| KW-4 | Verdict « Intégrée à la période en cours » : un brief est rédigé, il **remplace** une page prévue non entamée, la date est annoncée | demande | ✅ L4c (`lib/keyword-requests/placement.ts`, `swap_plan_item`) | L4 |
 | KW-5 | Verdict « Gardée pour la période suivante » : stockée, consommée en priorité par le prochain plan | demande | ✅ L3 : verdict ; L4b : consommée par le plan suivant (premiers créneaux, un tiers au plus, jamais le pilier) | L3 (verdict) · L4 (consommation) |
 | KW-6 | Verdicts « Déjà prévue le JJ/MM », « Déjà couverte par cette page », « Vous êtes déjà en tête sur Google » — avec le lien ou la date | `decideEditorialAction` | ✅ L3 | L3 |
 | KW-7 | Verdict « À l'étude chez CNX » : hors zone, hors métier, ambigu | demande | ✅ L3 (+ site sans campagne, avis du modèle indisponible) | L3 |
@@ -137,7 +137,7 @@ reprendre · ❌ absent · ❓ à vérifier.
 | QA-4 | Documentation à jour : CLAUDE.md (1 283 tests, piège Vitest sous Git Bash), README, `db/README.md`, baseline régénérée après `021`, `022`, `023`, `024` | — | 🟡 | L0 puis chaque lot |
 | QA-5 | Recette par lot sur le Supabase local : captures 375 px et 1 440 px, Lighthouse, parcours complet (codes de connexion lus dans Mailpit), écritures en base listées, puis base remise à zéro | dev-cadrage | ❌ | chaque lot |
 | QA-6 | **Supabase local** : `supabase/config.toml`, schéma reconstruit depuis la baseline et les migrations, jeu de démonstration (deux clients, trois sites fictifs), une commande pour tout remettre à zéro (§ 4.8) | décision 16 | ✅ L0a (#30) | L0 |
-| QA-7 | Tests d'intégration (`*.db.test.ts`, `npm run test:db`) contre le Supabase local : isolation, RLS, `swap_plan_item` sous concurrence, idempotence des migrations ; rejoués en CI dans un job dédié (décision 18) | décision 16 | 🟡 outillage et 24 tests au L0a (#30) ; isolation au L1 ; fonctions de la 025 au L4b ; `swap_plan_item` au L4c | L0 (outillage) puis chaque lot |
+| QA-7 | Tests d'intégration (`*.db.test.ts`, `npm run test:db`) contre le Supabase local : isolation, RLS, `swap_plan_item` sous concurrence, idempotence des migrations ; rejoués en CI dans un job dédié (décision 18) | décision 16 | 🟡 outillage et 24 tests au L0a (#30) ; isolation au L1 ; fonctions de la 025 au L4b ; `swap_plan_item` sous concurrence (créneau réclamé, retrait pendant la rédaction) au L4c | L0 (outillage) puis chaque lot |
 
 ---
 
@@ -233,6 +233,13 @@ Console, SERP et suggestions, lus une fois) et de `writePlanBriefs` (le modèle 
 gardes de `normalizeBriefs`). Un brief seul s'écrira `writePlanBriefs(knowledge, [sujet])`. Comportement inchangé,
 verrouillé par `lib/planning/brief-plan.flow.test.ts` : le plan entier, modèle et inventaire simulés, prompt et
 briefs figés avant l'extraction.
+
+**Fait au L4c** : `swap_plan_item(plan, créneau, ancien item, nouvel item, demande, motifs)` prend aussi **la
+demande**, verrouillée en premier (l'ordre du retrait de la 025 : demande, puis le reste) et passée « prévue »
+dans la même transaction. Sans elle, un client qui retire sa demande pendant la rédaction du brief laisserait un
+créneau à une demande retirée. La fonction refuse aussi, d'elle-même, un pilier et un item qu'une demande « déjà
+prévue » désigne (règle 3) : cette demande le perdrait de vue. Le brief est rédigé contre la connaissance du site
+**plus** les briefs du cycle en cours (adresses prises, mots-clés portés), pour n'en concurrencer aucun.
 
 ### 3.5 Consommer les demandes au cycle suivant
 
@@ -363,6 +370,9 @@ RLS activé ; aucune politique
 - La note du client (« pourquoi ») n'est **jamais** envoyée au modèle : seule la recherche, entre balises, est jugée.
 - Une demande retirée date son retrait par `updated_at` (statut terminal), sans colonne de plus.
 
+Migration `026_swap_plan_item.sql` (L4c) — `function swap_plan_item(...)`, voir § 3.4 ; rend `placed`,
+`request_gone`, `plan_gone` ou `slot_taken` (le service essaie alors le créneau suivant, puis garde la demande).
+
 Migration `025_keyword_request_progress.sql` (L4b) — aucune table, deux fonctions :
 
 ```sql
@@ -475,7 +485,7 @@ Ordonnés par **risque** (sécurité d'abord, planificateur ensuite), puis par *
 | **L1** | Identité client : tables `clients`/`client_members`, `@supabase/ssr`, branche de `proxy.ts`, connexion par code, invitation et révocation depuis les Réglages d'un site, pages d'erreur ; tests d'isolation, limites de débit | ACC-1 à ACC-7, QA-2, QA-3 | L0 | ✅ L1 (#32) |
 | **L2** | Espace client en lecture : coquille mobile, accueil, pages en ligne, prochaines pages, sélecteur de site, **résultats Google**. Se scinde en L2a (lecture) / L2b (résultats) si la PR grossit | ESP-1 à ESP-6 | L1 | ✅ L2a (#33), L2b (#34) |
 | **L3** | Demandes, saisie et verdict : table, domaine (verdict, cycle de vie), tâche d'analyse, formulaire, liste et chronologie, retrait. Les demandes recevables sont **toutes** gardées pour la période suivante (pas encore d'insertion dans le cycle en cours) | KW-1 à KW-3, KW-5 (verdict), KW-6 à KW-9 | L2 | ✅ L3 (#35) |
-| **L4** | Demandes dans le moteur, en trois PR : **L4a** (#37) extraction de la rédaction des briefs **sans changement de comportement** ; **L4b** (#38) consommation au plan suivant, report, suivi de production et retour de publication (migration `025`) ; **L4c** `swap_plan_item` (migration `026`) et placement dans le cycle en cours | KW-4, KW-5, KW-8, KW-11, KW-13 | L3 | L · 4 j — L4a et L4b en revue |
+| **L4** | Demandes dans le moteur, en trois PR : **L4a** (#37) extraction de la rédaction des briefs **sans changement de comportement** ; **L4b** (#38) consommation au plan suivant, report, suivi de production et retour de publication (migration `025`) ; **L4c** (#39) `swap_plan_item` (migration `026`) et placement dans le cycle en cours | KW-4, KW-5, KW-8, KW-11, KW-13 | L3 | ✅ L4a (#37), L4b (#38) ; L4c en revue |
 | **L5** | Console opérateur des demandes et coquille : file, arbitrage, compteur dans le rail, onglet « Demandes » d'un site, rail et en-tête de site refaits, glossaire | KW-10, UX-5, UX-6 | L3 | M · 3 j |
 | **L6** | Refonte des écrans opérateur, un par un : tableau de bord, vue d'ensemble, stratégie, calendrier, publication, performances, pages, réglages — styles en ligne retirés, états, mouvement, graphiques, écrans hérités. Peut se scinder en L6a / L6b | UX-6 à UX-12 | L0, L5 | L · 5-6 j |
 | **L7** | E-mails : file d'envoi asynchrone traitée par le planificateur, modèles à la DA, désinscription des notifications | KW-12 | L3, SMTP | S · 2 j |

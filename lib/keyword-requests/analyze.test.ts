@@ -23,10 +23,10 @@ function ports(overrides: Partial<AnalysisPorts> = {}): AnalysisPorts & { writte
   return {
     written,
     listReceived: async () => [
-      { id: 'r1', site_id: 'site-a', keyword: "fuite d'eau", city: 'Troyes' },
-      { id: 'r2', site_id: 'site-a', keyword: 'débouchage', city: null },
-      { id: 'r3', site_id: 'site-a', keyword: 'plombier', city: 'Romilly-sur-Seine' },
-      { id: 'r4', site_id: 'site-b', keyword: 'électricien', city: null },
+      { id: 'r1', site_id: 'site-a', keyword: "fuite d'eau", city: 'Troyes', desired_by: null },
+      { id: 'r2', site_id: 'site-a', keyword: 'débouchage', city: null, desired_by: '2026-12-15' },
+      { id: 'r3', site_id: 'site-a', keyword: 'plombier', city: 'Romilly-sur-Seine', desired_by: null },
+      { id: 'r4', site_id: 'site-b', keyword: 'électricien', city: null, desired_by: null },
     ],
     listCampaigns: async () => [CAMPAIGN],
     listPlans: async () => ({
@@ -40,6 +40,7 @@ function ports(overrides: Partial<AnalysisPorts> = {}): AnalysisPorts & { writte
       written.push(...verdicts)
       return verdicts.map((verdict) => verdict.id)
     },
+    place: async () => ({ placed: 0, covered: 0, kept: 0 }),
     ...overrides,
   }
 }
@@ -68,6 +69,20 @@ describe('analyzeReceivedRequests', () => {
     expect(loadKnowledge).toHaveBeenCalledTimes(2)
     expect(listCampaigns).toHaveBeenCalledTimes(1)
     expect(listCampaigns).toHaveBeenCalledWith(['site-a', 'site-b'])
+  })
+
+  it('propose au cycle en cours les seules demandes recevables, une fois leur verdict ecrit (KW-4)', async () => {
+    const place = vi.fn(async () => ({ placed: 1, covered: 0, kept: 0 }))
+    await analyzeReceivedRequests(ports({ place }))
+    expect(place).toHaveBeenCalledTimes(1)
+    expect(place).toHaveBeenCalledWith([{ id: 'r2', campaign_id: 'camp', keyword: 'débouchage', city: null, desired_by: '2026-12-15' }])
+  })
+
+  it('une demande retiree pendant l analyse n est pas proposee, et un echec du placement ne perd pas les verdicts', async () => {
+    const place = vi.fn(async () => { throw new Error('modele injoignable') })
+    const fake = ports({ place, applyVerdicts: async (verdicts) => verdicts.filter((verdict) => verdict.id !== 'r2').map((verdict) => verdict.id) })
+    expect(await analyzeReceivedRequests(fake)).toEqual({ analysed: 4, written: 3 })
+    expect(place).toHaveBeenCalledWith([])
   })
 
   it('rien a analyser, rien a ecrire', async () => {

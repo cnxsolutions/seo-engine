@@ -452,7 +452,9 @@ sont exposes par aucune route HTTP : ils disparaissent a chaque redemarrage.
       │  un mot-cle propose depuis l'espace client (/espace) recoit son
       │  verdict par lots de 5 (lib/keyword-requests/analyze.ts) : deja
       │  prevue, deja gagnee, deja couverte, a l'etude chez CNX, ou gardee
-      │  pour la periode suivante ; le plan suivant la consomme en premier
+      │  pour la periode suivante, ou integree tout de suite au cycle en cours
+      │  a la place d'une page pas encore commencee (lib/keyword-requests/
+      │  placement.ts) ; sinon le plan suivant la consomme en premier
       │  (lib/planning/brief-plan.ts), puis la meme tache suit sa page jusqu'en
       │  ligne (lib/keyword-requests/progress.ts)
 ```
