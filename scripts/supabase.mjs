@@ -38,6 +38,20 @@ export function runSupabase(args, { capture = false } = {}) {
   return { status: result.status ?? 1, stdout: result.stdout ?? '' }
 }
 
+/**
+ * What `supabase status -o json` says of the local stack — API_URL, ANON_KEY,
+ * SERVICE_ROLE_KEY, DB_URL, MAILPIT_URL… — or null when it is not running.
+ * The keys are the CLI's fixed local ones, read here rather than copied into
+ * the repository.
+ */
+export function localStatus() {
+  const { status, stdout } = runSupabase(['status', '-o', 'json'], { capture: true })
+  // The CLI prints a version notice after the JSON on some runs: keep the object only.
+  const json = stdout.slice(stdout.indexOf('{'), stdout.lastIndexOf('}') + 1)
+  if (status !== 0 || !json) return null
+  return JSON.parse(json)
+}
+
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   process.exit(runSupabase(process.argv.slice(2)).status)
 }

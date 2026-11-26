@@ -22,6 +22,7 @@
     "@auth/core": "^0.34.3",
     "@next/env": "^16.2.2",
     "@sentropic/graphify": "^0.17.1",
+    "@supabase/ssr": "0.9.0",
     "@supabase/supabase-js": "^2.98.0",
     "@types/node-cron": "^3.0.11",
     "clsx": "^2.1.1",
@@ -34,7 +35,8 @@
     "openai": "^6.27.0",
     "react": "19.2.3",
     "react-dom": "19.2.3",
-    "styled-jsx": "^5.1.7"
+    "styled-jsx": "^5.1.7",
+    "zod": "4.6.7"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",

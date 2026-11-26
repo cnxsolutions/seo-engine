@@ -29,6 +29,21 @@ describe('donnees de demonstration', () => {
     expect(rows[0]).toEqual({ sites: 3, executing: 1 })
   })
 
+  it('deux clients, chacun avec son membre ; Durand seul chez le second', async () => {
+    const { rows } = await db.query<{ client: string; sites: string; members: string }>(`
+      select c.name as client,
+             (select string_agg(s.name, ', ' order by s.name) from public.sites s where s.client_id = c.id) as sites,
+             (select string_agg(m.email, ', ' order by m.email) from public.client_members m where m.client_id = c.id) as members
+        from public.clients c
+       where c.id in (md5('demo-client-a')::uuid, md5('demo-client-b')::uuid)
+       order by c.name
+    `)
+    expect(rows).toEqual([
+      { client: 'Électricité Durand', sites: 'Électricité Durand', members: 'luc@electricite-durand.test' },
+      { client: 'Martin Bâtiment', sites: 'Plomberie Martin, Toitures Lambert', members: 'marie@martin-batiment.test' },
+    ])
+  })
+
   it('aucun site ne porte de quoi publier, et tous sont en .test', async () => {
     const { rows } = await db.query<{ name: string }>(`
       select name from public.sites

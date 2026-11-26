@@ -18,6 +18,7 @@ export default defineConfig({
     include: ['**/*.db.test.ts'],
     exclude: [...configDefaults.exclude],
     globalSetup: ['./db/test-setup.db.ts'],
+    setupFiles: ['./db/env.db.ts'],
     fileParallelism: false,
     testTimeout: 30_000,
     hookTimeout: 60_000,

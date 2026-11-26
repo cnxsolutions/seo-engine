@@ -267,6 +267,14 @@ code, pre, kbd, samp, .mono {
   color: var(--ink-muted);
 }
 
+.brand-lockup--inverse .brand-lockup__name {
+  color: var(--hero-ink);
+}
+
+.brand-lockup--inverse .brand-lockup__by {
+  color: var(--hero-ink-muted);
+}
+
 .nav-section-label {
   padding: var(--space-5) var(--space-5) var(--space-2);
   font-size: var(--fs-2xs);
@@ -1990,6 +1998,80 @@ textarea.input {
   align-items: center;
   gap: var(--space-2);
   flex-wrap: wrap;
+}
+
+.settings-section__lead {
+  margin: 0;
+}
+
+/* ── Site settings — « Accès client » (L1) ── */
+
+.access {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.access__client {
+  margin: 0;
+}
+
+.access-members {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--surface-card);
+}
+
+.access-member {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-4);
+  padding: var(--space-3) var(--space-4);
+}
+
+.access-member + .access-member {
+  border-top: 1px solid var(--line);
+}
+
+.access-member__who {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1 1 14rem;
+  min-width: 0;
+}
+
+.access-member__email {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.access-member__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.access-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.access-form__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-3);
+}
+
+.access-form__field {
+  flex: 1 1 16rem;
+  min-width: 0;
 }
 
 /* ── Strategy tab — the cycle plan, flat, under each campaign ── */
