@@ -10,9 +10,10 @@
 // asked only about a request the measurements did not settle; the verdicts
 // are written in one call, each only if its request is still `received`.
 //
-// Nothing is placed in the cycle in progress yet: a receivable request is kept
-// for the next period (`deferred`), whose plan consumes it first (L4b,
-// lib/planning/brief-plan.ts). The current cycle takes requests from the L4c.
+// A receivable request is written « kept for the next period » (`deferred`),
+// then — same run — offered to the cycle in progress (placement.ts, L4c): it
+// replaces a page nobody has started when the cycle can take it, and waits for
+// the next plan otherwise (L4b, lib/planning/brief-plan.ts).
 
 import { COMMUNES_AUBE } from '@/lib/geo/communes'
 import { isNationalCampaign, targetCommunes } from '@/lib/geo/scope'
@@ -33,6 +34,7 @@ import {
   type VerdictContext,
 } from '@/src/core/domain/keyword-requests/verdict'
 import { judgeFit, type FitInput } from './fit'
+import { placeInCurrentCycle, type PlaceableRequest, type PlacementReport } from './placement'
 import {
   applyVerdicts,
   listExecutingPlans,
@@ -64,6 +66,8 @@ export interface AnalysisPorts {
   loadKnowledge(siteId: string): Promise<SiteKnowledge>
   judgeFit(input: FitInput): Promise<FitOpinion | null>
   applyVerdicts(verdicts: readonly StoredVerdict[]): Promise<string[]>
+  /** The receivable requests just written, offered to the cycle in progress (KW-4). */
+  place(requests: readonly PlaceableRequest[]): Promise<PlacementReport>
 }
 
 /** The real ones. Exported for the integration test, which swaps the model for a stand-in. */
@@ -82,6 +86,7 @@ export const defaultAnalysisPorts: AnalysisPorts = {
   },
   judgeFit,
   applyVerdicts,
+  place: (requests) => placeInCurrentCycle(requests),
 }
 
 interface SiteContext {
@@ -112,7 +117,23 @@ export async function analyzeReceivedRequests(ports: AnalysisPorts = defaultAnal
     `[demandes] ${requests.length} analysee(s), ${written.length} verdict(s) ecrit(s)` +
       (written.length < verdicts.length ? ` — ${verdicts.length - written.length} retiree(s) pendant l'analyse` : ''),
   )
+
+  // The verdict is written first: whatever happens to the placement, the
+  // request is already safely kept for the next period.
+  await ports.place(receivable(requests, verdicts, new Set(written))).catch((error: unknown) => {
+    console.warn(`[demandes] integration au cycle en cours impossible : ${error instanceof Error ? error.message : error}`)
+  })
   return { analysed: requests.length, written: written.length }
+}
+
+/** Rule 8: kept for the next period, with a campaign to place it in, and still as the analysis left it. */
+function receivable(requests: readonly ReceivedRequest[], verdicts: readonly StoredVerdict[], written: ReadonlySet<string>): PlaceableRequest[] {
+  const byId = new Map(requests.map((request) => [request.id, request]))
+  return verdicts.flatMap((verdict) => {
+    const request = byId.get(verdict.id)
+    if (!request || !written.has(verdict.id) || verdict.status !== 'deferred' || verdict.reason_code !== 'NEXT_PERIOD' || !verdict.campaign_id) return []
+    return [{ id: request.id, campaign_id: verdict.campaign_id, keyword: request.keyword, city: request.city, desired_by: request.desired_by }]
+  })
 }
 
 async function judge(request: ReceivedRequest, context: SiteContext, ports: AnalysisPorts): Promise<RequestVerdict> {
