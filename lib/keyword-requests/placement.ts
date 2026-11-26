@@ -27,12 +27,13 @@ import {
 import type { Campaign, PlanItemBrief } from '@/lib/types'
 import { parisDay } from '@/src/core/domain/client-space/overview'
 import { requestCity } from '@/src/core/domain/keyword-requests/consumption'
-import { placementCandidates } from '@/src/core/domain/keyword-requests/placement'
+import { placementCandidates, type NoPlacementReason } from '@/src/core/domain/keyword-requests/placement'
 import {
   advanceRequests,
   getRunningPlan,
   listCampaignPlannedSlots,
   listClaimedItemIds,
+  listRequestsToPlace,
   swapPlanItem,
   type RunningPlan,
 } from './repository'
@@ -46,10 +47,20 @@ export interface PlaceableRequest {
   desired_by: string | null
 }
 
+/** Why a request stayed kept for the next period: what the console tells CNX. */
+export type KeptReason = NoPlacementReason | 'NO_CYCLE' | 'BRIEF_UNAVAILABLE' | 'SLOTS_TAKEN'
+
+export interface PlacementResult {
+  id: string
+  outcome: 'placed' | 'covered' | 'kept'
+  reason: KeptReason | null
+}
+
 export interface PlacementReport {
   placed: number
   covered: number
   kept: number
+  results: PlacementResult[]
 }
 
 /** What placement needs from outside: the model and the site's reads, injectable for the integration test. */
@@ -67,13 +78,13 @@ export const defaultPlacementDeps: PlacementDeps = {
   now: () => new Date(),
 }
 
-type Outcome = keyof PlacementReport
+type Placed = Pick<PlacementResult, 'outcome' | 'reason'>
 
 export async function placeInCurrentCycle(
   requests: readonly PlaceableRequest[],
   deps: PlacementDeps = defaultPlacementDeps,
 ): Promise<PlacementReport> {
-  const report: PlacementReport = { placed: 0, covered: 0, kept: 0 }
+  const report: PlacementReport = { placed: 0, covered: 0, kept: 0, results: [] }
   if (requests.length === 0) return report
 
   const byCampaign = new Map<string, PlaceableRequest[]>()
@@ -87,13 +98,14 @@ export async function placeInCurrentCycle(
 
     // Sequential: each placement changes the plan the next one reads.
     for (const request of list) {
-      const outcome: Outcome = campaign?.current_cycle_id
-        ? await placeOne(request, campaign, knowledgeOf, deps).catch((error: unknown) => {
+      const result: Placed = campaign?.current_cycle_id
+        ? await placeOne(request, campaign, knowledgeOf, deps).catch((error: unknown): Placed => {
             console.warn(`[demandes] integration au cycle impossible pour ${request.id}, gardee : ${error instanceof Error ? error.message : error}`)
-            return 'kept' as const
+            return { outcome: 'kept', reason: 'BRIEF_UNAVAILABLE' }
           })
-        : 'kept'
-      report[outcome]++
+        : { outcome: 'kept', reason: 'NO_CYCLE' }
+      report[result.outcome]++
+      report.results.push({ id: request.id, ...result })
     }
   }
 
@@ -108,7 +120,7 @@ async function placeOne(
   campaign: Campaign,
   knowledgeOf: () => Promise<PlanningKnowledge>,
   deps: PlacementDeps,
-): Promise<Outcome> {
+): Promise<Placed> {
   const plan = await getRunningPlan(campaign.current_cycle_id as string)
   const [slots, claimed] = plan
     ? await Promise.all([listCampaignPlannedSlots(campaign.id), listClaimedItemIds(plan.items.map((item) => item.id))])
@@ -121,7 +133,8 @@ async function placeOne(
     today: parisDay(deps.now()),
     desiredBy: request.desired_by,
   })
-  if (placement.kind === 'none' || !plan) return 'kept'
+  if (placement.kind === 'none') return { outcome: 'kept', reason: placement.reason }
+  if (!plan) return { outcome: 'kept', reason: 'NO_RUNNING_CYCLE' }
 
   const knowledge = withCycleBriefs(await knowledgeOf(), plan)
   const first = placement.slots[0]
@@ -132,7 +145,7 @@ async function placeOne(
   }
 
   const brief = await deps.writeBrief(knowledge, subject)
-  if (!brief) return 'kept'
+  if (!brief) return { outcome: 'kept', reason: 'BRIEF_UNAVAILABLE' }
 
   if (brief.action?.kind === 'skip') {
     const written = await advanceRequests([{
@@ -142,7 +155,7 @@ async function placeOne(
       reason_code: 'PLAN_GUARD',
       reasons: [...brief.action.reasons],
     }])
-    return written.length > 0 ? 'covered' : 'kept'
+    return written.length > 0 ? { outcome: 'covered', reason: null } : { outcome: 'kept', reason: 'SLOTS_TAKEN' }
   }
 
   for (const candidate of placement.slots) {
@@ -158,10 +171,47 @@ async function placeOne(
           (previous ? `, a la place de « ${previous.target_keyword} ».` : '.'),
       ],
     })
-    if (outcome === 'placed') return 'placed'
-    if (outcome !== 'slot_taken') return 'kept'
+    if (outcome === 'placed') return { outcome: 'placed', reason: null }
+    if (outcome !== 'slot_taken') return { outcome: 'kept', reason: 'SLOTS_TAKEN' }
   }
-  return 'kept'
+  return { outcome: 'kept', reason: 'SLOTS_TAKEN' }
+}
+
+/** Requests CNX asked into the cycle in progress, per pass of the requests task. */
+export const OPERATOR_PLACEMENT_BATCH = 5
+
+const KEPT_REASONS: Readonly<Record<KeptReason, string>> = {
+  NO_CYCLE: "Aucun cycle ne tourne sur ce site : la demande attend le prochain plan.",
+  NO_RUNNING_CYCLE: "Aucun cycle ne tourne sur ce site : la demande attend le prochain plan.",
+  CYCLE_ENDING: 'Le cycle en cours finit dans moins de 3 jours : la demande passe en tete du prochain plan.',
+  QUOTA_REACHED: "Un tiers des pages du cycle viennent deja de demandes : la demande passe en tete du prochain plan.",
+  NO_FREE_SLOT: "Aucune page prevue n'est remplacable (toutes entamees, trop proches ou piliers) : la demande passe en tete du prochain plan.",
+  BRIEF_UNAVAILABLE: "Le brief n'a pas pu etre redige (modele indisponible) : la demande passe en tete du prochain plan.",
+  SLOTS_TAKEN: 'Les pages remplacables ont ete prises pendant la redaction : la demande passe en tete du prochain plan.',
+}
+
+/**
+ * The requests CNX marked « integrate » (arbitration.ts), tried in the cycle in
+ * progress. One that cannot enter says why — in the console — and is no longer
+ * tried: it stays at the head of the queue for the next plan.
+ */
+export async function placeRequestedByOperator(deps: PlacementDeps = defaultPlacementDeps): Promise<PlacementReport> {
+  const requests = await listRequestsToPlace(OPERATOR_PLACEMENT_BATCH)
+  const placeable = requests.filter((request): request is PlaceableRequest => request.campaign_id !== null)
+  const report = await placeInCurrentCycle(placeable, deps)
+
+  const kept = [
+    ...report.results.filter((result) => result.outcome === 'kept'),
+    ...requests.filter((request) => request.campaign_id === null).map((request) => ({ id: request.id, reason: 'NO_CYCLE' as const })),
+  ]
+  await advanceRequests(kept.map((result) => ({
+    id: result.id,
+    from: 'deferred' as const,
+    status: 'deferred' as const,
+    reason_code: 'NO_SLOT_NOW',
+    reasons: [KEPT_REASONS[result.reason ?? 'SLOTS_TAKEN']],
+  })))
+  return report
 }
 
 /**

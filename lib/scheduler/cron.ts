@@ -38,6 +38,7 @@ import { publishPage } from '@/lib/publishing/publish'
 import type { PublishOutcome } from '@/lib/publishing/outcome'
 import { checkCycleCompletion } from './cycle-manager'
 import { analyzeReceivedRequests } from '@/lib/keyword-requests/analyze'
+import { placeRequestedByOperator } from '@/lib/keyword-requests/placement'
 import { followProduction } from '@/lib/keyword-requests/progress'
 import {
   claimEditorialSlot,
@@ -233,12 +234,17 @@ export function initScheduler(): void {
   // here publishes; the same single-instance rule holds all the same, since
   // two processes would analyse the same request twice.
   //
-  // Two steps, each failing alone: the received requests are judged (five at
-  // a time), then the planned ones follow their slot through production.
+  // Three steps, each failing alone: the received requests are judged (five
+  // at a time) and the receivable ones offered to the cycle in progress; the
+  // ones CNX asked into the cycle from the console are tried (KW-10); the
+  // planned ones follow their slot through production.
   cron.schedule('*/2 * * * *', async () => {
     await runWithConcurrencyControl('keywordRequests', async () => {
       await analyzeReceivedRequests().catch((error) =>
         log('ERROR', 'keywordRequests', 'Keyword request analysis failed', undefined, error instanceof Error ? error : new Error(String(error)))
+      )
+      await placeRequestedByOperator().catch((error) =>
+        log('ERROR', 'keywordRequests', 'Keyword request placement asked by CNX failed', undefined, error instanceof Error ? error : new Error(String(error)))
       )
       await followProduction().catch((error) =>
         log('ERROR', 'keywordRequests', 'Keyword request production follow-up failed', undefined, error instanceof Error ? error : new Error(String(error)))

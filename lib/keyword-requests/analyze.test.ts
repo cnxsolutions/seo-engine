@@ -40,7 +40,7 @@ function ports(overrides: Partial<AnalysisPorts> = {}): AnalysisPorts & { writte
       written.push(...verdicts)
       return verdicts.map((verdict) => verdict.id)
     },
-    place: async () => ({ placed: 0, covered: 0, kept: 0 }),
+    place: async () => ({ placed: 0, covered: 0, kept: 0, results: [] }),
     ...overrides,
   }
 }
@@ -72,7 +72,7 @@ describe('analyzeReceivedRequests', () => {
   })
 
   it('propose au cycle en cours les seules demandes recevables, une fois leur verdict ecrit (KW-4)', async () => {
-    const place = vi.fn(async () => ({ placed: 1, covered: 0, kept: 0 }))
+    const place = vi.fn(async () => ({ placed: 1, covered: 0, kept: 0, results: [] }))
     await analyzeReceivedRequests(ports({ place }))
     expect(place).toHaveBeenCalledTimes(1)
     expect(place).toHaveBeenCalledWith([{ id: 'r2', campaign_id: 'camp', keyword: 'débouchage', city: null, desired_by: '2026-12-15' }])

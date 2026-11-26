@@ -5,7 +5,7 @@ import { REQUESTS_PER_SCREEN, readRequestZone, readSiteRequests } from '@/lib/cl
 import { parisDay } from '@/src/core/domain/client-space/overview'
 import { DESIRED_BY_MAX_DAYS } from '@/src/core/domain/keyword-requests/normalize'
 import { currentSite } from '../current-site'
-import { readPageNumber } from '../page-number'
+import { readPageNumber } from '@/lib/page-number'
 import { RequestBoard } from './RequestBoard'
 
 export const metadata: Metadata = { title: 'Demandes' }

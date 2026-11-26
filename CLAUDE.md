@@ -39,7 +39,7 @@ production n'est touchee que pour appliquer une migration avant un merge.
 npm run dev          # http://localhost:3000
 npm run lint         # ESLint          — 0 erreur attendue (33 warnings tolerees)
 npm run typecheck    # tsc --noEmit    — 0 erreur attendue
-npm test             # Vitest          — 1 441 tests (102 fichiers), tous verts
+npm test             # Vitest          — 1 457 tests (105 fichiers), tous verts
 npm run build        # build local (sans sortie standalone, voir next.config.ts)
 ```
 
@@ -53,7 +53,7 @@ La base de developpement est un **Supabase local** (Docker Desktop doit tourner)
 ```bash
 npm run db:local:start   # API :54321 · Postgres :54322 · Studio :54323 · Mailpit :54324
 npm run db:local:reset   # baseline + migrations + demonstration (sites fictifs, campagnes inactives)
-npm run test:db          # tests d'integration *.db.test.ts (86) — rejoues en CI dans le job « base »
+npm run test:db          # tests d'integration *.db.test.ts (92) — rejoues en CI dans le job « base »
 ```
 
 `.env.local` pointe sur cette base ; il ne contient **aucun** acces a la
@@ -221,7 +221,7 @@ Auth). Une fuite d'un client vers un autre est LE risque du chantier :
 - **Cache GitHub Actions cloisonne par branche** : `main` ne lit pas le cache
   cree sur une branche de PR. Le premier build apres un merge repart de zero.
 - **Vitest echoue en bloc sous Git Bash** quand le chemin courant commence par
-  un lecteur en minuscule (`c:/laragon/...`) : les 102 fichiers tombent avec
+  un lecteur en minuscule (`c:/laragon/...`) : les 105 fichiers tombent avec
   « Cannot read properties of undefined (reading 'config') », zero test lance.
   Ce n'est pas le code : lancer `npm test` depuis PowerShell, ou `cd /C/laragon/...`.
 

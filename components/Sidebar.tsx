@@ -7,8 +7,10 @@ import {
   ChevronRight,
   Globe,
   LayoutDashboard,
+  MessageSquarePlus,
   type LucideIcon,
 } from 'lucide-react'
+import { QUEUE_TEXT } from '@/lib/keyword-requests/operator-labels'
 import { BrandLockup } from './BrandMark'
 import { SITE_TABS, activeSiteTab, siteIdFromPathname, siteTabHref } from './site-tabs'
 
@@ -55,6 +57,7 @@ interface ToolLinkModel {
 
 const OVERVIEW: ToolLinkModel[] = [
   { href: '/dashboard', icon: LayoutDashboard, label: 'Tableau de bord' },
+  { href: '/demandes', icon: MessageSquarePlus, label: 'Demandes' },
   { href: '/sites', icon: Globe, label: 'Sites' },
 ]
 
@@ -99,11 +102,46 @@ function useSiteList(initial: SidebarSite[], pathname: string): SidebarSite[] {
   return sites
 }
 
+/**
+ * The requests waiting for CNX (KW-10), re-read like the sites: on every
+ * navigation and on focus — an arbitration made on the queue lowers it at once.
+ * A failed read keeps the last count rather than showing a zero.
+ */
+function useReviewCount(initial: number | null, pathname: string): number | null {
+  const [count, setCount] = useState(initial)
+
+  useEffect(() => {
+    const controller = new AbortController()
+    const load = () => {
+      fetch('/api/demandes/compteur', { cache: 'no-store', signal: controller.signal })
+        .then((response) => (response.ok ? response.json() : null))
+        .then((data) => {
+          if (data && typeof data.review === 'number') setCount(data.review)
+        })
+        .catch(() => undefined)
+    }
+    load()
+    window.addEventListener('focus', load)
+    return () => {
+      controller.abort()
+      window.removeEventListener('focus', load)
+    }
+  }, [pathname])
+
+  return count
+}
+
 // ─── Component ───────────────────────────────────────────────────────────────
 
-export function Sidebar({ sites: initialSites, environment }: { sites: SidebarSite[]; environment: SidebarEnvironment }) {
+export function Sidebar({ sites: initialSites, environment, reviewCount: initialReviewCount }: {
+  sites: SidebarSite[]
+  environment: SidebarEnvironment
+  /** Requests waiting for CNX, read by the layout; null when the read failed. */
+  reviewCount: number | null
+}) {
   const pathname = usePathname()
   const sites = useSiteList(initialSites, pathname)
+  const reviewCount = useReviewCount(initialReviewCount, pathname)
 
   /**
    * One row lights up at a time. « Sites » owns the list and the creation form;
@@ -126,7 +164,7 @@ export function Sidebar({ sites: initialSites, environment }: { sites: SidebarSi
       <nav aria-label="Navigation principale" style={{ flex: 1, padding: '0.5rem 0', overflowY: 'auto' }}>
         <div style={{ height: 8 }} />
         {OVERVIEW.map((item) => (
-          <ToolLink key={item.href} {...item} active={isActive(item.href)} />
+          <ToolLink key={item.href} {...item} active={isActive(item.href)} count={item.href === '/demandes' ? reviewCount : null} />
         ))}
 
         <div className="nav-section-label" id="nav-sites-label">Vos sites</div>
@@ -203,12 +241,18 @@ function SiteSubTabs({ siteId, siteName, pathname }: { siteId: string; siteName:
 }
 
 function ToolLink({
-  href, icon: Icon, label, active,
-}: ToolLinkModel & { active: boolean }) {
+  href, icon: Icon, label, active, count,
+}: ToolLinkModel & { active: boolean; count: number | null }) {
   return (
     <Link href={href} className={`nav-item ${active ? 'active' : ''}`} aria-current={active ? 'page' : undefined}>
       <Icon size={17} strokeWidth={active ? 2.2 : 1.8} />
       <span style={{ flex: 1 }}>{label}</span>
+      {count !== null && count > 0 && (
+        <span className="nav-count" title={QUEUE_TEXT.railCount(count)}>
+          {count}
+          <span className="sr-only"> {QUEUE_TEXT.railCount(count)}</span>
+        </span>
+      )}
       {active && <ChevronRight size={14} style={{ opacity: 0.5 }} />}
     </Link>
   )

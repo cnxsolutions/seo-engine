@@ -1,5 +1,6 @@
 import { headers } from 'next/headers'
 import { Sidebar, type SidebarEnvironment, type SidebarSite } from '@/components/Sidebar'
+import { countRequestsToReview } from '@/lib/keyword-requests/repository'
 import { createServiceClient } from '@/lib/supabase'
 
 /**
@@ -48,7 +49,12 @@ export default async function DashboardLayout({
 }: {
   children: React.ReactNode
 }) {
-  const [sites, environment] = await Promise.all([readSidebarSites(), readEnvironment()])
+  const [sites, environment, reviewCount] = await Promise.all([
+    readSidebarSites(),
+    readEnvironment(),
+    // The rail's counter of requests waiting for CNX; a failed read shows none rather than a zero.
+    countRequestsToReview().catch(() => null),
+  ])
 
   return (
     <div style={{ display: 'flex', minHeight: '100vh', width: '100%' }}>
@@ -59,7 +65,7 @@ export default async function DashboardLayout({
           light « Analytics » on the dashboard's performance tab. Analytics now
           lives in each site's Performances tab, and the rail reads only the
           pathname, which needs no boundary. */}
-      <Sidebar sites={sites} environment={environment} />
+      <Sidebar sites={sites} environment={environment} reviewCount={reviewCount} />
       <main id="contenu" className="main-content" tabIndex={-1}>
         {children}
       </main>
