@@ -7,11 +7,12 @@
 // Électricité Durand (client B) has a campaign and no cycle.
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { describe, expect, it } from 'vitest'
+import { describe, expect, inject, it } from 'vitest'
 import { createHash } from 'node:crypto'
 import { findClientSite } from '@/lib/client-space/repository'
 import { toClientSiteDto } from '@/lib/client-space/dto'
 import { readOnlinePages, readPeriod } from '@/lib/client-space/overview'
+import { readSearchResults } from '@/lib/client-space/results'
 import { parisDay } from '@/src/core/domain/client-space/overview'
 
 /** md5(seed)::uuid, as db/seed-local.sql derives its ids. */
@@ -63,5 +64,36 @@ describe('espace client — lecture d un site (L2)', () => {
 
   it('le site d un autre client ne s obtient pas : la lecture commence toujours par lui', async () => {
     expect(await findClientSite(seedId('demo-client-b'), seedId('demo-site-martin'))).toBeNull()
+  })
+})
+
+describe('espace client — resultats Google (L2b)', () => {
+  it('agrege en base : deux totaux, la comparaison, la courbe de 28 jours, les classements', async () => {
+    const view = await readSearchResults(await clientSite('demo-client-a', 'demo-site-martin'))
+    expect(view.kind).toBe('results')
+    if (view.kind !== 'results') return
+    const { results } = view
+    expect(results.days).toBe(28)
+    expect(results.daily).toHaveLength(28)
+    expect(results.daily.reduce((sum, point) => sum + point.clicks, 0)).toBe(results.current.clicks)
+    expect(results.change.clicks).not.toBeNull()
+    expect(results.pages.length).toBeGreaterThan(0)
+    expect(results.pages.length).toBeLessThanOrEqual(5)
+    expect(results.queries[0]).toEqual({ query: 'plombier troyes', clicks: expect.any(Number) })
+    for (const page of results.pages) expect(page.url.startsWith('https://plomberie-martin.test/')).toBe(true)
+  })
+
+  it('sans donnees ni Search Console, dit que CNX s en occupe — pas un zero', async () => {
+    expect(await readSearchResults(await clientSite('demo-client-b', 'demo-site-durand'))).toEqual({ kind: 'not_linked' })
+  })
+
+  it('la fonction est refusee a la cle publique', async () => {
+    const response = await fetch(`${inject('supabaseApiUrl')}/rest/v1/rpc/client_search_summary`, {
+      method: 'POST',
+      headers: { apikey: inject('supabaseAnonKey'), Authorization: `Bearer ${inject('supabaseAnonKey')}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ p_site_id: seedId('demo-site-martin') }),
+    })
+    expect(response.ok).toBe(false)
+    expect([401, 403, 404]).toContain(response.status)
   })
 })

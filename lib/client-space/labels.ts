@@ -51,3 +51,25 @@ export const PAGE_STATE_LABELS = {
   indexing: { label: 'En cours d’indexation', hint: 'Google ne l’a pas encore enregistrée. Il faut souvent quelques jours, parfois quelques semaines.' },
   checking: { label: 'CNX vérifie cette page', hint: 'Quelque chose empêche Google de l’enregistrer. CNX Solutions s’en occupe.' },
 } as const
+
+/** The « Résultats » screen (ESP-5, design.md § 9.4). */
+export const RESULTS_TEXT = {
+  eyebrow: 'Résultats Google',
+  title: (days: number) => `Vos ${days} derniers jours`,
+  clicks: 'Visites depuis Google',
+  impressions: 'Apparitions dans Google',
+  explain: 'Une visite, c’est un clic sur votre site depuis les résultats de Google. Une apparition, c’est votre site affiché dans une recherche, cliqué ou non.',
+  versus: (days: number) => `par rapport aux ${days} jours d’avant`,
+  noComparison: 'Pas encore assez d’historique pour comparer.',
+  curveTitle: 'Visites par jour',
+  topPages: 'Les pages qui amènent le plus de visites',
+  topQueries: 'Les recherches qui vous trouvent',
+  homePage: 'Page d’accueil',
+  visits: (count: number) => `${count} ${count > 1 ? 'visites' : 'visite'}`,
+  source: (from: string, to: string) => `Source : Google Search Console · du ${from} au ${to} · mise à jour chaque nuit.`,
+  notLinkedTitle: 'Vos résultats arrivent bientôt',
+  notLinkedBody: 'Ils apparaîtront ici dès que CNX Solutions aura relié votre site à Google. Vous n’avez rien à faire.',
+  waitingTitle: 'Les premières données sont en route',
+  waitingBody: 'Votre site est relié à Google. Les premiers chiffres arrivent sous quelques jours : Google les publie avec un peu de retard.',
+  emptyList: 'Pas encore de visite sur cette période.',
+} as const

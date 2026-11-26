@@ -31,7 +31,7 @@ Documents liés : [design.md](design.md) (identité visuelle, composants, écran
 | Échéance | **À fixer** (§ 7, décision 14) |
 | Cibles | Espace client : mobile d'abord, utilisable à 375 px, < 2 s · Console opérateur : desktop d'abord, utilisable sur mobile |
 | Distribution | La **même** application, le **même** conteneur, le **même** domaine (`seo.cnx-solutions.fr/espace`) |
-| Données | La base Supabase existante, trois tables et une fonction ajoutées (migrations `022`, `023` ; la `021` du L0 active le RLS) |
+| Données | La base Supabase existante, trois tables et deux fonctions ajoutées (migrations `022` espace client, `023` résultats Google, `024` demandes ; la `021` du L0 active le RLS) |
 | Environnements | **Développement, tests et recette : Supabase en local** (CLI + Docker, § 4.8) · Production : le projet Supabase hébergé, touché seulement pour appliquer une migration avant un merge (décision 16) |
 | E-mails | Expéditeur **`contact@cnx-solutions.fr`**, par le compte SMTP déjà utilisé par le site CNX ; en local, aucun envoi réel (décision 17) |
 | Contrainte qui prime | **Une seule instance** : le planificateur `node-cron` tourne dans le process (CLAUDE.md). Rien dans ce chantier ne la remet en cause |
@@ -89,8 +89,8 @@ reprendre · ❌ absent · ❓ à vérifier.
 | ESP-2 | Pages en ligne : titre, adresse, date, « visible sur Google » ou « en cours d'indexation » | `lib/google/tracking.ts`, `lib/indexing` | ✅ L2a (trois états : visible, en cours d'indexation, « CNX vérifie ») | L2 |
 | ESP-3 | Prochaines pages : sujet et date, sans type technique (« Pilier », « Enfant ») | `editorial_calendar` | ✅ L2a (titre du plan, sinon le sujet en français) | L2 |
 | ESP-4 | Sélecteur de site quand un client en a plusieurs | — | ✅ L2a | L2 |
-| ESP-5 | **Résultats Google** (décision 2) : clics et apparitions sur 28 jours comparés aux 28 précédents, courbe quotidienne, 5 pages et 5 recherches qui amènent le plus de visites ; source et période toujours affichées ; état vide utile si Search Console n'est pas reliée (« CNX s'en occupe ») | `gsc_performance`, `lib/google/performance.ts`, `SourceNote` | 🟡 données synchronisées chaque nuit, écran opérateur seulement | L2 |
-| ESP-6 | Mobile d'abord : tout l'espace utilisable à 375 px, chargé en < 2 s | règles dev | 🟡 L2a (375 px vérifié) ; L2b à suivre | L2 |
+| ESP-5 | **Résultats Google** (décision 2) : clics et apparitions sur 28 jours comparés aux 28 précédents, courbe quotidienne, 5 pages et 5 recherches qui amènent le plus de visites ; source et période toujours affichées ; état vide utile si Search Console n'est pas reliée (« CNX s'en occupe ») | `gsc_performance`, `lib/google/performance.ts`, `SourceNote` | ✅ L2b (fonction SQL `client_search_summary`, migration 023 ; état vide « CNX s’en occupe » ou « données en route ») | L2 |
+| ESP-6 | Mobile d'abord : tout l'espace utilisable à 375 px, chargé en < 2 s | règles dev | ✅ L2a, L2b (375 px et 1 280 px vérifiés, rendu serveur, une requête agrégée pour les résultats) | L2 |
 
 ### KW — Demandes de mots-clés
 
@@ -134,7 +134,7 @@ reprendre · ❌ absent · ❓ à vérifier.
 | QA-1 | **RLS activé sur toutes les tables**, sans politique (tout refusé hors clé de service), vérifié par un script — en local par un test, en production par une lecture seule — préalable à toute exposition de Supabase Auth | sécurité | ✅ L0a (#30) : la base reconstruite laissait les 30 tables lisibles par la clé publique ; migration `021`, et la baseline enregistre désormais l'état RLS | L0 |
 | QA-2 | Tests d'isolation, **contre le Supabase local** : pour chaque route `/api/espace`, un membre du client A n'obtient rien du client B (404, pas 403) | sécurité | 🟡 L1 : `db/client-space.db.test.ts` (isolation du module de portée, connexion réelle, révocation, expiration) ; une route de données `/api/espace` arrive au L3 avec son test | L1 |
 | QA-3 | Limites de débit (connexion, envoi de demandes), en mémoire — compatible avec l'instance unique | sécurité | 🟡 L1 : codes demandés et saisis (`lib/rate-limit.ts`) ; envoi de demandes au L3 | L1 · L3 |
-| QA-4 | Documentation à jour : CLAUDE.md (1 283 tests, piège Vitest sous Git Bash), README, `db/README.md`, baseline régénérée après `021`, `022`, `023` | — | 🟡 | L0 puis chaque lot |
+| QA-4 | Documentation à jour : CLAUDE.md (1 283 tests, piège Vitest sous Git Bash), README, `db/README.md`, baseline régénérée après `021`, `022`, `023`, `024` | — | 🟡 | L0 puis chaque lot |
 | QA-5 | Recette par lot sur le Supabase local : captures 375 px et 1 440 px, Lighthouse, parcours complet (codes de connexion lus dans Mailpit), écritures en base listées, puis base remise à zéro | dev-cadrage | ❌ | chaque lot |
 | QA-6 | **Supabase local** : `supabase/config.toml`, schéma reconstruit depuis la baseline et les migrations, jeu de démonstration (deux clients, trois sites fictifs), une commande pour tout remettre à zéro (§ 4.8) | décision 16 | ✅ L0a (#30) | L0 |
 | QA-7 | Tests d'intégration (`*.db.test.ts`, `npm run test:db`) contre le Supabase local : isolation, RLS, `swap_plan_item` sous concurrence, idempotence des migrations ; rejoués en CI dans un job dédié (décision 18) | décision 16 | 🟡 outillage et 24 tests au L0a (#30) ; isolation au L1, transaction au L4 | L0 (outillage) puis chaque lot |
@@ -318,7 +318,7 @@ index : client_members(client_id), client_members(lower(email)) unique, sites(cl
 RLS activé sur clients, client_members ; aucune politique
 ```
 
-Migration `023_keyword_requests.sql` :
+Migration `024_keyword_requests.sql` (la `023` est prise par les résultats Google du L2b) :
 
 ```sql
 keyword_requests (
@@ -423,7 +423,7 @@ Ordonnés par **risque** (sécurité d'abord, planificateur ensuite), puis par *
 |---|---|---|---|---|
 | **L0** | **L0a ✅ #30** (local, tests, RLS) · **L0b ✅ #31** (peau CNX). Socle : **Supabase local** (CLI épinglée, `config.toml`, remise à zéro, démo, `test:db`, job CI) ; scripts de migration ciblant le local par défaut ; jetons CNX, polices, marque, composants de base rhabillés, modale de confirmation ; vérification RLS (+ activation si besoin) ; CLAUDE.md à jour. Peut se scinder en L0a (local et tests) / L0b (peau CNX) | UX-1 à UX-4, UX-9, UX-10 (bases), QA-1, QA-4, QA-6, QA-7 | — | L · 4 j |
 | **L1** | Identité client : tables `clients`/`client_members`, `@supabase/ssr`, branche de `proxy.ts`, connexion par code, invitation et révocation depuis les Réglages d'un site, pages d'erreur ; tests d'isolation, limites de débit | ACC-1 à ACC-7, QA-2, QA-3 | L0 | ✅ L1 (#32) |
-| **L2** | Espace client en lecture : coquille mobile, accueil, pages en ligne, prochaines pages, sélecteur de site, **résultats Google**. Se scinde en L2a (lecture) / L2b (résultats) si la PR grossit | ESP-1 à ESP-6 | L1 | 🟡 L2a (#33) ; L2b (résultats Google) à suivre |
+| **L2** | Espace client en lecture : coquille mobile, accueil, pages en ligne, prochaines pages, sélecteur de site, **résultats Google**. Se scinde en L2a (lecture) / L2b (résultats) si la PR grossit | ESP-1 à ESP-6 | L1 | ✅ L2a (#33), L2b (#34) |
 | **L3** | Demandes, saisie et verdict : table, domaine (verdict, cycle de vie), tâche d'analyse, formulaire, liste et chronologie, retrait. Les demandes recevables sont **toutes** gardées pour la période suivante (pas encore d'insertion dans le cycle en cours) | KW-1 à KW-3, KW-5 (verdict), KW-6 à KW-9 | L2 | L · 4 j |
 | **L4** | Demandes dans le moteur : extraction de `writeBriefForSubject` **sans changement de comportement** (PR à part), `swap_plan_item`, placement dans le cycle en cours, consommation au plan suivant, retour de publication | KW-4, KW-5, KW-8, KW-11, KW-13 | L3 | L · 4 j |
 | **L5** | Console opérateur des demandes et coquille : file, arbitrage, compteur dans le rail, onglet « Demandes » d'un site, rail et en-tête de site refaits, glossaire | KW-10, UX-5, UX-6 | L3 | M · 3 j |
