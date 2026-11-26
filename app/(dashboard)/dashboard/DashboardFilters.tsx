@@ -18,6 +18,7 @@ import { RefreshCw } from 'lucide-react'
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import { useTransition } from 'react'
 import { SiteSwitcher, Tabs, type SiteOption } from '@/components/charts'
+import './dashboard.css'
 
 const PERIODS = [
   { id: '7', label: '7 j' },
@@ -54,15 +55,8 @@ export function DashboardFilters({
   }
 
   return (
-    <div
-      className="toolbar"
-      style={{
-        // Held at reduced opacity while the server re-renders: no skeleton flash,
-        // no layout jump.
-        opacity: pending ? 0.6 : 1,
-        transition: `opacity var(--dur) var(--ease)`,
-      }}
-    >
+    // Held at reduced opacity while the server re-renders: no skeleton flash, no layout jump.
+    <div className={`toolbar dashboard-filters${pending ? ' dashboard-filters--pending' : ''}`}>
       {sites && (
         <SiteSwitcher
           sites={sites}

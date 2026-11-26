@@ -25,6 +25,7 @@ import type { DashboardSite, PerformanceMetrics } from '@/app/api/dashboard/metr
 import { LineChart } from '@/components/charts'
 import { EmptyState, HeroFigure, StatTile } from '@/components/ui'
 import { MagnitudeBar, Panel, SourceNote } from './ui-bits'
+import './dashboard.css'
 import {
   formatCompact,
   formatCount,
@@ -59,7 +60,7 @@ export function PerformanceTab({
     return (
       <div>
         <SourceNote
-          source="table gsc_performance, alimentée par Google Search Console"
+          source="Google Search Console, synchronisé chaque nuit"
           period={requested}
           note={<>Scope : {scopeLabel}</>}
         />
@@ -80,7 +81,7 @@ export function PerformanceTab({
   return (
     <div>
       <SourceNote
-        source="table gsc_performance, alimentée par Google Search Console"
+        source="Google Search Console, synchronisé chaque nuit"
         period={period}
         note={
           <>
@@ -94,7 +95,7 @@ export function PerformanceTab({
       />
 
       {coverage.lastDate && coverage.lastDate < window.end && (
-        <p className="meta" style={{ margin: `calc(-1 * var(--space-3)) 0 var(--space-5)` }}>
+        <p className="meta performance__lag">
           Search Console publie ses chiffres avec deux à trois jours de retard : les données s&apos;arrêtent au{' '}
           {formatDayLong(coverage.lastDate)}, ce n&apos;est pas une chute de trafic.
         </p>
@@ -103,15 +104,9 @@ export function PerformanceTab({
       {metrics.disconnected.length > 0 && <DisconnectedNotice sites={metrics.disconnected} />}
 
       {/* The one number this view leads with. */}
-      <section
-        className="panel"
-        style={{ marginBottom: 'var(--space-6)', borderLeft: '3px solid var(--accent)' }}
-      >
-        <div
-          className="panel__body"
-          style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 'var(--space-8)' }}
-        >
-          <div style={{ minWidth: 190 }}>
+      <section className="panel performance__lead">
+        <div className="panel__body performance__lead-body">
+          <div className="performance__figure">
             <HeroFigure
               label="Le gisement"
               value={striking.total}
@@ -120,13 +115,13 @@ export function PerformanceTab({
             />
           </div>
 
-          <div style={{ flex: 1, minWidth: 260 }}>
-            <p style={{ fontSize: 'var(--fs-md)', color: 'var(--ink-primary)', fontWeight: 600, margin: 0 }}>
+          <div className="performance__claim">
+            <p className="performance__claim-text">
               Elles ont été affichées {formatCount(striking.impressions)} fois et n&apos;ont rapporté que{' '}
               {formatCount(striking.clicks)} clic{striking.clicks > 1 ? 's' : ''} ({formatPercent(strikingCtr)}).
             </p>
             {podiumCtr !== null && (
-              <p className="meta" style={{ marginTop: 'var(--space-2)', lineHeight: 'var(--lh-normal)' }}>
+              <p className="meta performance__claim-note">
                 Sur ce même site, les positions 1-3 convertissent {formatPercent(podiumCtr, 1)} de leurs impressions. La
                 page existe déjà et Google la montre déjà : la faire monter coûte moins cher que d&apos;en écrire une
                 nouvelle.
@@ -136,13 +131,13 @@ export function PerformanceTab({
 
           {/* On a site, the cycle is planned from its own Stratégie tab; the
               creation form only when no single site is in scope. */}
-          <Link href={siteId ? `/sites/${siteId}/strategie` : '/strategy/new'} className="btn-primary" style={{ flexShrink: 0 }}>
+          <Link href={siteId ? `/sites/${siteId}/strategie` : '/strategy/new'} className="btn-primary performance__cta">
             Planifier un cycle
           </Link>
         </div>
       </section>
 
-      <div className="kpi-row" style={{ marginBottom: 'var(--space-6)' }}>
+      <div className="kpi-row dashboard-row">
         <StatTile
           icon={Eye}
           label="Impressions"
@@ -169,14 +164,14 @@ export function PerformanceTab({
         />
       </div>
 
-      <div style={{ marginBottom: 'var(--space-6)' }}>
+      <div className="dashboard-block">
         <Panel
           title={`Les requêtes en position ${striking.minPosition} à ${striking.maxPosition}`}
           subtitle="Classées par volume d'affichage. Une place gagnée ici se paye en optimisation, pas en rédaction."
           icon={TrendingUp}
         >
           {striking.queries.length === 0 ? (
-            <p className="meta" style={{ margin: 0, lineHeight: 'var(--lh-normal)' }}>
+            <p className="meta dashboard__lead">
               Aucune requête de ce site ne se classe entre la {striking.minPosition}ᵉ et la {striking.maxPosition}ᵉ place
               sur la période. Il n&apos;y a pas de gisement à exploiter pour l&apos;instant — la priorité reste de
               publier et de se faire indexer.
@@ -188,8 +183,8 @@ export function PerformanceTab({
                   <tr>
                     <th scope="col">Requête</th>
                     <th scope="col">Page</th>
-                    <th scope="col" className="cell-num" style={{ whiteSpace: 'nowrap' }}>Position</th>
-                    <th scope="col" style={{ minWidth: 140 }}>Impressions</th>
+                    <th scope="col" className="cell-num dashboard-cell--nowrap">Position</th>
+                    <th scope="col" className="performance__col-impressions">Impressions</th>
                     <th scope="col" className="cell-num">Clics</th>
                   </tr>
                 </thead>
@@ -202,19 +197,18 @@ export function PerformanceTab({
                           href={query.pageUrl}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="meta"
-                          style={{ color: 'var(--ink-secondary)' }}
+                          className="meta performance__page-link"
                         >
                           {shortenUrl(query.pageUrl)}
                         </a>
                       </td>
-                      <td className="cell-num" style={{ whiteSpace: 'nowrap' }}>{formatPosition(query.position)}</td>
+                      <td className="cell-num dashboard-cell--nowrap">{formatPosition(query.position)}</td>
                       <td>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)' }}>
-                          <span className="num" style={{ minWidth: 44, textAlign: 'right', fontWeight: 600 }}>
+                        <div className="performance__bar-cell">
+                          <span className="num performance__bar-value performance__bar-value--44">
                             {formatCount(query.impressions)}
                           </span>
-                          <span style={{ flex: 1, minWidth: 60 }}>
+                          <span className="performance__bar performance__bar--60">
                             <MagnitudeBar value={query.impressions} max={maxStrikingImpressions} />
                           </span>
                         </div>
@@ -225,7 +219,7 @@ export function PerformanceTab({
                 </tbody>
               </table>
               {striking.total > striking.queries.length && (
-                <p className="meta" style={{ marginTop: 'var(--space-3)' }}>
+                <p className="meta dashboard__after">
                   {striking.queries.length} requêtes affichées sur {striking.total} dans la tranche.
                 </p>
               )}
@@ -234,14 +228,7 @@ export function PerformanceTab({
         </Panel>
       </div>
 
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))',
-          gap: 'var(--space-6)',
-          marginBottom: 'var(--space-6)',
-        }}
-      >
+      <div className="dashboard-grid dashboard-grid--gap-below">
         <Panel
           title="Où sont les impressions"
           subtitle={`Par tranche de position. Le gisement (positions ${striking.minPosition} à ${striking.maxPosition}) couvre la fin de la deuxième tranche et toute la troisième.`}
@@ -256,7 +243,7 @@ export function PerformanceTab({
               <thead>
                 <tr>
                   <th scope="col">Tranche</th>
-                  <th scope="col" style={{ minWidth: 150 }}>Impressions</th>
+                  <th scope="col" className="performance__col-impressions--band">Impressions</th>
                   <th scope="col" className="cell-num">Clics</th>
                   <th scope="col" className="cell-num">Couples</th>
                 </tr>
@@ -265,18 +252,18 @@ export function PerformanceTab({
                 {metrics.bands.map((band) => (
                   <tr key={band.id}>
                     <th scope="row">
-                      <span className="cell-strong" style={{ display: 'block' }}>
+                      <span className="cell-strong performance__band">
                         {band.label}
-                        {band.id === 'page2' && <span className="chip" style={{ marginLeft: 'var(--space-2)' }}>Gisement</span>}
+                        {band.id === 'page2' && <span className="chip performance__band-chip">Gisement</span>}
                       </span>
                       <span className="meta">{band.hint}</span>
                     </th>
                     <td>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)' }}>
-                        <span className="num" style={{ minWidth: 48, textAlign: 'right', fontWeight: 600 }}>
+                      <div className="performance__bar-cell">
+                        <span className="num performance__bar-value performance__bar-value--48">
                           {formatCount(band.impressions)}
                         </span>
-                        <span style={{ flex: 1, minWidth: 56 }}>
+                        <span className="performance__bar performance__bar--56">
                           <MagnitudeBar value={band.impressions} max={maxBandImpressions} />
                         </span>
                       </div>
@@ -296,7 +283,7 @@ export function PerformanceTab({
           icon={Link2Off}
         >
           {metrics.zeroClickPages.length === 0 ? (
-            <p className="meta" style={{ margin: 0, lineHeight: 'var(--lh-normal)' }}>
+            <p className="meta dashboard__lead">
               Aucune page dans ce cas : toutes les pages suffisamment affichées ont récolté au moins un clic.
             </p>
           ) : (
@@ -306,8 +293,8 @@ export function PerformanceTab({
                   <thead>
                     <tr>
                       <th scope="col">Page</th>
-                      <th scope="col" className="cell-num" style={{ whiteSpace: 'nowrap' }}>Position</th>
-                      <th scope="col" style={{ minWidth: 130 }}>Impressions</th>
+                      <th scope="col" className="cell-num dashboard-cell--nowrap">Position</th>
+                      <th scope="col" className="performance__col-impressions--page">Impressions</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -318,20 +305,19 @@ export function PerformanceTab({
                             href={page.pageUrl}
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="cell-strong"
-                            style={{ display: 'block' }}
+                            className="cell-strong performance__page"
                           >
                             {shortenUrl(page.pageUrl)}
                           </a>
                           {page.topQuery && <span className="meta">requête principale : {page.topQuery}</span>}
                         </th>
-                        <td className="cell-num" style={{ whiteSpace: 'nowrap' }}>{formatPosition(page.position)}</td>
+                        <td className="cell-num dashboard-cell--nowrap">{formatPosition(page.position)}</td>
                         <td>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)' }}>
-                            <span className="num" style={{ minWidth: 38, textAlign: 'right', fontWeight: 600 }}>
+                          <div className="performance__bar-cell">
+                            <span className="num performance__bar-value performance__bar-value--38">
                               {formatCount(page.impressions)}
                             </span>
-                            <span style={{ flex: 1, minWidth: 50 }}>
+                            <span className="performance__bar performance__bar--50">
                               <MagnitudeBar value={page.impressions} max={maxZeroClickImpressions} />
                             </span>
                           </div>
@@ -341,7 +327,7 @@ export function PerformanceTab({
                   </tbody>
                 </table>
               </div>
-              <p className="meta" style={{ marginTop: 'var(--space-3)' }}>
+              <p className="meta dashboard__after">
                 Total affiché sans clic : {formatCount(metrics.zeroClickImpressions)} impressions.
               </p>
             </>
@@ -349,7 +335,7 @@ export function PerformanceTab({
         </Panel>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: 'var(--space-6)' }}>
+      <div className="dashboard-grid">
         <Panel title="Impressions par jour" subtitle="Search Console" icon={Eye}>
           <LineChart
             series={[
@@ -383,7 +369,7 @@ export function PerformanceTab({
         </Panel>
       </div>
 
-      <p className="meta" style={{ marginTop: 'var(--space-3)', lineHeight: 'var(--lh-normal)' }}>
+      <p className="meta dashboard__after-lead">
         Deux graphes séparés, volontairement : impressions et clics n&apos;ont pas le même ordre de grandeur. Les
         superposer sur un double axe ferait apparaître une corrélation que les chiffres ne contiennent pas.
       </p>
@@ -482,16 +468,16 @@ function UnavailableState({ metrics, siteId }: { metrics: PerformanceMetrics; si
 
 function DisconnectedNotice({ sites }: { sites: DashboardSite[] }) {
   return (
-    <div className="panel" style={{ padding: 'var(--space-4)', marginBottom: 'var(--space-5)' }}>
-      <div style={{ display: 'flex', gap: 'var(--space-3)', alignItems: 'flex-start' }}>
-        <PlugZap size={16} color="var(--status-warning)" style={{ flexShrink: 0, marginTop: 2 }} />
-        <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--ink-secondary)', lineHeight: 'var(--lh-normal)' }}>
+    <div className="panel dashboard-notice">
+      <div className="dashboard-notice__row">
+        <PlugZap size={16} color="var(--status-warning)" className="notice__icon" />
+        <div className="dashboard-notice__text">
           {sites.length === 1 ? 'Ce site est exclu des chiffres ci-dessous' : 'Ces sites sont exclus des chiffres ci-dessous'}{' '}
           faute de Search Console :{' '}
           {sites.map((site, index) => (
             <span key={site.id}>
               {index > 0 && ', '}
-              <strong style={{ color: 'var(--ink-primary)' }}>{site.name}</strong>{' '}
+              <strong className="dashboard__strong">{site.name}</strong>{' '}
               <Link
                 href={site.googleConnected ? `/sites/${site.id}/google/select` : `/api/google/auth?site_id=${site.id}`}
                 className="btn-link"
