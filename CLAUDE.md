@@ -39,7 +39,7 @@ production n'est touchee que pour appliquer une migration avant un merge.
 npm run dev          # http://localhost:3000
 npm run lint         # ESLint          — 0 erreur attendue (33 warnings tolerees)
 npm run typecheck    # tsc --noEmit    — 0 erreur attendue
-npm test             # Vitest          — 1 283 tests (79 fichiers), tous verts
+npm test             # Vitest          — 1 339 tests (87 fichiers), tous verts
 npm run build        # build local (sans sortie standalone, voir next.config.ts)
 ```
 
@@ -53,11 +53,16 @@ La base de developpement est un **Supabase local** (Docker Desktop doit tourner)
 ```bash
 npm run db:local:start   # API :54321 · Postgres :54322 · Studio :54323 · Mailpit :54324
 npm run db:local:reset   # baseline + migrations + demonstration (sites fictifs, campagnes inactives)
-npm run test:db          # tests d'integration *.db.test.ts — rejoues en CI dans le job « base »
+npm run test:db          # tests d'integration *.db.test.ts (37) — rejoues en CI dans le job « base »
 ```
 
 `.env.local` pointe sur cette base ; il ne contient **aucun** acces a la
 production. Details : [`db/README.md`](db/README.md) § 0.
+
+Deux membres de demonstration ouvrent l'espace client en local :
+`marie@martin-batiment.test` (Plomberie Martin, Toitures Lambert) et
+`luc@electricite-durand.test` (Electricite Durand). Le code arrive dans Mailpit,
+http://127.0.0.1:54324 — aucun e-mail ne sort du poste.
 
 ---
 
@@ -109,7 +114,7 @@ Sans `--prod`, les scripts ne touchent **que** la base locale. `.env.prod-db`
 chaine de connexion de production.
 
 Les fichiers vivent dans `src/adapters/infrastructure/database/migrations/`
-(`001` a `021`), **jamais** dans `db/` ni dans `supabase/migrations/`. Ils
+(`001` a `022`), **jamais** dans `db/` ni dans `supabase/migrations/`. Ils
 doivent etre idempotents (`IF NOT EXISTS`, `CREATE OR REPLACE`) : la base
 elle-meme fait office de journal, il n'y a pas de table de suivi. Toute nouvelle
 table active son RLS dans sa propre migration (`db/rls.db.test.ts`).
@@ -165,6 +170,31 @@ La DA est celle de CNX Solutions (site et films), detaillee dans `docs/design.md
 
 ---
 
+## Espace client
+
+`/espace` est ouvert aux clients de CNX (connexion par code e-mail, Supabase
+Auth). Une fuite d'un client vers un autre est LE risque du chantier :
+
+- **Une seule porte vers les donnees** : `lib/client-space/scope.ts`, qui part
+  de la session et jamais d'un identifiant envoye par le navigateur. Un site
+  d'un autre client repond **404**, pas 403.
+- **Trois controles, aucun ne suffit seul** : `proxy.ts` (une session existe),
+  le layout `app/(espace)/espace/(membre)` (un membre non revoque, connecte il
+  y a moins de 30 jours), puis chaque route ou page (le site appartient a son
+  client).
+- **Jamais `select('*')`** sur `sites` cote client : DTO a colonnes nommees
+  (`lib/client-space/dto.ts`), sans secret, teste.
+- La cle **publique** ne sert qu'a Supabase Auth (`auth-client.ts`) ; toute
+  donnee passe par la cle de service, cote serveur. Le navigateur ne recoit
+  aucune cle. Sans `NEXT_PUBLIC_SUPABASE_ANON_KEY`, l'espace repond 503.
+- Chaque nouvelle route `/api/espace` arrive avec son test d'isolation contre
+  le Supabase local (`db/client-space.db.test.ts`).
+- L'e-mail de code a une seule source, `supabase/templates/code-connexion.html`,
+  servie en local et collee telle quelle dans le projet heberge (modele « Magic
+  Link »).
+
+---
+
 ## Pieges connus
 
 - **`npm run typecheck` echoue en local mais passe en CI** : un `.next` perime
@@ -184,9 +214,14 @@ La DA est celle de CNX Solutions (site et films), detaillee dans `docs/design.md
 - **Cache GitHub Actions cloisonne par branche** : `main` ne lit pas le cache
   cree sur une branche de PR. Le premier build apres un merge repart de zero.
 - **Vitest echoue en bloc sous Git Bash** quand le chemin courant commence par
-  un lecteur en minuscule (`c:/laragon/...`) : les 79 fichiers tombent avec
+  un lecteur en minuscule (`c:/laragon/...`) : les 87 fichiers tombent avec
   « Cannot read properties of undefined (reading 'config') », zero test lance.
   Ce n'est pas le code : lancer `npm test` depuis PowerShell, ou `cd /C/laragon/...`.
+
+- **Supabase CLI : `[auth.email] enable_signup` reste a `true`** dans
+  `supabase/config.toml`. Pour la CLI, ce drapeau allume le fournisseur e-mail
+  lui-meme : a `false`, plus aucun code ne part (« Email logins are
+  disabled »). L'inscription libre se coupe par `[auth] enable_signup`.
 
 ---
 

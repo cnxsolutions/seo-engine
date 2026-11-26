@@ -1,0 +1,252 @@
+/* ─────────────────────────────────────────────────────────────────────────────
+   The client space — docs/design.md § 1 (registers), § 9.1 (shell), § 11.
+   Mobile first, 375 px; tokens only (components/tokens.css).
+   ───────────────────────────────────────────────────────────────────────────── */
+
+/* ═══ HÉROS — the sign-in screen and the status pages ═══════════════════════ */
+
+.auth-shell {
+  min-height: 100dvh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-6) var(--space-4);
+  background:
+    radial-gradient(120% 90% at 20% 0%, var(--hero-2) 0%, var(--hero-1) 60%),
+    linear-gradient(140deg, var(--hero-1) 0%, var(--hero-3) 100%);
+  color: var(--hero-ink);
+}
+
+.auth-shell__inner {
+  width: 100%;
+  max-width: 26rem;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+
+.auth-shell__brand {
+  display: flex;
+  justify-content: center;
+}
+
+.auth-shell__card {
+  background: var(--surface-card);
+  color: var(--ink-primary);
+  border-radius: var(--radius-2xl);
+  padding: var(--space-6) var(--space-5);
+  box-shadow: var(--shadow-lg);
+}
+
+.auth-shell__title {
+  margin: var(--space-2) 0 var(--space-2);
+  font-family: var(--font-display);
+  font-size: var(--fs-2xl);
+  font-weight: 700;
+  letter-spacing: var(--ls-title);
+  line-height: var(--lh-tight);
+}
+
+.auth-shell__intro {
+  margin: 0 0 var(--space-5);
+  color: var(--ink-muted);
+  line-height: var(--lh-normal);
+}
+
+.auth-shell__notice {
+  margin-bottom: var(--space-4);
+}
+
+.auth-shell__footer {
+  margin: 0;
+  text-align: center;
+  font-size: var(--fs-sm);
+  line-height: var(--lh-normal);
+  color: var(--hero-ink-muted);
+}
+
+.auth-shell__footer a {
+  color: var(--hero-ink);
+  text-underline-offset: 3px;
+}
+
+/* ═══ Sign-in form ═════════════════════════════════════════════════════════ */
+
+.auth-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+/* Touch targets of 44 px at least (§ 11): the shared .input is sized for the console. */
+.auth-form .input,
+.espace .input {
+  min-height: 3rem;
+}
+
+.auth-form__sent {
+  margin: 0;
+  color: var(--ink-secondary);
+  line-height: var(--lh-normal);
+  overflow-wrap: anywhere;
+}
+
+.code-input {
+  font-family: var(--font-display);
+  font-size: var(--fs-2xl);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.4em;
+  text-align: center;
+}
+
+.auth-form__aside {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: var(--space-2) var(--space-4);
+}
+
+/* A secondary action that reads as a link but is a button: no URL behind it. */
+.link-button {
+  min-height: 2.75rem;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--accent-text);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+.link-button:disabled {
+  color: var(--ink-muted);
+  text-decoration: none;
+  cursor: default;
+}
+
+/* ═══ JOUR — the member's space ════════════════════════════════════════════ */
+
+.espace {
+  min-height: 100dvh;
+  background: var(--surface-page);
+}
+
+.espace-topbar {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  background: var(--surface-card);
+  border-bottom: 1px solid var(--line);
+}
+
+.espace-topbar__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.espace-topbar__who {
+  display: none;
+  font-size: var(--fs-sm);
+  color: var(--ink-muted);
+}
+
+.espace-main {
+  max-width: 60rem;
+  margin: 0 auto;
+  padding: var(--space-5) var(--space-4) var(--space-10);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+
+.espace-hero {
+  border-radius: var(--radius-2xl);
+  padding: var(--space-6) var(--space-5);
+  background:
+    radial-gradient(120% 90% at 20% 0%, var(--hero-2) 0%, var(--hero-1) 60%),
+    linear-gradient(140deg, var(--hero-1) 0%, var(--hero-3) 100%);
+  color: var(--hero-ink);
+}
+
+.espace-hero__eyebrow {
+  margin: 0;
+  font-size: var(--fs-2xs);
+  font-weight: 700;
+  letter-spacing: var(--ls-eyebrow-wide);
+  text-transform: uppercase;
+  color: var(--hero-ink-muted);
+}
+
+.espace-hero__title {
+  margin: var(--space-2) 0 var(--space-2);
+  font-family: var(--font-display);
+  font-size: var(--fs-2xl);
+  font-weight: 700;
+  letter-spacing: var(--ls-title);
+  line-height: var(--lh-tight);
+}
+
+.espace-hero__text {
+  margin: 0;
+  color: var(--hero-ink-muted);
+  line-height: var(--lh-normal);
+}
+
+.espace-section__title {
+  margin: 0 0 var(--space-3);
+  font-family: var(--font-display);
+  font-size: var(--fs-lg);
+  font-weight: 700;
+}
+
+.espace-sites {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--space-3);
+}
+
+.espace-site {
+  padding: var(--space-4) var(--space-5);
+  background: var(--surface-card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-xl);
+}
+
+.espace-site__name {
+  margin: 0;
+  font-family: var(--font-display);
+  font-weight: 700;
+}
+
+.espace-site__url {
+  margin: var(--space-1) 0 0;
+  font-size: var(--fs-sm);
+  color: var(--ink-muted);
+  overflow-wrap: anywhere;
+}
+
+@media (min-width: 64rem) {
+  .espace-topbar {
+    padding: var(--space-3) var(--space-6);
+  }
+
+  .espace-topbar__who {
+    display: inline;
+  }
+
+  .espace-sites {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}

@@ -4,6 +4,12 @@
 //              Single operator, single instance: no accounts, no sessions table,
 //              no identity provider — just "prove you are the operator".
 //
+//              The one exception is the CLIENT SPACE (`/espace`, `/api/espace`,
+//              `/auth`): clients sign in with a code by e-mail and carry a
+//              Supabase session, checked by lib/client-space/gate.ts. They never
+//              see the Basic challenge, and the operator gate never opens for
+//              a client session.
+//
 //              This is the `proxy` file convention. Next 16 deprecated
 //              `middleware.ts` (the build warns about it) and runs `proxy.ts` on
 //              the NODE.JS runtime rather than the Edge one — `export const
@@ -15,6 +21,7 @@
 
 import { NextResponse, type NextRequest } from 'next/server'
 import { timingSafeEqual } from '@/lib/crypto'
+import { clientSpaceGate, isClientSpacePath } from '@/lib/client-space/gate'
 
 /**
  * Shown by the browser's native credential prompt. There is no login page: the
@@ -47,16 +54,22 @@ export async function proxy(req: NextRequest) {
     )
   }
 
+  // A session cookie is as ambient as Basic credentials: cross-site writes are
+  // refused on both doors, before either looks at who is asking.
+  if (isCrossSiteWrite(req)) return crossSiteRefusal()
+
+  if (isClientSpacePath(req.nextUrl.pathname)) return clientSpaceGate(req)
+
   const presented = readPresentedSecret(req)
   if (presented === null) return challenge()
 
   if (!(await timingSafeEqual(presented, expected))) return challenge()
 
-  if (isCrossSiteWrite(req)) {
-    return NextResponse.json({ error: 'Requete cross-site refusee' }, { status: 403 })
-  }
-
   return NextResponse.next()
+}
+
+function crossSiteRefusal() {
+  return NextResponse.json({ error: 'Requete cross-site refusee' }, { status: 403 })
 }
 
 /** Requests that change nothing, and so need no cross-site protection. */

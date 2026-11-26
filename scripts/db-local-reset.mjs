@@ -11,21 +11,25 @@
 //      order. The baseline already contains most of what they do, so this is
 //      also the proof that each one is idempotent, as the project requires;
 //   4. db/seed-local.sql    — the demonstration data (fictional sites, inactive
-//      campaigns: nothing the local scheduler could publish anywhere).
+//      campaigns: nothing the local scheduler could publish anywhere);
+//   5. the demonstration MEMBERS (DEMO_MEMBERS), one per client: a confirmed
+//      Supabase Auth account through the local admin API, then its
+//      client_members row. Their sign-in codes land in Mailpit.
 //
 // There is deliberately NO supabase/migrations directory: two folders of
 // migrations would drift at the first change made to only one of them.
 //
 //   npm run db:local:reset            # steps 1 to 4
-//   npm run db:local:reset -- --keep  # steps 3 and 4 only, on the current database:
+//   npm run db:local:reset -- --keep  # steps 3 to 5 only, on the current database:
 //                                     # the quick loop while writing a new migration.
 //                                     # The baseline is a dump, not a migration, and
 //                                     # is never replayed over itself.
 
 import { readdirSync, readFileSync } from 'node:fs'
 import { pathToFileURL } from 'node:url'
+import { createClient } from '@supabase/supabase-js'
 import { connect } from './db-connect.mjs'
-import { runSupabase } from './supabase.mjs'
+import { localStatus, runSupabase } from './supabase.mjs'
 
 export const BASELINE = 'db/000_baseline.sql'
 export const MIGRATIONS_DIR = 'src/adapters/infrastructure/database/migrations'
@@ -42,6 +46,51 @@ export const SEED = 'db/seed-local.sql'
  * file is replayed on top of the baseline, which is what proves it idempotent.
  */
 export const ABSORBED_BY_BASELINE = new Set(['001_schema_federation.sql'])
+
+/**
+ * One person per demonstration client (db/seed-local.sql): enough to sign in
+ * to each space and to see that neither sees the other. `client` is the md5
+ * seed of the client's id.
+ */
+export const DEMO_MEMBERS = [
+  { email: 'marie@martin-batiment.test', client: 'demo-client-a' },
+  { email: 'luc@electricite-durand.test', client: 'demo-client-b' },
+]
+
+/**
+ * The id of a confirmed local Auth account for `email`, created if needed.
+ * With --keep the account survives from the previous run: found again, not
+ * duplicated.
+ */
+async function demoUserId(admin, email) {
+  const created = await admin.createUser({ email, email_confirm: true })
+  if (created.data?.user) return created.data.user.id
+  if (created.error?.code !== 'email_exists') throw new Error(`compte ${email} : ${created.error?.message}`)
+  const { data, error } = await admin.listUsers({ page: 1, perPage: 1000 })
+  if (error) throw new Error(`liste des comptes : ${error.message}`)
+  const user = data.users.find((candidate) => candidate.email === email)
+  if (!user) throw new Error(`compte ${email} annonce existant mais introuvable`)
+  return user.id
+}
+
+export async function createDemoMembers(client) {
+  const status = localStatus()
+  if (!status?.SERVICE_ROLE_KEY) throw new Error('supabase status illisible : la pile locale tourne-t-elle ?')
+  if (!/^https?:\/\/(127\.0\.0\.1|localhost)[:/]/.test(status.API_URL)) {
+    throw new Error(`l'API Supabase annoncee n'est pas locale (${status.API_URL}) : refus.`)
+  }
+  const admin = createClient(status.API_URL, status.SERVICE_ROLE_KEY, { auth: { persistSession: false } }).auth.admin
+
+  for (const member of DEMO_MEMBERS) {
+    const userId = await demoUserId(admin, member.email)
+    await client.query(
+      `insert into public.client_members (client_id, user_id, email)
+       values (md5($1)::uuid, $2, $3)
+       on conflict do nothing`,
+      [member.client, userId, member.email],
+    )
+  }
+}
 
 /** The migration files to replay, in the order they were written. */
 export function migrationFiles() {
@@ -88,6 +137,8 @@ async function main() {
       await applyFile(client, path)
       console.log(`[local] ${path}`)
     }
+    await createDemoMembers(client)
+    console.log(`[local] membres de demonstration : ${DEMO_MEMBERS.map((member) => member.email).join(', ')}`)
     const { rows } = await client.query(
       `select count(*)::int as tables from information_schema.tables
         where table_schema = 'public' and table_type = 'BASE TABLE'`

@@ -93,6 +93,11 @@
   --hero-2: #16266f;
   --hero-3: #0b4da2;
   --hero-4: #2f7ef0;
+  /* Ink on the navy: the theme's white and its muted white (rgba .72, 9.6:1
+     on --hero-1), and the frosted fill of .cnx-badge-glass. */
+  --hero-ink: #ffffff;
+  --hero-ink-muted: rgb(255 255 255 / 0.72);
+  --hero-glass: rgb(255 255 255 / 0.14);
 
   /* ── Status (reserved — always with an icon or a label) ────────────────
      -mark is the fill/glyph, -text is the WCAG-AA text step for the same

@@ -1361,6 +1361,16 @@ export function formatDayLong(iso: string): string {
   return DAY_LONG.format(new Date(`${iso.slice(0, 10)}T12:00:00Z`))
 }
 
+/** Pinned to Paris: the container runs in UTC, the browser wherever it is, and both must print the same instant. */
+const MOMENT = new Intl.DateTimeFormat('fr-FR', {
+  day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Paris',
+})
+
+/** « 26 novembre 2026 à 00:52 » — an instant (timestamptz), where formatDayLong takes an ISO day. */
+export function formatMoment(iso: string): string {
+  return MOMENT.format(new Date(iso))
+}
+
 const WEEKDAY = new Intl.DateTimeFormat('fr-FR', { weekday: 'long' })
 
 /** « lundi » — même règle du midi UTC que `formatDay`, pour la même raison. */

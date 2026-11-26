@@ -16,10 +16,15 @@
 -- toujours une periode EN COURS. Les identifiants sont fixes (md5 -> uuid) pour
 -- que les tests et les captures designent les memes lignes d'un jour a l'autre.
 --
--- Trois sites, deux futurs clients (la table `clients` arrive au L1) :
---   client A — Plomberie Martin (cycle en cours, pages en ligne, resultats Google)
---            — Toitures Lambert (campagne sans cycle : l'etat vide)
---   client B — Electricite Durand (sert aux tests de cloisonnement)
+-- Trois sites, deux clients (migration 022) :
+--   client A « Martin Batiment »    — Plomberie Martin (cycle en cours, pages en ligne,
+--                                     resultats Google) et Toitures Lambert (campagne
+--                                     sans cycle : l'etat vide)
+--   client B « Electricite Durand » — Electricite Durand (sert aux tests de cloisonnement)
+--
+-- Les MEMBRES (une personne par client) ont besoin d'un compte Supabase Auth : ils sont
+-- crees par scripts/db-local-reset.mjs, par l'API d'administration locale, apres ce
+-- fichier. Les codes de connexion arrivent dans Mailpit (http://127.0.0.1:54324).
 --
 -- Idempotent : `on conflict do nothing` partout, rejouable avec --keep.
 
@@ -31,6 +36,19 @@ values
   (md5('demo-site-lambert')::uuid, 'Toitures Lambert',    'nextjs',    'https://toitures-lambert.test',   true),
   (md5('demo-site-durand')::uuid,  'Électricité Durand',  'wordpress', 'https://electricite-durand.test', true)
 on conflict do nothing;
+
+-- ─── Clients (L1) ───────────────────────────────────────────────────────────
+
+insert into public.clients (id, name)
+values
+  (md5('demo-client-a')::uuid, 'Martin Bâtiment'),
+  (md5('demo-client-b')::uuid, 'Électricité Durand')
+on conflict do nothing;
+
+update public.sites set client_id = md5('demo-client-a')::uuid
+ where id in (md5('demo-site-martin')::uuid, md5('demo-site-lambert')::uuid) and client_id is null;
+update public.sites set client_id = md5('demo-client-b')::uuid
+ where id = md5('demo-site-durand')::uuid and client_id is null;
 
 -- ─── Campagnes ──────────────────────────────────────────────────────────────
 

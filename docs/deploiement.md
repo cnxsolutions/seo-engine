@@ -89,6 +89,20 @@ chown deploy:deploy /opt/seo-engine/.env && chmod 600 /opt/seo-engine/.env
 `APP_ACCESS_SECRET` et `WORDPRESS_WEBHOOK_SECRET` — sans elles l'application
 repond `503` sur tout. Les generer avec `openssl rand -base64 32`.
 
+L'espace client (`/espace`) demande en plus `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+(la cle publique du projet) : sans elle, lui seul repond `503`. Et, dans le
+tableau de bord Supabase du projet heberge, une fois pour toutes :
+
+- Authentication > Sign In / Providers : inscription libre **coupee**, fournisseur
+  e-mail **actif** ;
+- Authentication > URL Configuration : Site URL `https://seo.mondomaine.fr` (le
+  lien des e-mails y renvoie, vers `/auth/callback`) ;
+- Authentication > Email Templates > Magic Link : objet « Votre code d'accès —
+  CNX SEO Engine », corps = `supabase/templates/code-connexion.html` ;
+- code a 6 chiffres valable 1 heure (Email OTP length / expiration) ;
+- SMTP personnalise (expediteur `contact@cnx-solutions.fr`) : le SMTP integre de
+  Supabase plafonne a quelques e-mails par heure.
+
 Si tu branches Google, `GOOGLE_REDIRECT_URI` doit valoir
 `https://seo.mondomaine.fr/api/google/callback`, declare a l'identique dans la
 console Google Cloud.

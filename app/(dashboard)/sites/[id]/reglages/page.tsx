@@ -9,9 +9,10 @@
 //   1. Connexion Google   — c'est là que reviennent /api/google/sync et
 //                           /api/google/select, avec leur verdict en requête
 //   2. Identité et accès  — nom, adresse, état actif, identifiants du connecteur
-//   3. Schéma CMS         — WordPress seulement : un site Next.js se décrit par
+//   3. Accès client       — qui peut ouvrir l'espace client de ce site (L1)
+//   4. Schéma CMS         — WordPress seulement : un site Next.js se décrit par
 //                           l'analyse de son dépôt, pas par un CMS
-//   4. Zone dangereuse    — en dernier, toujours
+//   5. Zone dangereuse    — en dernier, toujours
 //
 // Lecture par `loadSite()` (../site-data) : `SITE_SAFE_COLUMNS`, aucun secret,
 // et le formulaire client ne reçoit qu'une projection à la main de la ligne.
@@ -23,6 +24,7 @@ import { EditSiteForm, type EditableSite } from '../../EditSiteForm'
 import { AnalyzeRepoButton } from '../../AnalyzeRepoButton'
 import { loadSite } from '../site-data'
 import { TabIntro } from '../TabIntro'
+import { ClientAccessSection } from './ClientAccess'
 import { GoogleConnectionSection } from './GoogleConnection'
 import { SchemaPanel } from './SchemaPanel'
 
@@ -76,6 +78,8 @@ export default async function SiteSettingsPage({
         </p>
         <EditSiteForm site={editable} />
       </section>
+
+      <ClientAccessSection siteId={site.id} />
 
       {site.type === 'wordpress' ? (
         <SchemaPanel siteId={site.id} />

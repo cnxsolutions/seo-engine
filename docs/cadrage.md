@@ -73,13 +73,13 @@ reprendre · ❌ absent · ❓ à vérifier.
 
 | ID | Fonctionnalité | Source | État | Lot |
 |---|---|---|---|---|
-| ACC-1 | L'opérateur invite un client depuis les **Réglages** d'un site (nom du client, e-mail) ; le client reçoit un e-mail d'invitation | demande | ❌ | L1 |
-| ACC-2 | Connexion **sans mot de passe** : code à 6 chiffres reçu par e-mail (lien en secours), seuls les e-mails invités reçoivent un code | décision 3 | ❌ | L1 |
-| ACC-3 | **Cloisonnement** : un membre ne lit et n'écrit que sur les sites de son client, vérifié côté serveur à chaque requête | règles dev | ❌ | L1 |
-| ACC-4 | Révocation d'un accès par l'opérateur (effet immédiat), déconnexion, session qui expire | règles dev | ❌ | L1 |
-| ACC-5 | Barrière : `/espace`, `/api/espace`, `/auth` sortent de la barrière Basic et passent par la session client ; tout le reste reste derrière `APP_ACCESS_SECRET`, fermé par défaut | `proxy.ts` | ❌ | L1 |
-| ACC-6 | Pages connexion, code expiré, accès révoqué, 403/404/500 de l'espace, en français, à la DA CNX | règles dev | ❌ | L1 |
-| ACC-7 | L'opérateur voit qui a accès à chaque site et la dernière connexion | — | ❌ | L1 |
+| ACC-1 | L'opérateur invite un client depuis les **Réglages** d'un site (nom du client, e-mail) ; le client reçoit un e-mail d'invitation | demande | ✅ L1 (invitation = compte confirmé + code, voir § 4.4) | L1 |
+| ACC-2 | Connexion **sans mot de passe** : code à 6 chiffres reçu par e-mail (lien en secours), seuls les e-mails invités reçoivent un code | décision 3 | ✅ L1 | L1 |
+| ACC-3 | **Cloisonnement** : un membre ne lit et n'écrit que sur les sites de son client, vérifié côté serveur à chaque requête | règles dev | ✅ L1 (`scope.ts`, 3 contrôles) | L1 |
+| ACC-4 | Révocation d'un accès par l'opérateur (effet immédiat), déconnexion, session qui expire | règles dev | ✅ L1 (révocation + blocage du compte ; session de 30 jours) | L1 |
+| ACC-5 | Barrière : `/espace`, `/api/espace`, `/auth` sortent de la barrière Basic et passent par la session client ; tout le reste reste derrière `APP_ACCESS_SECRET`, fermé par défaut | `proxy.ts` | ✅ L1 (`lib/client-space/gate.ts`) | L1 |
+| ACC-6 | Pages connexion, code expiré, accès révoqué, 403/404/500 de l'espace, en français, à la DA CNX | règles dev | ✅ L1 (accès retiré = page de connexion qui le dit ; 404 pour un site d'un autre client) | L1 |
+| ACC-7 | L'opérateur voit qui a accès à chaque site et la dernière connexion | — | ✅ L1 (section « Accès client » des Réglages) | L1 |
 
 ### ESP — Espace client
 
@@ -132,8 +132,8 @@ reprendre · ❌ absent · ❓ à vérifier.
 | ID | Fonctionnalité | Source | État | Lot |
 |---|---|---|---|---|
 | QA-1 | **RLS activé sur toutes les tables**, sans politique (tout refusé hors clé de service), vérifié par un script — en local par un test, en production par une lecture seule — préalable à toute exposition de Supabase Auth | sécurité | ✅ L0a (#30) : la base reconstruite laissait les 30 tables lisibles par la clé publique ; migration `021`, et la baseline enregistre désormais l'état RLS | L0 |
-| QA-2 | Tests d'isolation, **contre le Supabase local** : pour chaque route `/api/espace`, un membre du client A n'obtient rien du client B (404, pas 403) | sécurité | ❌ | L1 |
-| QA-3 | Limites de débit (connexion, envoi de demandes), en mémoire — compatible avec l'instance unique | sécurité | ❌ | L1 · L3 |
+| QA-2 | Tests d'isolation, **contre le Supabase local** : pour chaque route `/api/espace`, un membre du client A n'obtient rien du client B (404, pas 403) | sécurité | 🟡 L1 : `db/client-space.db.test.ts` (isolation du module de portée, connexion réelle, révocation, expiration) ; une route de données `/api/espace` arrive au L3 avec son test | L1 |
+| QA-3 | Limites de débit (connexion, envoi de demandes), en mémoire — compatible avec l'instance unique | sécurité | 🟡 L1 : codes demandés et saisis (`lib/rate-limit.ts`) ; envoi de demandes au L3 | L1 · L3 |
 | QA-4 | Documentation à jour : CLAUDE.md (1 283 tests, piège Vitest sous Git Bash), README, `db/README.md`, baseline régénérée après `021`, `022`, `023` | — | 🟡 | L0 puis chaque lot |
 | QA-5 | Recette par lot sur le Supabase local : captures 375 px et 1 440 px, Lighthouse, parcours complet (codes de connexion lus dans Mailpit), écritures en base listées, puis base remise à zéro | dev-cadrage | ❌ | chaque lot |
 | QA-6 | **Supabase local** : `supabase/config.toml`, schéma reconstruit depuis la baseline et les migrations, jeu de démonstration (deux clients, trois sites fictifs), une commande pour tout remettre à zéro (§ 4.8) | décision 16 | ✅ L0a (#30) | L0 |
@@ -262,6 +262,7 @@ l'opérateur de décider, pas au client de deviner.
 | Demandes ouvertes par site | 30 | au-delà, c'est une stratégie à reprendre avec CNX, pas une file |
 | Envois par membre | 30 / heure | abus, coût du jugement par le modèle |
 | Codes de connexion | 5 / 15 min par e-mail et par IP | force brute, quota d'e-mails |
+| Codes saisis | 10 / 15 min par e-mail et par IP | un code à 6 chiffres se devine ; laisse la place aux fautes de frappe (ajouté au L1) |
 
 Les valeurs sont des constantes nommées du domaine, modifiables en une ligne.
 
@@ -353,7 +354,7 @@ aujourd'hui. Ensuite : `node scripts/db-baseline.mjs` contre la production, puis
 - **Opérateur** : inchangé en V1, HTTP Basic sur `APP_ACCESS_SECRET`, fermé par défaut, protection
   `Sec-Fetch-Site` sur les écritures.
 - **Client** : Supabase Auth, OTP par e-mail, `shouldCreateUser: false` (seuls les invités reçoivent un code),
-  invitation par `auth.admin.inviteUserByEmail` depuis la console. Cookies `HttpOnly`, `Secure`, `SameSite=Lax`.
+  invitation depuis la console. **Écart assumé au L1** : pas de `auth.admin.inviteUserByEmail` — un invité reste non confirmé, et une fois l'inscription coupée Supabase refuse de lui envoyer un code (vérifié en local le 26/11). L'invitation crée donc un compte **confirmé** (`auth.admin.createUser`) puis envoie le même e-mail de code que chaque connexion (`supabase/templates/code-connexion.html`). Révocation : `revoked_at`, puis blocage du compte Supabase (`ban_duration`), qui tue la session et coupe les codes. Cookies `HttpOnly`, `Secure`, `SameSite=Lax`.
 - `proxy.ts` : `/espace`, `/api/espace`, `/auth` sont retirés du matcher Basic **par segment** (même forme
   `(?:/|$)` que l'exception du webhook), et reçoivent leur propre branche : rafraîchir la session, rediriger vers
   `/espace/connexion` sans session, refuser les écritures inter-sites. Le layout de l'espace et chaque route
@@ -405,7 +406,7 @@ isolation, RLS, transaction), et le parcours complet en recette.
 | Docker Desktop lancé sur le poste (le moteur Docker ne répondait pas le 25/11) | Supabase local | CNX | **L0** |
 | Accès production sortis de `.env.local` vers le fichier réservé aux migrations (`--prod`) | `npm run dev` ne peut plus toucher la production | CNX, accompagné | **L0** |
 | Réglages SMTP du site CNX (hôte, port, identifiant, mot de passe) reportés dans le SMTP personnalisé de **Supabase hébergé**, expéditeur `contact@cnx-solutions.fr` ; SPF, DKIM et DMARC du domaine vérifiés pour ce fournisseur | codes de connexion en production (le SMTP intégré de Supabase plafonne à quelques e-mails par heure), invitations, notifications | CNX | **L0** (une correction DNS se propage lentement) |
-| Réglages Supabase Auth : OTP e-mail actif, inscription publique coupée, URL de redirection, modèles d'e-mail FR | ACC-2 | CNX (tableau de bord) | L1 |
+| Réglages Supabase Auth du projet hébergé : inscription publique **coupée** (Authentication > Sign In / Providers > « Allow new users to sign up » à off, fournisseur e-mail **laissé actif**), OTP 6 chiffres valable 1 h, Site URL `https://seo.cnx-solutions.fr`, modèle « Magic Link » = `supabase/templates/code-connexion.html` (objet « Votre code d'accès — CNX SEO Engine ») | ACC-2 | CNX (tableau de bord) | **avant le merge du L1** |
 | Liste des premiers clients : nom, e-mail(s), site(s) | invitations, recette réelle | CNX | L2 |
 | Relecture des libellés de verdict et des textes de l'espace | ton CNX, aucune promesse intenable | CNX | L3 |
 | Lien « Confidentialité » (traitement de l'e-mail des membres) sur cnx-solutions.fr | RGPD | CNX | L1 |
@@ -421,7 +422,7 @@ Ordonnés par **risque** (sécurité d'abord, planificateur ensuite), puis par *
 | Lot | Contenu | Couvre | Dépend de | Taille |
 |---|---|---|---|---|
 | **L0** | **L0a ✅ #30** (local, tests, RLS) · **L0b ✅ #31** (peau CNX). Socle : **Supabase local** (CLI épinglée, `config.toml`, remise à zéro, démo, `test:db`, job CI) ; scripts de migration ciblant le local par défaut ; jetons CNX, polices, marque, composants de base rhabillés, modale de confirmation ; vérification RLS (+ activation si besoin) ; CLAUDE.md à jour. Peut se scinder en L0a (local et tests) / L0b (peau CNX) | UX-1 à UX-4, UX-9, UX-10 (bases), QA-1, QA-4, QA-6, QA-7 | — | L · 4 j |
-| **L1** | Identité client : tables `clients`/`client_members`, `@supabase/ssr`, branche de `proxy.ts`, connexion par code, invitation et révocation depuis les Réglages d'un site, pages d'erreur ; tests d'isolation, limites de débit | ACC-1 à ACC-7, QA-2, QA-3 | L0 | L · 4 j |
+| **L1** | Identité client : tables `clients`/`client_members`, `@supabase/ssr`, branche de `proxy.ts`, connexion par code, invitation et révocation depuis les Réglages d'un site, pages d'erreur ; tests d'isolation, limites de débit | ACC-1 à ACC-7, QA-2, QA-3 | L0 | ✅ L1 (#32) |
 | **L2** | Espace client en lecture : coquille mobile, accueil, pages en ligne, prochaines pages, sélecteur de site, **résultats Google**. Se scinde en L2a (lecture) / L2b (résultats) si la PR grossit | ESP-1 à ESP-6 | L1 | L · 5 j |
 | **L3** | Demandes, saisie et verdict : table, domaine (verdict, cycle de vie), tâche d'analyse, formulaire, liste et chronologie, retrait. Les demandes recevables sont **toutes** gardées pour la période suivante (pas encore d'insertion dans le cycle en cours) | KW-1 à KW-3, KW-5 (verdict), KW-6 à KW-9 | L2 | L · 4 j |
 | **L4** | Demandes dans le moteur : extraction de `writeBriefForSubject` **sans changement de comportement** (PR à part), `swap_plan_item`, placement dans le cycle en cours, consommation au plan suivant, retour de publication | KW-4, KW-5, KW-8, KW-11, KW-13 | L3 | L · 4 j |

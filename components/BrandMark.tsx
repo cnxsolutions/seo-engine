@@ -33,12 +33,14 @@ export function BrandMark({ size = 'md' }: BrandMarkProps) {
 
 interface BrandLockupProps {
   size?: BrandMarkSize
+  /** `inverse` on the navy of the hero register (sign-in, status pages). */
+  tone?: 'default' | 'inverse'
 }
 
 /** The mark, the product name, and who makes it. */
-export function BrandLockup({ size = 'md' }: BrandLockupProps) {
+export function BrandLockup({ size = 'md', tone = 'default' }: BrandLockupProps) {
   return (
-    <span className="brand-lockup">
+    <span className={tone === 'inverse' ? 'brand-lockup brand-lockup--inverse' : 'brand-lockup'}>
       <BrandMark size={size} />
       <span className="brand-lockup__text">
         <span className="brand-lockup__name">SEO Engine</span>

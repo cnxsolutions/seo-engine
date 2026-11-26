@@ -124,7 +124,10 @@ etablissement), `020_page_indexing.sql` (suivi de l'indexation des pages), puis
 `021_rls_toutes_tables.sql` : **RLS active sur les 30 tables publiques, sans
 politique**. L'application ne passe que par la cle de service, qui contourne le
 RLS ; la cle publique, elle, ne lit plus rien. Une nouvelle table active son RLS
-dans sa propre migration — `db/rls.db.test.ts` echoue sinon.
+dans sa propre migration — `db/rls.db.test.ts` echoue sinon. Enfin
+`022_client_space.sql` (L1) : tables `clients` et `client_members` (RLS active,
+sans politique ; `client_members.user_id` reference `auth.users`) et colonne
+nullable `sites.client_id`, sans backfill.
 
 Tous ses CHECK sont poses `NOT VALID` : ils s'appliquent aux ecritures futures
 sans jamais faire echouer la migration sur une ligne historique. Une ligne

@@ -1,0 +1,47 @@
+<!--
+  CNX SEO Engine — le code d'acces a l'espace client.
+
+  Le SEUL e-mail que Supabase Auth envoie pour l'espace : la premiere fois (l'operateur
+  vient d'ouvrir l'acces) comme a chaque connexion. Un seul modele pour les deux, parce
+  qu'une invitation Supabase cree un compte non confirme, auquel un code ne peut plus etre
+  envoye une fois les inscriptions coupees (lib/client-space/access.ts).
+
+  Source unique : ce fichier sert en local (supabase/config.toml) et se colle tel quel dans
+  le projet heberge (Authentication > Email Templates > Magic Link), objet compris :
+  « Votre code d'accès — CNX SEO Engine ».
+
+  Styles en ligne et tableaux : c'est ce que lisent les messageries, qui ignorent les
+  feuilles de style. Les valeurs sont celles de components/tokens.css.
+-->
+<!doctype html>
+<html lang="fr">
+  <body style="margin:0;padding:0;background:#f4f5f7;font-family:Inter,Segoe UI,Helvetica,Arial,sans-serif;color:#08090d;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f4f5f7;padding:32px 16px;">
+      <tr>
+        <td align="center">
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:480px;background:#ffffff;border:1px solid #e8eaef;border-radius:20px;overflow:hidden;">
+            <tr>
+              <td style="background:#0d1440;padding:24px 28px;">
+                <p style="margin:0;font-size:12px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:rgba(255,255,255,.72);">CNX Solutions</p>
+                <p style="margin:6px 0 0;font-size:20px;font-weight:700;color:#ffffff;">Votre espace CNX SEO Engine</p>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:28px;">
+                <p style="margin:0 0 16px;font-size:16px;line-height:1.55;color:#08090d;">Bonjour,</p>
+                <p style="margin:0 0 20px;font-size:16px;line-height:1.55;color:#08090d;">Voici votre code pour accéder à votre espace&nbsp;:</p>
+                <p style="margin:0 0 20px;padding:16px;background:#f4f5f7;border-radius:12px;text-align:center;font-size:32px;font-weight:700;letter-spacing:.3em;color:#08090d;">{{ .Token }}</p>
+                <p style="margin:0 0 24px;font-size:14px;line-height:1.55;color:#687080;">Ce code est valable une heure et ne sert qu'une fois. Saisissez-le sur la page de connexion, ou ouvrez directement votre espace&nbsp;:</p>
+                <p style="margin:0 0 28px;">
+                  <a href="{{ .SiteURL }}/auth/callback?token_hash={{ .TokenHash }}&amp;type=email" style="display:inline-block;padding:12px 22px;border-radius:999px;background:#0b6cf9;color:#ffffff;font-size:15px;font-weight:700;text-decoration:none;">Ouvrir mon espace</a>
+                </p>
+                <p style="margin:0;font-size:13px;line-height:1.55;color:#687080;">Vous recevez ce message parce que CNX Solutions vous a ouvert un accès, ou parce que quelqu'un a demandé un code pour {{ .Email }}. Si ce n'est pas vous, ignorez-le&nbsp;: sans le code, personne n'entre.</p>
+              </td>
+            </tr>
+          </table>
+          <p style="margin:16px 0 0;font-size:12px;color:#687080;">CNX Solutions · contact@cnx-solutions.fr</p>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>
