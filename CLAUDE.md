@@ -39,7 +39,7 @@ production n'est touchee que pour appliquer une migration avant un merge.
 npm run dev          # http://localhost:3000
 npm run lint         # ESLint          — 0 erreur attendue (33 warnings tolerees)
 npm run typecheck    # tsc --noEmit    — 0 erreur attendue
-npm test             # Vitest          — 1 360 tests (89 fichiers), tous verts
+npm test             # Vitest          — 1 369 tests (90 fichiers), tous verts
 npm run build        # build local (sans sortie standalone, voir next.config.ts)
 ```
 
@@ -53,7 +53,7 @@ La base de developpement est un **Supabase local** (Docker Desktop doit tourner)
 ```bash
 npm run db:local:start   # API :54321 · Postgres :54322 · Studio :54323 · Mailpit :54324
 npm run db:local:reset   # baseline + migrations + demonstration (sites fictifs, campagnes inactives)
-npm run test:db          # tests d'integration *.db.test.ts (37) — rejoues en CI dans le job « base »
+npm run test:db          # tests d'integration *.db.test.ts (42) — rejoues en CI dans le job « base »
 ```
 
 `.env.local` pointe sur cette base ; il ne contient **aucun** acces a la
@@ -177,7 +177,10 @@ Auth). Une fuite d'un client vers un autre est LE risque du chantier :
 
 - **Une seule porte vers les donnees** : `lib/client-space/scope.ts`, qui part
   de la session et jamais d'un identifiant envoye par le navigateur. Un site
-  d'un autre client repond **404**, pas 403.
+  d'un autre client repond **404**, pas 403. Les lectures d'un site
+  (`lib/client-space/overview.ts`) prennent le `ClientSiteDto` qu'elle rend,
+  jamais un id : les helpers operateur (`select('*')`, prompts, types de page)
+  ne servent pas cote client.
 - **Trois controles, aucun ne suffit seul** : `proxy.ts` (une session existe),
   le layout `app/(espace)/espace/(membre)` (un membre non revoque, une session
   ouverte PAR UN CODE il y a moins de 30 jours et apres sa derniere revocation —
@@ -218,7 +221,7 @@ Auth). Une fuite d'un client vers un autre est LE risque du chantier :
 - **Cache GitHub Actions cloisonne par branche** : `main` ne lit pas le cache
   cree sur une branche de PR. Le premier build apres un merge repart de zero.
 - **Vitest echoue en bloc sous Git Bash** quand le chemin courant commence par
-  un lecteur en minuscule (`c:/laragon/...`) : les 89 fichiers tombent avec
+  un lecteur en minuscule (`c:/laragon/...`) : les 90 fichiers tombent avec
   « Cannot read properties of undefined (reading 'config') », zero test lance.
   Ce n'est pas le code : lancer `npm test` depuis PowerShell, ou `cd /C/laragon/...`.
 

@@ -29,3 +29,25 @@ export function readSignInNotice(raw: string | string[] | undefined): SignInNoti
   // `hasOwn`, not `in`: `?motif=constructor` must not reach Object.prototype.
   return value && Object.hasOwn(SIGN_IN_NOTICES, value) ? (value as SignInNotice) : null
 }
+
+/** The words of the member's screens (L2). */
+export const CLIENT_SPACE_TEXT = {
+  noSiteTitle: 'Votre espace est prêt',
+  noSiteBody: 'Aucun site n’y est encore rattaché. CNX Solutions s’en occupe : écrivez à contact@cnx-solutions.fr si cela dure.',
+  periodEyebrow: 'Période en cours',
+  noPeriodTitle: 'Votre prochaine période se prépare',
+  noPeriodBody: 'CNX Solutions prépare les prochaines pages de votre site. Elles apparaîtront ici dès le début de la période.',
+  upcomingTitle: 'Prochaines pages',
+  upcomingEmpty: 'Toutes les pages de la période sont en ligne. Les suivantes arrivent avec la prochaine période.',
+  onlineTitle: 'Pages en ligne',
+  onlineEmpty: 'Aucune page n’est encore en ligne. Les premières arrivent aux dates prévues ci-dessus.',
+  onlineEmptyNoPeriod: 'Aucune page n’est encore en ligne.',
+  onlineSource: 'Pages écrites et publiées par CNX Solutions sur votre site.',
+} as const
+
+/** What Google makes of a page, said plainly (src/core/domain/client-space/overview.ts). */
+export const PAGE_STATE_LABELS = {
+  visible: { label: 'Visible sur Google', hint: 'Google a enregistré cette page : elle peut apparaître dans ses résultats.' },
+  indexing: { label: 'En cours d’indexation', hint: 'Google ne l’a pas encore enregistrée. Il faut souvent quelques jours, parfois quelques semaines.' },
+  checking: { label: 'CNX vérifie cette page', hint: 'Quelque chose empêche Google de l’enregistrer. CNX Solutions s’en occupe.' },
+} as const

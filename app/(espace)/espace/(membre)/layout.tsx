@@ -13,8 +13,8 @@ export const dynamic = 'force-dynamic'
  * A refused session goes through /auth/deconnexion, which can clear the
  * cookies a server component cannot, and lands on the sign-in page saying why.
  *
- * L1 ships the frame and the home; the bottom navigation of design.md § 9.1
- * arrives with the pages it leads to (L2).
+ * No <main> here: the site layout ([siteId]/layout.tsx) puts its navigation
+ * beside the content, and a navigation does not belong inside <main>.
  */
 export default async function MemberLayout({ children }: { children: React.ReactNode }) {
   const result = await getClientSession()
@@ -37,7 +37,7 @@ export default async function MemberLayout({ children }: { children: React.React
           </form>
         </div>
       </header>
-      <main id="contenu" className="espace-main">{children}</main>
+      {children}
     </div>
   )
 }
