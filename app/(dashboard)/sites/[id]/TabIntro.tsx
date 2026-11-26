@@ -22,7 +22,7 @@ export function TabIntro({
 }) {
   return (
     <div className="tab-intro">
-      <div style={{ minWidth: 0 }}>
+      <div className="tab-intro__text">
         <h2 className="tab-intro__title">{title}</h2>
         {subtitle && <p className="tab-intro__subtitle">{subtitle}</p>}
       </div>

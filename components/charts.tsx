@@ -165,14 +165,19 @@ interface FrameProps {
   className?: string
 }
 
+/** A computed value handed to the stylesheet (components/ui.css): the only inline style left here. */
+function cssVars(vars: Record<`--${string}`, string>): React.CSSProperties {
+  return vars as React.CSSProperties
+}
+
 function ChartFrame({ title, description, legend, footer, children, className }: FrameProps) {
   return (
-    <figure className={`chart ${className ?? ''}`.trim()} style={{ margin: 0 }}>
+    <figure className={`chart chart__frame ${className ?? ''}`.trim()}>
       {(title || description || legend) && (
         <figcaption className="chart__head">
-          <div style={{ minWidth: 0 }}>
+          <div className="chart__titles">
             {title && <div className="card-title">{title}</div>}
-            {description && <div className="meta" style={{ marginTop: 2 }}>{description}</div>}
+            {description && <div className="meta chart__description">{description}</div>}
           </div>
           {legend}
         </figcaption>
@@ -196,7 +201,7 @@ function ChartTable({
   rows: Array<{ label: string; values: string[] }>
 }) {
   return (
-    <div className={visible ? 'scroll-x' : 'sr-only'} style={visible ? { marginTop: 'var(--space-3)' } : undefined}>
+    <div className={visible ? 'scroll-x chart__table' : 'sr-only'}>
       <table className="data-table">
         <caption className="sr-only">{caption}</caption>
         <thead>
@@ -237,11 +242,11 @@ interface TooltipState {
 function ChartTooltip({ state }: { state: TooltipState | null }) {
   if (!state) return null
   return (
-    <div className="chart-tooltip" style={{ left: state.x, top: state.y }} role="presentation">
+    <div className="chart-tooltip chart-tooltip--placed" style={cssVars({ '--tooltip-x': `${state.x}px`, '--tooltip-y': `${state.y}px` })} role="presentation">
       <div className="chart-tooltip__x">{state.heading}</div>
       {state.rows.map((row, i) => (
         <div key={i} className="chart-tooltip__row">
-          {row.color && <span className="chart-legend__rule" style={{ background: row.color }} aria-hidden="true" />}
+          {row.color && <span className="chart-legend__rule chart-legend__rule--series" style={cssVars({ '--series-color': row.color })} aria-hidden="true" />}
           <span className="chart-tooltip__name">{row.name}</span>
           <span className="chart-tooltip__value">{row.value}</span>
         </div>
@@ -251,7 +256,7 @@ function ChartTooltip({ state }: { state: TooltipState | null }) {
 }
 
 function EmptyChart({ height, message }: { height: number; message: string }) {
-  return <div className="chart-empty" style={{ height }}>{message}</div>
+  return <div className="chart-empty chart-empty--sized" style={cssVars({ '--chart-height': `${height}px` })}>{message}</div>
 }
 
 // ═══ Sparkline ═══════════════════════════════════════════════════════
@@ -307,13 +312,12 @@ export function Sparkline({
 
   return (
     <svg
-      className={className}
+      className={`sparkline ${className ?? ''}`.trim()}
       width={width}
       height={height}
       viewBox={`0 0 ${width} ${height}`}
       role="img"
       aria-label={ariaLabel ?? `Tendance sur ${clean.length} points`}
-      style={{ overflow: 'visible' }}
     >
       {variant === 'bars' ? (
         clean.map((v, i) => {
@@ -477,7 +481,7 @@ export function BarChart({
       footer={showTableToggle ? <TableToggle open={tableOpen} onToggle={() => setTableOpen((v) => !v)} id={tableId} /> : undefined}
       className={className}
     >
-      <div ref={ref} style={{ position: 'relative' }}>
+      <div ref={ref} className="chart__plot">
         <svg className="chart__svg" width={width} height={plotH} role="img" aria-label={title ?? 'Graphique en barres'}>
           {/* Grid — solid hairlines, one step off the surface, behind the marks. */}
           {g.scale.ticks.map((t, i) => {
@@ -498,7 +502,7 @@ export function BarChart({
                 textAnchor={horizontal ? 'middle' : 'end'}
                 fontSize={TICK_FONT}
                 fill="var(--chart-label)"
-                style={{ fontVariantNumeric: 'tabular-nums' }}
+                className="chart__num"
               >
                 {g.tickTexts[i]}
               </text>
@@ -532,7 +536,7 @@ export function BarChart({
                     fontSize={TICK_FONT}
                     fontWeight={600}
                     fill="var(--ink-secondary)"
-                    style={{ fontVariantNumeric: 'tabular-nums' }}
+                    className="chart__num"
                   >
                     {valueText}
                   </text>
@@ -731,7 +735,7 @@ export function LineChart({
         <div className="chart-legend">
           {live.map((s, i) => (
             <span key={s.id} className="chart-legend__item">
-              <span className="chart-legend__rule" style={{ background: slotColor(s, i) }} aria-hidden="true" />
+              <span className="chart-legend__rule chart-legend__rule--series" style={cssVars({ '--series-color': slotColor(s, i) })} aria-hidden="true" />
               {s.name}
             </span>
           ))}
@@ -740,7 +744,7 @@ export function LineChart({
       footer={showTableToggle ? <TableToggle open={tableOpen} onToggle={() => setTableOpen((v) => !v)} id={tableId} /> : undefined}
       className={className}
     >
-      <div ref={ref} style={{ position: 'relative' }}>
+      <div ref={ref} className="chart__plot">
         <svg
           className="chart__svg"
           width={width}
@@ -755,7 +759,7 @@ export function LineChart({
           {g.scale.ticks.map((t, i) => (
             <g key={i}>
               <line x1={g.padLeft} x2={g.padLeft + g.innerW} y1={g.toY(t)} y2={g.toY(t)} stroke="var(--chart-grid)" strokeWidth={1} />
-              <text x={g.padLeft - 8} y={g.toY(t) + 3.5} textAnchor="end" fontSize={TICK_FONT} fill="var(--chart-label)" style={{ fontVariantNumeric: 'tabular-nums' }}>
+              <text x={g.padLeft - 8} y={g.toY(t) + 3.5} textAnchor="end" fontSize={TICK_FONT} fill="var(--chart-label)" className="chart__num">
                 {g.tickTexts[i]}
               </text>
             </g>
@@ -794,7 +798,7 @@ export function LineChart({
                   <circle cx={g.toX(cursor)} cy={g.toY(s.points[cursor].value)} r={4} fill={colour} stroke="var(--chart-surface)" strokeWidth={2} />
                 )}
                 {endLabels && last && (
-                  <text x={g.toX(s.points.length - 1) + 8} y={endLabels[i] + 4} fontSize={TICK_FONT} fontWeight={600} fill="var(--ink-secondary)" style={{ fontVariantNumeric: 'tabular-nums' }}>
+                  <text x={g.toX(s.points.length - 1) + 8} y={endLabels[i] + 4} fontSize={TICK_FONT} fontWeight={600} fill="var(--ink-secondary)" className="chart__num">
                     {fmt(last.value)}
                   </text>
                 )}
@@ -1013,13 +1017,12 @@ export function SiteSwitcher({
   if (options.length === 0) return null
 
   return (
-    <div ref={rootRef} className={className} style={{ position: 'relative', minWidth: size === 'sm' ? 180 : 232 }} onKeyDown={onKeyDown}>
+    <div ref={rootRef} className={`site-select${size === 'sm' ? ' site-select--sm' : ''} ${className ?? ''}`.trim()} onKeyDown={onKeyDown}>
       <span id={`${uid}-label`} className="sr-only">{label}</span>
       <button
         ref={buttonRef}
         type="button"
-        className={`btn-secondary ${size === 'sm' ? 'btn-sm' : ''}`.trim()}
-        style={{ width: '100%', justifyContent: 'space-between', fontWeight: 500 }}
+        className={`btn-secondary site-select__button ${size === 'sm' ? 'btn-sm' : ''}`.trim()}
         aria-haspopup="listbox"
         aria-expanded={open}
         aria-labelledby={`${uid}-label ${uid}-button`}
@@ -1027,7 +1030,7 @@ export function SiteSwitcher({
         disabled={disabled}
         onClick={() => (open ? setOpen(false) : openList())}
       >
-        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 'var(--space-2)', minWidth: 0 }}>
+        <span className="site-select__current">
           <Globe size={14} color="var(--ink-muted)" />
           <span className="truncate">{selected?.name ?? label}</span>
         </span>
@@ -1048,10 +1051,10 @@ export function SiteSwitcher({
                 onMouseEnter={() => setActiveIndex(index)}
                 onClick={() => commit(option)}
               >
-                <Check size={13} style={{ opacity: isSelected ? 1 : 0 }} color="var(--accent-text)" />
-                <span style={{ minWidth: 0, flex: 1 }}>
-                  <span className="truncate" style={{ display: 'block' }}>{option.name}</span>
-                  {option.url && <span className="meta truncate" style={{ display: 'block' }}>{option.url}</span>}
+                <Check size={13} className={`site-select__check${isSelected ? ' site-select__check--on' : ''}`} color="var(--accent-text)" />
+                <span className="site-select__option">
+                  <span className="truncate site-select__line">{option.name}</span>
+                  {option.url && <span className="meta truncate site-select__line">{option.url}</span>}
                 </span>
                 {option.type && <span className="chip">{option.type}</span>}
               </li>
@@ -1080,7 +1083,10 @@ export function SiteSwitcher({
  * The scrim pads itself by --space-6 on each side and --space-12 is exactly
  * twice that, so the panel can never claim more room than the scrim leaves it.
  */
-const MODAL_MAX_HEIGHT = 'calc(100vh - var(--space-12))'
+/** A width given as a number is in pixels; a string is already a CSS length. */
+function cssLength(value: number | string): string {
+  return typeof value === 'number' ? `${value}px` : value
+}
 
 /** `md` is the slot detail of /calendar; `lg` the cycle plan, whose body is a table. */
 const MODAL_SIZES = { md: 580, lg: 1000 } as const
@@ -1173,40 +1179,19 @@ export function Modal({ open = true, onClose, title, subtitle, footer, size, wid
   if (!open) return null
 
   return (
-    <div
-      onClick={onClose}
-      style={{
-        // The token itself, not a copy of its value: the two `MODAL_Z = 100`
-        // constants this replaces were justified by a comment claiming csstype
-        // refuses a custom property here. The installed version does not — its
-        // ZIndex union carries `(string & {})`, verified against node_modules.
-        position: 'fixed', inset: 0, zIndex: 'var(--z-modal)',
-        background: 'var(--surface-scrim)', padding: 'var(--space-6)',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-      }}
-    >
+    <div onClick={onClose} className="modal__scrim">
       <div
         ref={panelRef}
-        className="panel"
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
         onClick={(event) => event.stopPropagation()}
         onKeyDown={onPanelKeyDown}
-        style={{
-          width: '100%',
-          maxWidth: width ?? maxWidth ?? (size ? MODAL_SIZES[size] : MODAL_DEFAULT_WIDTH),
-          // Flex column with the body as the ONLY scroller. An overflow on the
-          // panel itself would carry the header and the confirming button out
-          // of sight on a short screen, and cancel the body's own .scroll-x.
-          maxHeight: MODAL_MAX_HEIGHT,
-          display: 'flex',
-          flexDirection: 'column',
-          boxShadow: 'var(--shadow-lg)',
-        }}
+        className="panel modal__panel"
+        style={cssVars({ '--modal-width': cssLength(width ?? maxWidth ?? (size ? MODAL_SIZES[size] : MODAL_DEFAULT_WIDTH)) })}
       >
-        <div className="panel__header" style={{ flexShrink: 0 }}>
-          <div style={{ minWidth: 0 }}>
+        <div className="panel__header modal__head">
+          <div className="modal__titles">
             <h2 className="card-title" id={titleId}>{title}</h2>
             {subtitle && <div className="meta">{subtitle}</div>}
           </div>
@@ -1215,9 +1200,9 @@ export function Modal({ open = true, onClose, title, subtitle, footer, size, wid
           </button>
         </div>
 
-        <div style={{ overflowY: 'auto', minHeight: 0, flex: 1 }}>{children}</div>
+        <div className="modal__body">{children}</div>
 
-        {footer && <div className="panel__footer" style={{ flexShrink: 0 }}>{footer}</div>}
+        {footer && <div className="panel__footer modal__foot">{footer}</div>}
       </div>
     </div>
   )
@@ -1275,7 +1260,7 @@ export function ConfirmModal({
       title={title}
       size="md"
       footer={
-        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 'var(--space-3)', flexWrap: 'wrap' }}>
+        <div className="modal__actions">
           <Button variant="secondary" onClick={onClose} disabled={inFlight}>{cancelLabel}</Button>
           {/* The destructive act carries a glyph as well as the red: colour
               alone is not a warning for a reader who cannot see it. */}
@@ -1293,19 +1278,16 @@ export function ConfirmModal({
         </div>
       }
     >
-      <div className="panel__body" style={{ display: 'grid', gap: 'var(--space-4)' }}>
+      <div className="panel__body modal__confirm-body">
         {danger ? (
-          <div
-            className="inset"
-            style={{ borderLeft: '3px solid var(--status-critical)', display: 'flex', gap: 'var(--space-3)', alignItems: 'flex-start' }}
-          >
-            <TriangleAlert size={16} color="var(--status-critical)" style={{ flexShrink: 0, marginTop: 2 }} aria-hidden="true" />
+          <div className="inset modal__danger">
+            <TriangleAlert size={16} color="var(--status-critical)" className="notice__icon" aria-hidden="true" />
             {/* --ink-secondary, not .meta: --ink-muted on --surface-inset is
                 4,42:1, under AA, and this is the text the decision rests on. */}
-            <div style={{ color: 'var(--ink-secondary)' }}>{body}</div>
+            <div className="modal__text">{body}</div>
           </div>
         ) : (
-          <div style={{ color: 'var(--ink-secondary)' }}>{body}</div>
+          <div className="modal__text">{body}</div>
         )}
         {children}
       </div>

@@ -83,9 +83,13 @@ export function formatMetric(value: number, format: ValueFormat = 'number', opti
   }
 }
 
-/** A tint that works whether `color` is a hex literal or a CSS custom property. */
-function tint(color: string, percent: number): string {
-  return `color-mix(in srgb, ${color} ${percent}%, transparent)`
+/**
+ * The one inline style left in this module: CSS custom properties carrying a
+ * value computed from props (a colour the caller chose, a bar's length). The
+ * presentation itself lives in components/ui.css.
+ */
+function cssVars(vars: Record<`--${string}`, string>): React.CSSProperties {
+  return vars as React.CSSProperties
 }
 
 // ── PageHeader ──────────────────────────────────────────────
@@ -119,42 +123,32 @@ export function PageHeader({
   action, secondaryAction, actions, meta, backHref, children,
 }: PageHeaderProps) {
   return (
-    <header style={{ marginBottom: 'var(--space-6)' }}>
-      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 'var(--space-6)' }}>
-        <div style={{ minWidth: 0 }}>
+    <header className="page-header" style={cssVars({ '--page-header-color': iconColor })}>
+      <div className="page-header__row">
+        <div className="page-header__main">
           {backHref && (
-            <Link href={backHref} className="btn-link" style={{ marginBottom: 'var(--space-2)' }}>
+            <Link href={backHref} className="btn-link page-header__back">
               <ArrowLeft size={12} /> Retour
             </Link>
           )}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', marginBottom: 'var(--space-2)' }}>
-            <span
-              style={{
-                width: 22, height: 22, borderRadius: 'var(--radius-sm)',
-                background: tint(iconColor, 12),
-                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-              }}
-            >
+          <div className="page-header__eyebrow">
+            <span className="page-header__icon">
               <Icon size={13} color={iconColor} strokeWidth={2.2} />
             </span>
-            <span className="eyebrow" style={{ color: iconColor }}>{badge}</span>
+            <span className="eyebrow page-header__badge">{badge}</span>
           </div>
           <h1 className="section-title">{title}</h1>
           {subtitle && <p className="section-subtitle section-subtitle--flush">{subtitle}</p>}
-          {meta && (
-            <div className="meta" style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--space-1) var(--space-4)', marginTop: 'var(--space-2)' }}>
-              {meta}
-            </div>
-          )}
+          {meta && <div className="meta page-header__meta">{meta}</div>}
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', flexShrink: 0 }}>
+        <div className="page-header__actions">
           {actions}
           {secondaryAction && <HeaderButton action={secondaryAction} variant="btn-ghost" />}
           {action && <HeaderButton action={action} variant="btn-primary" />}
         </div>
       </div>
-      {children && <div style={{ marginTop: 'var(--space-5)' }}>{children}</div>}
+      {children && <div className="page-header__children">{children}</div>}
     </header>
   )
 }
@@ -187,8 +181,8 @@ export function FormField({ label, hint, children, htmlFor, error, required }: F
     <div>
       <label className="field-label" htmlFor={htmlFor}>
         {label}
-        {required && <span style={{ color: 'var(--status-critical-text)', marginLeft: 3 }} aria-hidden="true">*</span>}
-        {hint && !error && <span className="field-hint" style={{ marginLeft: 'var(--space-2)' }}>{hint}</span>}
+        {required && <span className="form-field__required" aria-hidden="true">*</span>}
+        {hint && !error && <span className="field-hint form-field__hint">{hint}</span>}
       </label>
       {children}
       {error && <FieldError>{error}</FieldError>}
@@ -206,7 +200,7 @@ export function FormField({ label, hint, children, htmlFor, error, required }: F
  */
 export function FieldError({ children }: { children: React.ReactNode }) {
   return (
-    <p style={{ marginTop: 'var(--space-1)', fontSize: 'var(--fs-xs)', color: 'var(--status-critical-text)', display: 'flex', alignItems: 'center', gap: 4 }}>
+    <p className="field-error">
       <TriangleAlert size={12} /> {children}
     </p>
   )
@@ -273,13 +267,7 @@ export function EmptyState({
         <div className="empty__icons">{icons}</div>
       ) : (
         <div className="empty__icons">
-          <span
-            style={{
-              width: 44, height: 44, borderRadius: 'var(--radius-lg)',
-              background: tint(preset.color, 12),
-              display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-            }}
-          >
+          <span className={`empty__glyph empty__glyph--${variant}`}>
             <Icon size={20} color={preset.color} strokeWidth={1.8} />
           </span>
         </div>
@@ -314,12 +302,10 @@ interface IconBoxProps {
 
 export function IconBox({ icon: Icon, color, size = 18, boxSize = 36 }: IconBoxProps) {
   return (
-    <span style={{
-      width: boxSize, height: boxSize, minWidth: boxSize,
-      background: tint(color, 12),
-      borderRadius: Math.round(boxSize * 0.25),
-      display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-    }}>
+    <span
+      className="icon-box"
+      style={cssVars({ '--icon-box-size': `${boxSize}px`, '--icon-box-radius': `${Math.round(boxSize * 0.25)}px`, '--icon-box-color': color })}
+    >
       <Icon size={size} color={color} strokeWidth={2} />
     </span>
   )
@@ -490,7 +476,7 @@ function DeltaTag({ delta }: { delta: StatDelta }) {
     <span className={`delta delta--${tone}`}>
       <Arrow size={12} strokeWidth={2.4} aria-hidden="true" />
       {formatMetric(delta.value, delta.format ?? 'number', { decimals: delta.decimals, unit: delta.unit, signed: true })}
-      {delta.period && <span style={{ color: 'var(--ink-muted)', fontWeight: 500 }}>vs {delta.period}</span>}
+      {delta.period && <span className="delta__period">vs {delta.period}</span>}
     </span>
   )
 }
@@ -502,13 +488,13 @@ export function StatTile({
 
   const content = (
     <>
-      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 'var(--space-3)' }}>
-        <span className="stat-label" style={{ marginTop: 0 }}>{label}</span>
+      <div className="stat-card__head">
+        <span className="stat-label stat-label--flush">{label}</span>
         {Icon && <Icon size={15} color="var(--ink-faint)" strokeWidth={2} />}
       </div>
-      <div className="stat-value" style={{ marginTop: 'var(--space-2)' }}>{display}</div>
-      <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 'var(--space-3)', marginTop: 'var(--space-2)', minHeight: 20 }}>
-        <span style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
+      <div className="stat-value stat-card__value">{display}</div>
+      <div className="stat-card__foot">
+        <span className="stat-card__notes">
           {delta && <DeltaTag delta={delta} />}
           {hint && <span className="meta truncate">{hint}</span>}
         </span>
@@ -517,13 +503,13 @@ export function StatTile({
     </>
   )
 
-  const style: React.CSSProperties = emphasis
-    ? { borderColor: 'var(--accent)', boxShadow: '0 0 0 1px var(--accent-wash)' }
-    : {}
+  const classes = ['stat-card', href ? 'card--interactive stat-card--link' : '', emphasis ? 'stat-card--emphasis' : '', className ?? '']
+    .filter(Boolean)
+    .join(' ')
 
   return href
-    ? <Link href={href} className={`stat-card card--interactive ${className ?? ''}`.trim()} style={{ display: 'block', ...style }}>{content}</Link>
-    : <div className={`stat-card ${className ?? ''}`.trim()} style={style}>{content}</div>
+    ? <Link href={href} className={classes}>{content}</Link>
+    : <div className={classes}>{content}</div>
 }
 
 // ── HeroFigure ──────────────────────────────────────────────
@@ -544,13 +530,13 @@ export function HeroFigure({ label, value, format = 'compact', decimals, unit, d
   const display = typeof value === 'number' ? formatMetric(value, format, { decimals, unit }) : value
   return (
     <div className={className}>
-      <div className="stat-label" style={{ marginTop: 0 }}>{label}</div>
-      <div style={{ display: 'flex', alignItems: 'flex-end', gap: 'var(--space-4)', marginTop: 'var(--space-2)' }}>
+      <div className="stat-label stat-label--flush">{label}</div>
+      <div className="hero-figure__row">
         <span className="hero-figure">{display}</span>
-        {delta && <span style={{ paddingBottom: 6 }}><DeltaTag delta={delta} /></span>}
-        {trend && <span style={{ marginLeft: 'auto' }}>{trend}</span>}
+        {delta && <span className="hero-figure__delta"><DeltaTag delta={delta} /></span>}
+        {trend && <span className="hero-figure__trend">{trend}</span>}
       </div>
-      {caption && <div className="meta" style={{ marginTop: 'var(--space-2)' }}>{caption}</div>}
+      {caption && <div className="meta hero-figure__caption">{caption}</div>}
     </div>
   )
 }
@@ -589,9 +575,9 @@ export function Meter({ value, max = 100, label, valueLabel, tone = 'accent', th
   return (
     <div className={className}>
       {(label || valueLabel) && (
-        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 'var(--space-3)', marginBottom: 'var(--space-2)' }}>
+        <div className="meter__head">
           {label && <span className="meta">{label}</span>}
-          <span className="meta num" style={{ color: 'var(--ink-primary)', fontWeight: 600 }}>
+          <span className="meta num meter__readout">
             {valueLabel ?? `${formatMetric(value)} / ${formatMetric(max)}`}
           </span>
         </div>
@@ -604,7 +590,7 @@ export function Meter({ value, max = 100, label, valueLabel, tone = 'accent', th
         aria-valuemax={max}
         aria-label={label}
       >
-        <div className="meter__fill" style={{ width: `${ratio * 100}%` }} />
+        <div className="meter__fill meter__fill--ratio" style={cssVars({ '--meter-fill': `${ratio * 100}%` })} />
       </div>
     </div>
   )
@@ -673,22 +659,14 @@ interface SchemaFieldProps {
  */
 export function SchemaField({ name, type, required, description, children }: SchemaFieldProps) {
   return (
-    <div style={{
-      display: 'flex',
-      alignItems: 'flex-start',
-      gap: 'var(--space-3)',
-      padding: 'var(--space-3)',
-      background: 'var(--surface-card)',
-      borderRadius: 'var(--radius-md)',
-      border: '1px solid var(--line)',
-    }}>
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', flexWrap: 'wrap' }}>
-          <code style={{ fontSize: 'var(--fs-sm)', fontWeight: 600, color: 'var(--ink-primary)' }}>{name}</code>
+    <div className="schema-field">
+      <div className="schema-field__body">
+        <div className="schema-field__head">
+          <code className="schema-field__name">{name}</code>
           <span className="chip">{type}</span>
           {required && <span className="badge badge-danger">Requis</span>}
         </div>
-        {description && <p className="meta" style={{ marginTop: 'var(--space-1)' }}>{description}</p>}
+        {description && <p className="meta schema-field__description">{description}</p>}
         {children}
       </div>
     </div>
@@ -713,40 +691,22 @@ export function ContentTypeCard({ name, label, fieldCount, requiredCount, isExpa
         type="button"
         onClick={onToggle}
         aria-expanded={isExpanded}
-        style={{
-          width: '100%',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          gap: 'var(--space-4)',
-          padding: 'var(--space-3) var(--space-4)',
-          background: 'transparent',
-          border: 'none',
-          textAlign: 'left',
-        }}
+        className="content-type__toggle"
       >
-        <div style={{ minWidth: 0 }}>
-          <div style={{ fontWeight: 600, color: 'var(--ink-primary)' }}>{label}</div>
+        <div className="content-type__title">
+          <div className="content-type__label">{label}</div>
           <div className="meta mono">{name}</div>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+        <div className="content-type__counts">
           <span className="badge badge-muted">{fieldCount} champs</span>
           {requiredCount > 0 && <span className="badge badge-info">{requiredCount} requis</span>}
-          <span
-            aria-hidden="true"
-            style={{
-              color: 'var(--ink-muted)',
-              transition: 'transform var(--dur) var(--ease)',
-              transform: isExpanded ? 'rotate(180deg)' : 'rotate(0deg)',
-              fontSize: 10,
-            }}
-          >
+          <span aria-hidden="true" className={`content-type__chevron${isExpanded ? ' content-type__chevron--open' : ''}`}>
             ▼
           </span>
         </div>
       </button>
       {isExpanded && children && (
-        <div style={{ padding: '0 var(--space-4) var(--space-4)', display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
+        <div className="content-type__fields">
           {children}
         </div>
       )}
@@ -771,7 +731,7 @@ export function SeoConfigBadge({ plugin, schemaTypes = [] }: SeoConfigBadgeProps
   const label = plugin ? SEO_PLUGIN_LABELS[plugin] ?? plugin : null
 
   return (
-    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--space-2)', alignItems: 'center' }}>
+    <div className="seo-config">
       {label
         ? <StatusBadge status="connected" label={label} />
         : <StatusBadge status="stale" label="Aucun plugin SEO détecté" />}
@@ -849,7 +809,7 @@ export function RiskBadge({ level, label, size = 'md' }: { level: RiskLevel; lab
   // is nothing but a coloured square with a glyph — the exact failure this
   // component exists to prevent. The word is never optional.
   return (
-    <span className={preset.cls} style={size === 'sm' ? { padding: '0.0625rem 0.375rem' } : undefined}>
+    <span className={`${preset.cls}${size === 'sm' ? ' risk-badge--sm' : ''}`}>
       <Icon size={11} strokeWidth={2.4} aria-hidden="true" />
       {label || preset.label}
     </span>
@@ -891,19 +851,19 @@ export function SimilarityScore({ value, threshold, label, partial, className }:
   return (
     <div className={className}>
       <div className="meta">{label}</div>
-      <div style={{ display: 'flex', alignItems: 'baseline', flexWrap: 'wrap', gap: 'var(--space-2)', marginTop: 'var(--space-1)' }}>
-        <span className="num" style={{ fontSize: 'var(--fs-md)', fontWeight: 700, color: partial ? 'var(--ink-muted)' : 'var(--ink-primary)' }}>
+      <div className="similarity__figures">
+        <span className={`num similarity__score${partial ? ' similarity__score--partial' : ''}`}>
           {formatMetric(value * 100, 'number', { decimals: 0 })}
         </span>
-        <span className="num" style={{ fontSize: 'var(--fs-sm)', color: 'var(--ink-muted)' }}>/ 100</span>
+        <span className="num similarity__scale">/ 100</span>
         {/* The threshold is a figure the operator decides on, so it does not
             wear `.meta`: --ink-muted on --surface-inset measures 4.42:1, under AA. */}
-        <span className="num" style={{ fontSize: 'var(--fs-xs)', color: 'var(--ink-secondary)' }}>
+        <span className="num similarity__threshold">
           · seuil {formatMetric(threshold * 100, 'number', { decimals: 0 })}
         </span>
         <RiskBadge level={level} size="sm" />
       </div>
-      <div style={{ marginTop: 'var(--space-2)' }}>
+      <div className="similarity__meter">
         <Meter
           value={value}
           max={1}
@@ -915,7 +875,7 @@ export function SimilarityScore({ value, threshold, label, partial, className }:
       {partial && (
         // No character count here: the excerpt cap belongs to the crawler, and
         // a figure copied into the design system outlives the truth it quoted.
-        <p style={{ marginTop: 'var(--space-1)', fontSize: 'var(--fs-xs)', color: 'var(--ink-secondary)', lineHeight: 'var(--lh-snug)' }}>
+        <p className="similarity__partial">
           Comparée à un extrait de la page, pas à son texte complet — un score bas ne prouve rien.
         </p>
       )}
@@ -960,12 +920,12 @@ export function ComparePanel({ left, right, title, risk, children }: {
     <section className="panel">
       {(title || risk) && (
         <div className="panel__header">
-          <h3 className="card-title" style={{ minWidth: 0 }}>{title ?? 'Comparaison'}</h3>
+          <h3 className="card-title compare__title">{title ?? 'Comparaison'}</h3>
           {risk && <RiskBadge level={risk} />}
         </div>
       )}
       <div className="panel__body--flush">
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))' }}>
+        <div className="compare__columns">
           <CompareColumn side={left} />
           <CompareColumn side={right} />
         </div>
@@ -980,21 +940,17 @@ export function ComparePanel({ left, right, title, risk, children }: {
 function CompareColumn({ side }: { side: CompareSide }) {
   const proposed = side.kind === 'proposee'
   return (
-    <div style={{
-      minWidth: 0,
-      padding: 'var(--space-4) var(--space-5)',
-      borderLeft: `2px solid ${proposed ? 'var(--accent)' : 'var(--line-strong)'}`,
-    }}>
-      <div className="eyebrow" style={proposed ? { color: 'var(--accent-text)' } : undefined}>
+    <div className={`compare__column${proposed ? ' compare__column--proposed' : ''}`}>
+      <div className={`eyebrow${proposed ? ' compare__eyebrow--proposed' : ''}`}>
         {proposed ? 'Page proposée' : 'Page en ligne'}
       </div>
-      <div style={{ marginTop: 'var(--space-2)' }}>
+      <div className="compare__path">
         <span className="chip">{side.path}</span>
       </div>
-      {side.url && <div className="meta truncate" style={{ marginTop: 'var(--space-1)' }}>{side.url}</div>}
-      {side.observedAt && <div className="meta" style={{ marginTop: 'var(--space-1)' }}>Observée le {formatDayLong(side.observedAt)}</div>}
+      {side.url && <div className="meta truncate compare__line">{side.url}</div>}
+      {side.observedAt && <div className="meta compare__line">Observée le {formatDayLong(side.observedAt)}</div>}
       {side.note && (
-        <p style={{ marginTop: 'var(--space-2)', fontSize: 'var(--fs-sm)', color: 'var(--ink-secondary)', lineHeight: 'var(--lh-snug)' }}>
+        <p className="compare__note">
           {side.note}
         </p>
       )}
@@ -1019,14 +975,14 @@ export function CompareField({ label, before, after, similarity, threshold, part
   partial?: boolean
 }) {
   return (
-    <div style={{ padding: 'var(--space-4) var(--space-5)', borderTop: '1px solid var(--line)' }}>
+    <div className="compare__field">
       <div className="field-label">{label}</div>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 'var(--space-4)' }}>
+      <div className="compare__values">
         <CompareValue kind="existante" value={before} />
         <CompareValue kind="proposee" value={after} />
       </div>
       {similarity !== undefined && threshold !== undefined && (
-        <div style={{ marginTop: 'var(--space-3)' }}>
+        <div className="compare__similarity">
           <SimilarityScore value={similarity} threshold={threshold} label={label} partial={partial} />
         </div>
       )}
@@ -1039,15 +995,7 @@ export function CompareField({ label, before, after, similarity, threshold, part
 function CompareValue({ kind, value }: { kind: CompareSide['kind']; value: string }) {
   const proposed = kind === 'proposee'
   return (
-    <p style={{
-      margin: 0,
-      minWidth: 0,
-      paddingLeft: 'var(--space-3)',
-      borderLeft: `2px solid ${proposed ? 'var(--accent)' : 'var(--line-strong)'}`,
-      fontSize: 'var(--fs-sm)',
-      color: 'var(--ink-secondary)',
-      lineHeight: 'var(--lh-snug)',
-    }}>
+    <p className={`compare__value${proposed ? ' compare__value--proposed' : ''}`}>
       <span className="sr-only">{proposed ? 'Page proposée : ' : 'Page en ligne : '}</span>
       {value}
     </p>
@@ -1092,31 +1040,11 @@ export function Notice({ tone, title, body, icon, action, onDismiss, inline, chi
   const Icon = icon ?? preset.icon
 
   return (
-    <div
-      className={inline ? 'inset' : 'glass-card'}
-      style={{
-        borderLeft: `3px solid ${preset.mark}`,
-        marginBottom: inline ? 0 : 'var(--space-5)',
-        display: 'flex',
-        gap: 'var(--space-3)',
-        alignItems: 'flex-start',
-      }}
-    >
-      <Icon size={16} color={preset.mark} strokeWidth={2.2} aria-hidden="true" style={{ flexShrink: 0, marginTop: 2 }} />
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <strong style={{ fontSize: 'var(--fs-sm)', fontWeight: 600, color: preset.text }}>{title}</strong>
-        {body && (
-          <p style={{
-            fontSize: 'var(--fs-sm)',
-            color: 'var(--ink-secondary)',
-            margin: '0.25rem 0 0',
-            lineHeight: 1.55,
-            // Kept from the /sites/new copy this replaces: the bodies fed to a
-            // Notice are error strings, and an unbroken URL or token in one of
-            // them would otherwise push the card past the viewport.
-            overflowWrap: 'anywhere',
-          }}>{body}</p>
-        )}
+    <div className={`${inline ? 'inset' : 'glass-card'} notice notice--${tone}${inline ? ' notice--inline' : ''}`}>
+      <Icon size={16} color={preset.mark} strokeWidth={2.2} aria-hidden="true" className="notice__icon" />
+      <div className="notice__content">
+        <strong className="notice__title">{title}</strong>
+        {body && <p className="notice__body">{body}</p>}
         {children}
       </div>
       {action && (
@@ -1157,24 +1085,12 @@ export function ReasonList({ title, reasons, tone = 'critical' }: {
 
   return (
     <div className="inset">
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 'var(--space-1)',
-          fontSize: 'var(--fs-2xs)',
-          fontWeight: 650,
-          textTransform: 'uppercase',
-          letterSpacing: 'var(--ls-eyebrow)',
-          color: critical ? 'var(--status-critical-text)' : 'var(--accent-text)',
-          marginBottom: 'var(--space-2)',
-        }}
-      >
+      <div className={`reason-list__heading${critical ? '' : ' reason-list__heading--info'}`}>
         <Icon size={12} aria-hidden="true" />
         {title}
       </div>
       {reasons.length > 0 && (
-        <ul style={{ margin: 0, paddingLeft: '1.1rem', fontSize: 'var(--fs-xs)', color: 'var(--ink-secondary)', lineHeight: 1.7 }}>
+        <ul className="reason-list__items">
           {reasons.map((reason, i) => (
             <li key={i}>{reason}</li>
           ))}
@@ -1223,24 +1139,24 @@ export function GbpPostPreview({ businessName, summary, cta, maxChars, target, c
   const overflow = summary.length > maxChars
 
   return (
-    <section className={`panel ${className ?? ''}`.trim()} style={{ maxWidth: '22rem' }}>
+    <section className={`panel gbp-preview ${className ?? ''}`.trim()}>
       <div className="panel__header">
-        <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)', minWidth: 0 }}>
+        <div className="gbp-preview__identity">
           <IconBox icon={MapPin} color="var(--series-3)" boxSize={28} size={14} />
-          <div style={{ minWidth: 0 }}>
-            <div className="truncate" style={{ fontSize: 'var(--fs-sm)', fontWeight: 600, color: 'var(--ink-primary)' }}>{businessName}</div>
+          <div className="gbp-preview__who">
+            <div className="truncate gbp-preview__business">{businessName}</div>
             <div className="meta">Post sur la fiche</div>
           </div>
         </div>
       </div>
 
       <div className="panel__body">
-        <p style={{ margin: 0, fontSize: 'var(--fs-sm)', color: 'var(--ink-secondary)', whiteSpace: 'pre-wrap', lineHeight: 'var(--lh-normal)' }}>
+        <p className="gbp-preview__summary">
           {overflow ? summary.slice(0, maxChars) : summary}
           {overflow && (
             // The wavy underline is a SHAPE. A wash alone would leave the
             // overflow invisible in greyscale, which is where it matters most.
-            <span style={{ background: 'var(--status-critical-wash)', textDecoration: 'underline wavy var(--status-critical)' }}>
+            <span className="gbp-preview__overflow">
               {summary.slice(maxChars)}
             </span>
           )}
@@ -1251,13 +1167,13 @@ export function GbpPostPreview({ businessName, summary, cta, maxChars, target, c
             <hr className="divider" />
             {/* Google renders the call to action as a text link. A filled
                 button here would promise a rendering that never happens. */}
-            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 'var(--space-1)', color: 'var(--accent-text)', fontWeight: 600, fontSize: 'var(--fs-sm)' }}>
+            <span className="gbp-preview__cta">
               {cta.label}
               <ArrowRight size={13} aria-hidden="true" />
             </span>
             {/* 'CALL' carries no url — showing one would invent a destination. */}
             {cta.actionType !== 'CALL' && cta.url && (
-              <div className="meta truncate" style={{ marginTop: 'var(--space-1)' }}>{cta.url}</div>
+              <div className="meta truncate gbp-preview__url">{cta.url}</div>
             )}
           </>
         )}
@@ -1272,7 +1188,7 @@ export function GbpPostPreview({ businessName, summary, cta, maxChars, target, c
           label="Longueur"
           valueLabel={`${summary.length} / ${maxChars} car. · cible ${target.min}–${target.max}`}
         />
-        <p className="meta" style={{ marginTop: 'var(--space-2)' }}>Limites à confirmer contre l’API Google.</p>
+        <p className="meta gbp-preview__limits">Limites à confirmer contre l’API Google.</p>
       </div>
     </section>
   )
@@ -1289,21 +1205,13 @@ export function GbpPostPreview({ businessName, summary, cta, maxChars, target, c
  */
 export function SourceNote({ source, period, note }: { source: string; period: string; note?: React.ReactNode }) {
   return (
-    <p
-      className="meta"
-      style={{
-        margin: `0 0 var(--space-5)`,
-        display: 'flex',
-        flexWrap: 'wrap',
-        gap: 'var(--space-1) var(--space-3)',
-      }}
-    >
+    <p className="meta source-note">
       <span>
-        <strong style={{ color: 'var(--ink-secondary)', fontWeight: 600 }}>Source</strong> {source}
+        <strong className="source-note__label">Source</strong> {source}
       </span>
       <span aria-hidden>·</span>
       <span>
-        <strong style={{ color: 'var(--ink-secondary)', fontWeight: 600 }}>Période</strong> {period}
+        <strong className="source-note__label">Période</strong> {period}
       </span>
       {note && (
         <>
@@ -1322,17 +1230,10 @@ export function SourceNote({ source, period, note }: { source: string; period: s
  */
 export function MagnitudeBar({ value, max }: { value: number; max: number }) {
   return (
-    <div
-      aria-hidden="true"
-      style={{ height: 6, width: '100%', background: 'var(--surface-inset)', borderRadius: '0 3px 3px 0' }}
-    >
+    <div aria-hidden="true" className="magnitude-bar">
       <div
-        style={{
-          height: '100%',
-          width: `${max > 0 ? Math.max((value / max) * 100, value > 0 ? 2 : 0) : 0}%`,
-          background: 'var(--series-1)',
-          borderRadius: '0 3px 3px 0',
-        }}
+        className="magnitude-bar__fill"
+        style={cssVars({ '--magnitude': `${max > 0 ? Math.max((value / max) * 100, value > 0 ? 2 : 0) : 0}%` })}
       />
     </div>
   )
