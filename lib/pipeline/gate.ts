@@ -337,7 +337,6 @@ export interface GateInput {
  */
 export function buildQualityConfig(opts: {
   targetWordCount: number
-  expectsImages?: boolean
 }): ContentQualityConfig {
   const target = opts.targetWordCount > 0 ? opts.targetWordCount : 300
 
@@ -349,7 +348,8 @@ export function buildQualityConfig(opts: {
     minParagraphCount: 3,
     minHeadingCount: 2,
     requiredHeadings: ['h2'],
-    minImageCount: opts.expectsImages ? 1 : 0,
+    // The engine ships no image: a missing one is not a finding.
+    minImageCount: 0,
     imageAltRequired: true,
     // Internal and external links are audited against the real site by
     // internal-links.ts; counting them here would double-report.

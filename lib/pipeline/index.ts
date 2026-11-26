@@ -101,7 +101,7 @@ export interface PipelineContext<P extends GeneratedPage = GeneratedPage> {
    * first place, passes the whole row and therefore both.
    */
   campaign?:
-    | (Pick<Campaign, 'target_length' | 'enable_images' | 'enable_external_links'>
+    | (Pick<Campaign, 'target_length' | 'enable_external_links'>
       & Partial<Pick<Campaign, 'communes' | 'business_name'>>)
     | null
   planBrief?: PlanItemBrief | null
@@ -460,7 +460,6 @@ async function runPipeline<P extends GeneratedPage>(
     anomalies: (context.page as Partial<GeneratedSeoPage>).anomalies,
     quality: buildQualityConfig({
       targetWordCount: measurement.target,
-      expectsImages: context.campaign?.enable_images ?? false,
     }),
     seo: buildSeoConfig(),
 

@@ -39,7 +39,7 @@ production n'est touchee que pour appliquer une migration avant un merge.
 npm run dev          # http://localhost:3000
 npm run lint         # ESLint          — 0 erreur attendue (33 warnings tolerees)
 npm run typecheck    # tsc --noEmit    — 0 erreur attendue
-npm test             # Vitest          — 1 428 tests (99 fichiers), tous verts
+npm test             # Vitest          — 1 411 tests (98 fichiers), tous verts
 npm run build        # build local (sans sortie standalone, voir next.config.ts)
 ```
 
@@ -221,7 +221,7 @@ Auth). Une fuite d'un client vers un autre est LE risque du chantier :
 - **Cache GitHub Actions cloisonne par branche** : `main` ne lit pas le cache
   cree sur une branche de PR. Le premier build apres un merge repart de zero.
 - **Vitest echoue en bloc sous Git Bash** quand le chemin courant commence par
-  un lecteur en minuscule (`c:/laragon/...`) : les 99 fichiers tombent avec
+  un lecteur en minuscule (`c:/laragon/...`) : les 98 fichiers tombent avec
   « Cannot read properties of undefined (reading 'config') », zero test lance.
   Ce n'est pas le code : lancer `npm test` depuis PowerShell, ou `cd /C/laragon/...`.
 

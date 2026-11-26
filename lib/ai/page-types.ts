@@ -33,8 +33,6 @@ export interface PageTypeGenerateOptions {
   model?: string
   enableExternalLinks?: boolean
   externalLinkCount?: number
-  enableImages?: boolean
-  imagePerPage?: number
   pillarSlug?: string
   pillarTitle?: string
   competitorNames?: string[]
@@ -418,7 +416,6 @@ export async function generateSeoPage(opts: PageTypeGenerateOptions): Promise<Ge
     model = 'claude-haiku',
     enableExternalLinks = true,
     externalLinkCount = 3,
-    imagePerPage = 1,
     pillarSlug,
     pillarTitle,
     competitorNames = [],
@@ -482,7 +479,6 @@ export async function generateSeoPage(opts: PageTypeGenerateOptions): Promise<Ge
   }
 
   const systemPrompt = buildSystemPrompt(pageType, config.systemPromptExtra, searchIntent, !city.trim())
-  const wantsImage = wantsHeroImage(opts)
   const userPrompt = buildUserPrompt({
     pageType,
     city,
@@ -494,8 +490,6 @@ export async function generateSeoPage(opts: PageTypeGenerateOptions): Promise<Ge
     adjustedLength,
     enableExternalLinks,
     externalLinkCount,
-    enableImages: wantsImage,
-    imagePerPage,
     minFaq: config.minFaq,
     requiredSections: config.requiredSections,
     pillarSlug,
@@ -586,8 +580,6 @@ export function buildUserPrompt(opts: {
   adjustedLength: number
   enableExternalLinks: boolean
   externalLinkCount: number
-  enableImages: boolean
-  imagePerPage: number
   minFaq: number
   requiredSections: string[]
   pillarSlug?: string
@@ -639,15 +631,6 @@ export function buildUserPrompt(opts: {
 - Une URL dont tu n'es pas certain est remplacee par la page d'accueil du domaine officiel. Jamais d'URL inventee.
 - Format: {"url": "https://...", "anchor": "texte d'ancrage", "domain": "example.com", "relevance": "pourquoi ce lien est pertinent"}`
     : '- Pas de liens externes.'
-
-  // One photo at most, generated at publication from what the model writes here.
-  const imagesBlock = opts.enableImages
-    ? `
-- Une photo realiste sera generee pour l'en-tete de la page, a partir de ta description.
-- "imagePrompt" : EN ANGLAIS, une ou deux phrases qui decrivent la scene de cette photo (lieu, personnes,
-  action) et illustrent le sujet de la page. Aucun texte, logo, marque ni ecran lisible dans la scene.
-- "imageAlts" : UN seul texte alternatif, en francais, qui dit ce que montre la photo.`
-    : '- Pas d\'image : "imagePrompt" vide et "imageAlts" vide.'
 
   const briefBlock = opts.planBrief
     ? `
@@ -746,9 +729,6 @@ Couvrir le sujet dans la fourchette, puis s'arreter.
 MAILLAGE EXTERNE:
 ${externalLinksBlock}
 
-IMAGES:
-${imagesBlock}
-
 REPONDS EN JSON avec cette structure :
 {
   "title": "string (max 65 chars, intention specifique, mot-cle focus inclus ; une question seulement si elle est bien formee, jamais un '?' ajoute a un groupe nominal)",
@@ -773,8 +753,6 @@ REPONDS EN JSON avec cette structure :
   "internalLinks": [{"anchor": "string", "suggestion": "slug de la page cible"}],
   "internalLinksHtml": ["<a href='/url'>ancre</a>"],
   "faqItems": [{"q": "string", "a": "string"}],
-  "imageAlts": ["string"],
-  "imagePrompt": "string (anglais : la scene de la photo d'en-tete, vide si pas d'image)",
   "externalLinks": [{"url": "string", "anchor": "string", "domain": "string", "relevance": "string"}],
   "relatedSlugs": ["slugs de pages liees suggerees"],
   "ctaText": "Nous contacter",
@@ -1055,8 +1033,6 @@ export function normalizeResponse(
     internalLinksHtml: Array.isArray(p.internalLinksHtml) ? p.internalLinksHtml : [],
     faqItems,
     imageAlts: Array.isArray(p.imageAlts) ? p.imageAlts : [],
-    generateImage: wantsHeroImage(opts),
-    imagePrompt: wantsHeroImage(opts) ? firstNonEmpty(p.imagePrompt) || undefined : undefined,
     ctaText: firstNonEmpty(p.ctaText) || 'Nous contacter',
     targetLength: adjustedLength,
     // Measured instead of self-reported: a model's own word count is guesswork,
@@ -1083,14 +1059,6 @@ export function normalizeResponse(
       structure: fullRagContext.promptBlocks.structure || undefined,
     } : undefined,
   }
-}
-
-/**
- * Whether this page gets a hero image: the brief's own choice when it made
- * one, else the campaign's default (`enableImages`, from `enable_images`).
- */
-export function wantsHeroImage(opts: Pick<PageTypeGenerateOptions, 'planBrief' | 'enableImages'>): boolean {
-  return opts.planBrief?.generate_image ?? opts.enableImages ?? false
 }
 
 /**

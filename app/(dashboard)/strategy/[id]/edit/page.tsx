@@ -102,14 +102,13 @@ interface FormState {
   cycle_auto_renew: boolean
   enable_external_links: boolean
   external_link_count: string
-  enable_images: boolean
 }
 
 /**
  * La campagne telle que la base la rend, remise en champs. Les défauts sont
- * ceux que la route POST écrit (liens externes et images actifs, 3 liens, 2
- * images) : une colonne absente d'une vieille ligne se relit comme la base la
- * traiterait, pas comme un zéro.
+ * ceux que la route POST écrit (liens externes actifs, 3 liens) : une colonne
+ * absente d'une vieille ligne se relit comme la base la traiterait, pas comme
+ * un zéro.
  */
 function fromCampaign(campaign: Campaign): FormState {
   // A campaign saved with « tous » as its commune reads back as national, and
@@ -136,7 +135,6 @@ function fromCampaign(campaign: Campaign): FormState {
     cycle_auto_renew: Boolean(campaign.cycle_auto_renew),
     enable_external_links: campaign.enable_external_links ?? true,
     external_link_count: String(campaign.external_link_count ?? 3),
-    enable_images: campaign.enable_images === true,
   }
 }
 
@@ -202,7 +200,6 @@ function toPayload(form: FormState) {
     cycle_auto_renew: form.cycle_auto_renew,
     enable_external_links: form.enable_external_links,
     external_link_count: Number(form.external_link_count),
-    enable_images: form.enable_images,
   }
 }
 
@@ -485,17 +482,6 @@ export default function EditCampaignPage() {
                         <input id="external-link-count" name="external_link_count" type="number" min={1} max={10} value={form.external_link_count} onChange={handle} className="input" style={{ maxWidth: 140 }} />
                       </FormField>
                     )}
-                  </div>
-                  <div style={{ display: 'grid', gap: 'var(--space-2)' }}>
-                    <CheckLabel
-                      id="enable-images"
-                      name="enable_images"
-                      checked={form.enable_images}
-                      onChange={handle}
-                      hint="Une photo réaliste générée à la publication, sans texte. Modifiable brief par brief dans la Stratégie."
-                    >
-                      Photo IA en tête de chaque page
-                    </CheckLabel>
                   </div>
                 </div>
               </div>

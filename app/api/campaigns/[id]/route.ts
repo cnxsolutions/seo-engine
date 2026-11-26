@@ -182,7 +182,7 @@ export async function PATCH(req: NextRequest, context: { params: Promise<{ id: s
       values.publish_status = payload.publish_status
     }
 
-    for (const field of ['auto_publish', 'is_active', 'cycle_auto_renew', 'enable_external_links', 'enable_images'] as const) {
+    for (const field of ['auto_publish', 'is_active', 'cycle_auto_renew', 'enable_external_links'] as const) {
       if (!has(field)) continue
       if (typeof payload[field] !== 'boolean') return invalid(field, 'booléen attendu')
       values[field] = payload[field]
@@ -198,12 +198,6 @@ export async function PATCH(req: NextRequest, context: { params: Promise<{ id: s
       const count = toInteger(payload.external_link_count, 0, 10)
       if (count === null) return invalid('external_link_count', 'entre 0 et 10')
       values.external_link_count = count
-    }
-
-    if (has('image_per_page')) {
-      const count = toInteger(payload.image_per_page, 0, 10)
-      if (count === null) return invalid('image_per_page', 'entre 0 et 10')
-      values.image_per_page = count
     }
 
     if (has('frequency_hours')) {
