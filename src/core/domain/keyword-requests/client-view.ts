@@ -44,7 +44,8 @@ export type ClientRequestState =
   | 'withdrawn'
 
 export type ClientRequestDetail =
-  | { kind: 'planned'; day: string | null }
+  /** `already`: the cycle had the search before the client asked (rule 3), not planned for them. */
+  | { kind: 'planned'; day: string | null; already: boolean }
   | { kind: 'won'; position: number; url: string | null }
   | { kind: 'page'; url: string | null }
   | { kind: 'city'; city: string }
@@ -124,7 +125,7 @@ export function safeUrl(value: unknown): string | null {
 function detailOf(status: RequestStatus, record: RequestRecord, evidence: ReadEvidence): ClientRequestDetail {
   switch (status) {
     case 'scheduled':
-      return { kind: 'planned', day: record.scheduled_for }
+      return { kind: 'planned', day: record.scheduled_for, already: record.reason_code === 'ALREADY_PLANNED' }
     case 'published':
       return { kind: 'page', url: safeUrl(record.published_url) }
     case 'covered':

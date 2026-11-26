@@ -48,8 +48,10 @@ function Detail({ request }: { request: ClientRequestView }) {
       return <>{detail.kind === 'city' ? REQUEST_DETAIL_TEXT.reviewCity(detail.city) : REQUEST_DETAIL_TEXT.review}</>
     case 'deferred':
       return <>{REQUEST_DETAIL_TEXT.deferred}</>
-    case 'scheduled':
-      return <>{REQUEST_DETAIL_TEXT.planned(detail.kind === 'planned' && detail.day ? formatDay(detail.day) : null)}</>
+    case 'scheduled': {
+      const day = detail.kind === 'planned' && detail.day ? formatDay(detail.day) : null
+      return <>{detail.kind === 'planned' && detail.already ? REQUEST_DETAIL_TEXT.alreadyPlanned(day) : REQUEST_DETAIL_TEXT.planned(day)}</>
+    }
     case 'in_production':
       return <>{REQUEST_DETAIL_TEXT.inProduction}</>
     case 'published':

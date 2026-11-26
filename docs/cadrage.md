@@ -100,15 +100,15 @@ reprendre · ❌ absent · ❓ à vérifier.
 | KW-2 | Validation serveur : longueur, nombre de mots, pas d'URL ; plafond de demandes ouvertes par site ; limite de débit | règles dev | ✅ L3 (domaine `normalize.ts` rejoué par la route ; plafond et doublons dans `submit_keyword_requests`, sous verrou du site ; 30 envois / heure par membre) | L3 |
 | KW-3 | Analyse **asynchrone** par une tâche du planificateur (toutes les 2 min, lots de 5) : verdict, motifs, preuves | demande | ✅ L3 (`lib/keyword-requests/analyze.ts`, tâche `keywordRequests` ; contexte chargé une fois par site, verdicts écrits en un appel) | L3 |
 | KW-4 | Verdict « Intégrée à la période en cours » : un brief est rédigé, il **remplace** une page prévue non entamée, la date est annoncée | demande | ❌ | L4 |
-| KW-5 | Verdict « Gardée pour la période suivante » : stockée, consommée en priorité par le prochain plan | demande | 🟡 L3 : verdict ; consommation au L4 | L3 (verdict) · L4 (consommation) |
+| KW-5 | Verdict « Gardée pour la période suivante » : stockée, consommée en priorité par le prochain plan | demande | ✅ L3 : verdict ; L4b : consommée par le plan suivant (premiers créneaux, un tiers au plus, jamais le pilier) | L3 (verdict) · L4 (consommation) |
 | KW-6 | Verdicts « Déjà prévue le JJ/MM », « Déjà couverte par cette page », « Vous êtes déjà en tête sur Google » — avec le lien ou la date | `decideEditorialAction` | ✅ L3 | L3 |
 | KW-7 | Verdict « À l'étude chez CNX » : hors zone, hors métier, ambigu | demande | ✅ L3 (+ site sans campagne, avis du modèle indisponible) | L3 |
-| KW-8 | Suivi : chronologie reçue → analysée → prévue (date) → en rédaction → en ligne (lien) | demande | 🟡 L3 : chronologie affichée, rafraîchie toutes les 10 s pendant l'analyse ; passages « en rédaction » et « en ligne » au L4 | L3 · L4 |
+| KW-8 | Suivi : chronologie reçue → analysée → prévue (date) → en rédaction → en ligne (lien) | demande | ✅ L3 : chronologie affichée, rafraîchie toutes les 10 s pendant l'analyse ; L4b : « en rédaction » et « en ligne » (lien), suivis toutes les 2 min depuis le créneau et sa génération | L3 · L4 |
 | KW-9 | Le client retire une demande tant qu'elle n'est pas en rédaction | — | ✅ L3 (modale de confirmation ; retrait conditionnel au statut, jamais écrasé par l'analyse) | L3 |
 | KW-10 | Console opérateur : file de toutes les demandes, filtres, arbitrage (intégrer maintenant, reporter, refuser avec motif, rouvrir), compteur « à examiner » dans le rail | demande | ❌ | L5 |
-| KW-11 | Report sans perte : une demande non consommée (plan plein, quota atteint) reste en tête au plan suivant ; au-delà de 3 cycles d'attente, elle passe « à examiner » | demande | ❌ | L4 |
+| KW-11 | Report sans perte : une demande non consommée (plan plein, quota atteint) reste en tête au plan suivant ; au-delà de 3 cycles d'attente, elle passe « à examiner » | demande | ✅ L4b (`deferred_cycles`, compté au démarrage d'un plan ; un créneau remplacé rend sa demande à la file) | L4 |
 | KW-12 | E-mails : au client (verdict, mise en ligne), à l'opérateur (demande à examiner) — par une file d'envoi asynchrone | — | ❌ | L7 |
-| KW-13 | Planification : les demandes en attente entrent dans **les deux** chemins de plan (manuel et renouvellement automatique) ; chaque brief issu d'une demande porte `client_request_id` et un repère « Demande du client » dans l'onglet Stratégie | `lib/planning/brief-plan.ts`, `lib/scheduler/cycle-manager.ts` | ❌ | L4 |
+| KW-13 | Planification : les demandes en attente entrent dans **les deux** chemins de plan (manuel et renouvellement automatique) ; chaque brief issu d'une demande porte `client_request_id` et un repère « Demande du client » dans l'onglet Stratégie | `lib/planning/brief-plan.ts`, `lib/scheduler/cycle-manager.ts` | ✅ L4b | L4 |
 
 ### UX — Refonte de l'interface (tout le projet)
 
@@ -137,7 +137,7 @@ reprendre · ❌ absent · ❓ à vérifier.
 | QA-4 | Documentation à jour : CLAUDE.md (1 283 tests, piège Vitest sous Git Bash), README, `db/README.md`, baseline régénérée après `021`, `022`, `023`, `024` | — | 🟡 | L0 puis chaque lot |
 | QA-5 | Recette par lot sur le Supabase local : captures 375 px et 1 440 px, Lighthouse, parcours complet (codes de connexion lus dans Mailpit), écritures en base listées, puis base remise à zéro | dev-cadrage | ❌ | chaque lot |
 | QA-6 | **Supabase local** : `supabase/config.toml`, schéma reconstruit depuis la baseline et les migrations, jeu de démonstration (deux clients, trois sites fictifs), une commande pour tout remettre à zéro (§ 4.8) | décision 16 | ✅ L0a (#30) | L0 |
-| QA-7 | Tests d'intégration (`*.db.test.ts`, `npm run test:db`) contre le Supabase local : isolation, RLS, `swap_plan_item` sous concurrence, idempotence des migrations ; rejoués en CI dans un job dédié (décision 18) | décision 16 | 🟡 outillage et 24 tests au L0a (#30) ; isolation au L1, transaction au L4 | L0 (outillage) puis chaque lot |
+| QA-7 | Tests d'intégration (`*.db.test.ts`, `npm run test:db`) contre le Supabase local : isolation, RLS, `swap_plan_item` sous concurrence, idempotence des migrations ; rejoués en CI dans un job dédié (décision 18) | décision 16 | 🟡 outillage et 24 tests au L0a (#30) ; isolation au L1 ; fonctions de la 025 au L4b ; `swap_plan_item` au L4c | L0 (outillage) puis chaque lot |
 
 ---
 
@@ -204,8 +204,8 @@ Une machine à états dans le domaine, dont chaque transition est testée.
 |---|---|---|---|
 | `received` | Reçue — analyse en cours | Reçue | `scheduled`, `deferred`, `covered`, `review`, `withdrawn` |
 | `review` | À l'étude chez CNX | À examiner | `scheduled`, `deferred`, `declined`, `withdrawn` |
-| `deferred` | Gardée pour la période suivante | Reportée | `scheduled`, `review` (après 3 cycles), `withdrawn` |
-| `scheduled` | Prévue le JJ/MM | Planifiée (cycle n, créneau du JJ/MM) | `in_production`, `deferred` (plan annulé), `withdrawn` |
+| `deferred` | Gardée pour la période suivante | Reportée | `scheduled`, `covered` (brief écarté par les gardes du plan, L4b), `review` (après 3 cycles), `withdrawn` |
+| `scheduled` | Prévue le JJ/MM | Planifiée (cycle n, créneau du JJ/MM) | `in_production`, `published` et `review` (production courte, vue entre deux passages, L4b), `deferred` (créneau remplacé ou plan annulé), `withdrawn` |
 | `in_production` | En rédaction | En génération / publication | `published`, `review` (échec) |
 | `published` | En ligne — voir la page | Publiée | — |
 | `covered` | Déjà couverte — voir la page | Couverte | `scheduled`, `deferred` (rouverte par l'opérateur) |
@@ -325,7 +325,7 @@ RLS activé sur clients, client_members ; aucune politique
 ```
 
 Migration `024_keyword_requests.sql` (la `023` est prise par les résultats Google du L2b ; `swap_plan_item`
-passe dans la `025`, avec le L4 qui s'en sert) :
+passe dans la `026`, avec le L4c qui s'en sert — la `025` est prise par le L4b, ci-dessous) :
 
 ```sql
 keyword_requests (
@@ -362,6 +362,34 @@ RLS activé ; aucune politique
   (`OPINION_UNAVAILABLE` : panne, crédit épuisé, réponse illisible). Jamais un refus, jamais une perte.
 - La note du client (« pourquoi ») n'est **jamais** envoyée au modèle : seule la recherche, entre balises, est jugée.
 - Une demande retirée date son retrait par `updated_at` (statut terminal), sans colonne de plus.
+
+Migration `025_keyword_request_progress.sql` (L4b) — aucune table, deux fonctions :
+
+```sql
+function advance_keyword_requests(jsonb)        -- les étapes d'un lot, chacune seulement si la demande est
+                                                -- encore dans le statut attendu ; une clé absente garde sa colonne
+function withdraw_keyword_request(site, id)     -- le retrait : écarte le créneau d'une demande planifiée dans la
+                                                -- même transaction, refuse si le planificateur l'a déjà réclamé
+```
+
+**Écarts assumés au L4b** (26/11) :
+
+- Le passage à `published` (§ 3.6) n'est pas branché dans `lib/publishing/record.ts` : la tâche des demandes
+  (toutes les 2 min) lit le créneau de chaque demande planifiée et sa génération. Une page publiée par le
+  planificateur, par la publication différée ou à la main depuis la console est vue de la même façon, et aucun
+  chemin de publication n'est modifié. Le client l'apprend en 2 minutes au plus.
+- Une demande passe `scheduled` au **démarrage** du plan (`startCycle`, renouvellement), jamais sur un brouillon ;
+  le compte des cycles attendus se fait au même moment. Une demande envoyée après l'écriture du plan n'est pas
+  comptée comme ayant attendu.
+- Une demande prend le type « page enfant » (quand la campagne le planifie) : un local pack, une alternative ou un
+  comparatif écrits sur une recherche libre du client donneraient des pages à contresens.
+- Un nouveau cycle rend à la file les demandes de ses créneaux jamais produits (`scheduled → deferred`), avant de
+  supprimer ces créneaux ; elles passent au plan d'après. Le suivi rattrape aussi un créneau disparu avec son plan.
+- Retirer une demande planifiée écarte son créneau (statut `skipped`) : le cycle produit une page de moins plutôt
+  qu'une page que le client a retirée. Un brief écrit pour une demande retirée pendant que le plan était un
+  brouillon est écarté de la même façon au démarrage.
+- Le créneau de la demande remplace un sujet de la rotation (premiers créneaux non piliers) : volume et coût du
+  cycle inchangés.
 
 Rien ne change dans `cycle_plans` ni `editorial_calendar` : `client_request_id` vit dans l'item JSONB du plan,
 et le lien créneau → brief existe déjà (`editorial_calendar.plan_item_id`). L'historique des statuts tient dans
@@ -447,7 +475,7 @@ Ordonnés par **risque** (sécurité d'abord, planificateur ensuite), puis par *
 | **L1** | Identité client : tables `clients`/`client_members`, `@supabase/ssr`, branche de `proxy.ts`, connexion par code, invitation et révocation depuis les Réglages d'un site, pages d'erreur ; tests d'isolation, limites de débit | ACC-1 à ACC-7, QA-2, QA-3 | L0 | ✅ L1 (#32) |
 | **L2** | Espace client en lecture : coquille mobile, accueil, pages en ligne, prochaines pages, sélecteur de site, **résultats Google**. Se scinde en L2a (lecture) / L2b (résultats) si la PR grossit | ESP-1 à ESP-6 | L1 | ✅ L2a (#33), L2b (#34) |
 | **L3** | Demandes, saisie et verdict : table, domaine (verdict, cycle de vie), tâche d'analyse, formulaire, liste et chronologie, retrait. Les demandes recevables sont **toutes** gardées pour la période suivante (pas encore d'insertion dans le cycle en cours) | KW-1 à KW-3, KW-5 (verdict), KW-6 à KW-9 | L2 | ✅ L3 (#35) |
-| **L4** | Demandes dans le moteur : extraction de `writeBriefForSubject` **sans changement de comportement** (PR à part), `swap_plan_item`, placement dans le cycle en cours, consommation au plan suivant, retour de publication | KW-4, KW-5, KW-8, KW-11, KW-13 | L3 | L · 4 j |
+| **L4** | Demandes dans le moteur, en trois PR : **L4a** (#37) extraction de la rédaction des briefs **sans changement de comportement** ; **L4b** (#38) consommation au plan suivant, report, suivi de production et retour de publication (migration `025`) ; **L4c** `swap_plan_item` (migration `026`) et placement dans le cycle en cours | KW-4, KW-5, KW-8, KW-11, KW-13 | L3 | L · 4 j — L4a et L4b en revue |
 | **L5** | Console opérateur des demandes et coquille : file, arbitrage, compteur dans le rail, onglet « Demandes » d'un site, rail et en-tête de site refaits, glossaire | KW-10, UX-5, UX-6 | L3 | M · 3 j |
 | **L6** | Refonte des écrans opérateur, un par un : tableau de bord, vue d'ensemble, stratégie, calendrier, publication, performances, pages, réglages — styles en ligne retirés, états, mouvement, graphiques, écrans hérités. Peut se scinder en L6a / L6b | UX-6 à UX-12 | L0, L5 | L · 5-6 j |
 | **L7** | E-mails : file d'envoi asynchrone traitée par le planificateur, modèles à la DA, désinscription des notifications | KW-12 | L3, SMTP | S · 2 j |

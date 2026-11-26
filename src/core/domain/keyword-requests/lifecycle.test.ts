@@ -22,6 +22,17 @@ describe('cycle de vie d une demande (§ 3.3)', () => {
     expect(canTransition('declined', 'review')).toBe(true)
   })
 
+  it('ce que le moteur voit arriver a une demande planifiee (L4)', () => {
+    // Le plan a ecrit son brief et les gardes l'ont ecarte.
+    expect(canTransition('deferred', 'covered')).toBe(true)
+    // La production est suivie toutes les 2 min : une courte commence et finit entre deux passages.
+    expect(canTransition('scheduled', 'published')).toBe(true)
+    expect(canTransition('scheduled', 'review')).toBe(true)
+    // Un creneau supprime rend la demande a la file, sans perte.
+    expect(canTransition('scheduled', 'deferred')).toBe(true)
+    expect(canTransition('in_production', 'deferred')).toBe(false)
+  })
+
   it('une demande en ligne ou retiree est terminee', () => {
     for (const to of REQUEST_STATUSES) {
       expect(canTransition('published', to)).toBe(false)

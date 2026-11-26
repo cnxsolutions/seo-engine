@@ -652,6 +652,12 @@ export interface PlanItemBrief {
   /** Ce que ce brief fait a l'existant. Absent des plans ecrits avant ce lot. */
   action?: PlanItemAction
   /**
+   * La demande du client que ce brief sert (keyword_requests.id, L4) : son
+   * creneau porte la recherche demandee, et la demande suit la page jusqu'en
+   * ligne. Absent d'un brief seme par la rotation des mots-cles.
+   */
+  client_request_id?: string
+  /**
    * La PROJECTION de `action` sous les noms de colonnes de la migration 018.
    *
    * Ces trois champs ne sont ecrits que sur un item 'refresh', et jamais

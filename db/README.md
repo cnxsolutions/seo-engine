@@ -136,7 +136,15 @@ jamais la meme recherche) et deux fonctions, `submit_keyword_requests` (plafond
 et doublons sous un verrou du site) et `apply_keyword_verdicts` (les verdicts
 d'un lot, seulement sur les demandes encore `received`) ; `EXECUTE` retire a
 `anon` et `authenticated`. **La tache du planificateur lit cette table toutes
-les 2 minutes : appliquer la 024 en production AVANT le merge.**
+les 2 minutes : appliquer la 024 en production AVANT le merge.** Puis
+`025_keyword_request_progress.sql` (L4b) : aucune table, deux fonctions —
+`advance_keyword_requests` (les etapes d'un lot de demandes : planifiee,
+couverte, en redaction, en ligne, a examiner ; chacune seulement si la demande
+est encore dans le statut attendu) et `withdraw_keyword_request` (le retrait
+par le client, qui ecarte le creneau d'une demande planifiee dans la meme
+transaction) ; `EXECUTE` retire a `anon` et `authenticated`. **Le retrait et la
+tache du planificateur appellent ces fonctions : appliquer la 025 en production
+AVANT le merge.**
 
 Tous ses CHECK sont poses `NOT VALID` : ils s'appliquent aux ecritures futures
 sans jamais faire echouer la migration sur une ligne historique. Une ligne

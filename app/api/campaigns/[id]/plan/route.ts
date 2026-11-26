@@ -97,7 +97,7 @@ export async function PATCH(req: NextRequest, context: { params: Promise<{ id: s
 
     if (action === 'confirm') {
       const items = plan_data || plan.plan_data
-      await startCycle(campaign, plan.id, items)
+      await startCycle(campaign, plan, items)
       return NextResponse.json({ success: true, message: 'Cycle demarré' })
     }
 

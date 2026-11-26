@@ -34,11 +34,16 @@ describe('clientRequestView', () => {
   })
 
   it('prevue : la date du creneau, et les etapes qui restent', () => {
-    const view = clientRequestView(record({ status: 'scheduled', scheduled_for: '2026-11-28', decided_at: '2026-11-26T10:00:00Z' }))
-    expect(view.detail).toEqual({ kind: 'planned', day: '2026-11-28' })
+    const view = clientRequestView(record({ status: 'scheduled', scheduled_for: '2026-11-28', decided_at: '2026-11-26T10:00:00Z', reason_code: 'PLANNED' }))
+    expect(view.detail).toEqual({ kind: 'planned', day: '2026-11-28', already: false })
     expect(view.timeline.map((step) => `${step.kind}:${step.status}`)).toEqual([
       'received:done', 'analysed:done', 'planned:current', 'writing:upcoming', 'online:upcoming',
     ])
+  })
+
+  it('deja au programme avant la demande, ou mise au programme pour elle : deux phrases differentes', () => {
+    expect(clientRequestView(record({ status: 'scheduled', scheduled_for: '2026-11-30', reason_code: 'ALREADY_PLANNED' })).detail)
+      .toEqual({ kind: 'planned', day: '2026-11-30', already: true })
   })
 
   it('deja gagnee : la position et la page, jamais les motifs internes', () => {

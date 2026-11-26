@@ -21,9 +21,11 @@ vi.mock('@/lib/ai/provider', async (importOriginal) => ({
   generateJson: vi.fn(),
 }))
 vi.mock('@/lib/existing/inventory', () => ({ loadSiteInventory: vi.fn() }))
+vi.mock('@/lib/keyword-requests/repository', () => ({ listWaitingRequests: vi.fn() }))
 
 import { generateJson } from '@/lib/ai/provider'
 import { loadSiteInventory } from '@/lib/existing/inventory'
+import { listWaitingRequests } from '@/lib/keyword-requests/repository'
 import { generateBriefPlanWithSignals } from './brief-plan'
 
 const campaign = {
@@ -147,6 +149,8 @@ beforeEach(() => {
   vi.spyOn(console, 'warn').mockImplementation(() => {})
   vi.mocked(loadSiteInventory).mockResolvedValue(site)
   vi.mocked(generateJson).mockResolvedValue(JSON.stringify(answer))
+  // No request waiting: the plans below are those of a campaign nobody asked anything of.
+  vi.mocked(listWaitingRequests).mockResolvedValue([])
 })
 
 afterEach(() => {
@@ -154,6 +158,7 @@ afterEach(() => {
   vi.restoreAllMocks()
   vi.mocked(generateJson).mockReset()
   vi.mocked(loadSiteInventory).mockReset()
+  vi.mocked(listWaitingRequests).mockReset()
 })
 
 describe('generateBriefPlanWithSignals — le plan entier', () => {
@@ -168,6 +173,7 @@ describe('generateBriefPlanWithSignals — le plan entier', () => {
 
     expect(loadSiteInventory).toHaveBeenCalledTimes(1)
     expect(loadSiteInventory).toHaveBeenCalledWith('site-1')
+    expect(listWaitingRequests).toHaveBeenCalledWith('campaign-1')
     expect(generateJson).toHaveBeenCalledTimes(1)
 
     // What the model was asked, and what the plan became: both frozen.
@@ -213,5 +219,54 @@ describe('generateBriefPlanWithSignals — le plan entier', () => {
 
     expect(result.items).toEqual([])
     expect(generateJson).not.toHaveBeenCalled()
+  })
+
+  it('les demandes du client prennent les premiers creneaux, avant la rotation (§ 3.5)', async () => {
+    vi.mocked(listWaitingRequests).mockResolvedValue([
+      { id: 'req-fuite', keyword: 'recherche de fuite', city: null, desired_by: null, created_at: '2026-11-20T10:00:00Z', deferred_cycles: 0 },
+      { id: 'req-adoucisseur', keyword: 'adoucisseur d eau', city: 'Sainte-Savine', desired_by: '2026-12-10', created_at: '2026-11-24T10:00:00Z', deferred_cycles: 1 },
+    ])
+    vi.mocked(generateJson).mockResolvedValue(JSON.stringify({
+      // One answer per subject sent, in order: the pillar, the request, the last child.
+      items: [
+        { target_keyword: 'plombier troyes urgence nuit', proposed_slug: 'plombier-troyes-urgence-nuit' },
+        { target_keyword: 'adoucisseur d eau sainte-savine', proposed_slug: 'adoucisseur-eau-sainte-savine' },
+        { target_keyword: 'plombier sainte-savine depannage', proposed_slug: 'plombier-sainte-savine-depannage' },
+      ],
+    }))
+
+    const result = await generateBriefPlanWithSignals({
+      campaign,
+      cycleDays: 8,
+      gscSignals: signals,
+      serpEvidence: [],
+      searchSuggestions: [],
+    })
+
+    // 4 creneaux : une demande au plus (un tiers), sur le premier creneau qui n'est pas le pilier,
+    // et la plus pressee d'abord (une date souhaitee passe avant l'anciennete).
+    const [pillar, first] = result.items
+    expect(pillar.page_type).toBe('pillar')
+    expect(pillar.client_request_id).toBeUndefined()
+    expect(first).toMatchObject({
+      client_request_id: 'req-adoucisseur',
+      page_type: 'child',
+      target_city: 'Sainte-Savine',
+      target_keyword: 'adoucisseur d eau sainte-savine',
+    })
+    expect(result.items.filter((item) => item.client_request_id)).toHaveLength(1)
+
+    // Le modele sait quel creneau vient du client, et qu'il doit en garder la recherche.
+    const [request] = vi.mocked(generateJson).mock.calls[0]
+    expect(request.userPrompt).toContain('"demande_client": true')
+    expect(request.userPrompt).toContain('"target_keyword_seed": "adoucisseur d eau"')
+    expect(request.userPrompt).toContain('Creneaux marques "demande_client"')
+  })
+
+  it('une file illisible n empeche pas le plan : il s ecrit sans elle', async () => {
+    vi.mocked(listWaitingRequests).mockRejectedValue(new Error('base injoignable'))
+    const result = await generateBriefPlanWithSignals({ campaign, cycleDays: 8, gscSignals: signals, serpEvidence, searchSuggestions: suggestions })
+    expect(result.items.length).toBe(4)
+    expect(result.items.some((item) => item.client_request_id)).toBe(false)
   })
 })

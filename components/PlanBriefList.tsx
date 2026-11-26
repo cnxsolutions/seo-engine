@@ -203,6 +203,7 @@ function BriefRow({
         <span className="plan-brief__tags">
           <ActionBadge kind={kind} />
           {!skipped && <span className="chip">{pageTypeLabel(item.page_type)}</span>}
+          {item.client_request_id && <span className="chip" title="Recherche demandée par le client depuis son espace">Demande du client</span>}
           <span className="meta">
             {action?.kind === 'skip'
               ? action.reasons[0] ?? 'Aucun motif enregistré.'
@@ -319,6 +320,7 @@ function BriefDetail({
       <div className="plan-brief__tags">
         <ActionBadge kind={kind} />
         {kind === 'create' && <span className="chip">{pageTypeLabel(item.page_type)}</span>}
+        {item.client_request_id && <span className="chip" title="Recherche demandée par le client depuis son espace">Demande du client</span>}
         {kind === 'create' && (
           <span className="meta">{item.search_intent || '—'} · {formatMetric(item.estimated_word_count, 'number')} mots</span>
         )}
