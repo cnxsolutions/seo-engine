@@ -1,0 +1,332 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`generateBriefPlanWithSignals — le plan entier > lit l existant une fois, ne soumet au modele que les sujets a ecrire, et garde chaque decision > items 1`] = `
+[
+  {
+    "action": {
+      "kind": "create",
+      "slug": {
+        "status": "free",
+      },
+    },
+    "competitor_insights": [],
+    "estimated_word_count": 1200,
+    "hasId": true,
+    "internal_link_targets": [
+      "pages filles du cluster",
+      "https://exemple.fr/plombier-troyes",
+    ],
+    "outline": [
+      "H2: Quand appeler",
+      "H2: Tarifs de nuit",
+    ],
+    "page_goal": "Capter une intention informationnelle et transactionnelle sur plombier troyes urgence nuit.",
+    "page_type": "pillar",
+    "priority": "high",
+    "proposed_slug": "plombier-urgence-nuit-troyes",
+    "proposed_title": "Plombier a Troyes la nuit : intervention d urgence",
+    "rationale": "Page pillar planifiee pour renforcer la couverture longue traine. Angle distinct de https://exemple.fr/plombier-troyes, qui couvre déjà « plombier troyes ».",
+    "required_entities": [
+      "Troyes",
+      "Aube",
+    ],
+    "scheduled_date": "2026-11-27",
+    "search_intent": "informationnelle et transactionnelle",
+    "secondary_keywords": [
+      "plombier troyes urgence nuit pres de moi",
+      "plombier troyes urgence nuit avis",
+      "plombier troyes urgence nuit prix",
+    ],
+    "seo_rules": [
+      "Reprendre le sujet "plombier troyes urgence nuit", ecrit en francais correct, dans le title, le H1, l'introduction et un H2.",
+      "Inclure au moins 3 formulations longue traine naturelles.",
+      "Ajouter une FAQ structuree.",
+      "Prevoir un maillage interne coherent.",
+      "Page complémentaire de https://exemple.fr/plombier-troyes (« plombier troyes ») : ne pas reprendre ce mot-clé ni ses variantes proches, ne pas réécrire ce que cette page couvre déjà, et lier vers elle.",
+    ],
+    "target_city": "Troyes",
+    "target_keyword": "plombier troyes urgence nuit",
+  },
+  {
+    "action": {
+      "kind": "create",
+      "slug": {
+        "status": "free",
+      },
+    },
+    "competitor_insights": [],
+    "estimated_word_count": 900,
+    "hasId": true,
+    "internal_link_targets": [
+      "page pilier parente",
+    ],
+    "outline": [
+      "H2: Les signes",
+      "H2: Le prix",
+    ],
+    "page_goal": "Capter une intention longue traine specifique sur debouchage canalisation troyes.",
+    "page_type": "child",
+    "people_also_ask": [
+      "Combien coute un debouchage de canalisation ?",
+    ],
+    "priority": "high",
+    "proposed_slug": "debouchage-canalisation-troyes",
+    "proposed_title": "Debouchage de canalisation a Troyes",
+    "rationale": "Page child planifiee pour renforcer la couverture longue traine.",
+    "required_entities": [
+      "Troyes",
+      "Aube",
+    ],
+    "scheduled_date": "2026-11-29",
+    "search_intent": "longue traine specifique",
+    "search_suggestions": [
+      "debouchage canalisation troyes prix",
+    ],
+    "secondary_keywords": [
+      "debouchage canalisation troyes pres de moi",
+      "debouchage canalisation troyes avis",
+      "debouchage canalisation troyes prix",
+    ],
+    "seo_rules": [
+      "Reprendre le sujet "debouchage canalisation troyes", ecrit en francais correct, dans le title, le H1, l'introduction et un H2.",
+      "Inclure au moins 3 formulations longue traine naturelles.",
+      "Ajouter une FAQ structuree.",
+      "Prevoir un maillage interne coherent.",
+    ],
+    "target_city": "Troyes",
+    "target_keyword": "debouchage canalisation troyes",
+  },
+  {
+    "action": {
+      "kind": "skip",
+      "reasons": [
+        "« chauffe-eau » figure parmi les requetes que Search Console interdit d'ouvrir : le site la gagne deja, ou plusieurs de ses pages se la disputent.",
+        "Une page de plus sur cette requete prendrait ses signaux a celle qui la porte : renforcer l'existante est le seul gain disponible.",
+      ],
+    },
+    "competitor_insights": [],
+    "estimated_word_count": 0,
+    "hasId": true,
+    "internal_link_targets": [
+      "page pilier parente",
+    ],
+    "outline": [
+      "H2: Le besoin, en pratique",
+      "H2: Méthode et critères de choix",
+      "H2: Conseils pratiques",
+      "H2: FAQ",
+    ],
+    "page_goal": "Sujet ecarte : aucune page n'est prevue pour ce creneau.",
+    "page_type": "child",
+    "priority": "low",
+    "proposed_slug": "",
+    "proposed_title": "plombier à Troyes : guide complet",
+    "rationale": "« chauffe-eau » figure parmi les requetes que Search Console interdit d'ouvrir : le site la gagne deja, ou plusieurs de ses pages se la disputent. Une page de plus sur cette requete prendrait ses signaux a celle qui la porte : renforcer l'existante est le seul gain disponible.",
+    "required_entities": [
+      "Troyes",
+      "Aube",
+    ],
+    "scheduled_date": "2026-12-01",
+    "search_intent": "longue traine specifique",
+    "secondary_keywords": [
+      "chauffe-eau pres de moi",
+      "chauffe-eau avis",
+      "chauffe-eau prix",
+    ],
+    "seo_rules": [
+      "Reprendre le sujet "chauffe-eau", ecrit en francais correct, dans le title, le H1, l'introduction et un H2.",
+      "Inclure au moins 3 formulations longue traine naturelles.",
+      "Ajouter une FAQ structuree.",
+      "Prevoir un maillage interne coherent.",
+    ],
+    "target_city": "Troyes",
+    "target_keyword": "chauffe-eau",
+  },
+  {
+    "action": {
+      "kind": "skip",
+      "reasons": [
+        "« plombier troyes » reprend le mot-clé « plombier troyes », déjà ciblé par une page du site : le créneau est écarté plutôt que de la concurrencer.",
+      ],
+    },
+    "competitor_insights": [],
+    "estimated_word_count": 0,
+    "hasId": true,
+    "internal_link_targets": [
+      "page pilier parente",
+    ],
+    "outline": [
+      "H2: Le besoin, en pratique",
+      "H2: Méthode et critères de choix",
+      "H2: Conseils pratiques",
+      "H2: FAQ",
+    ],
+    "page_goal": "Sujet ecarte : aucune page n'est prevue pour ce creneau.",
+    "page_type": "child",
+    "priority": "low",
+    "proposed_slug": "",
+    "proposed_title": "plombier à Sainte-Savine : guide complet",
+    "rationale": "« plombier troyes » reprend le mot-clé « plombier troyes », déjà ciblé par une page du site : le créneau est écarté plutôt que de la concurrencer.",
+    "required_entities": [
+      "Sainte-Savine",
+      "Aube",
+    ],
+    "scheduled_date": "2026-12-03",
+    "search_intent": "longue traine specifique",
+    "secondary_keywords": [
+      "plombier pres de moi",
+      "plombier avis",
+      "plombier prix",
+    ],
+    "seo_rules": [
+      "Reprendre le sujet "plombier", ecrit en francais correct, dans le title, le H1, l'introduction et un H2.",
+      "Inclure au moins 3 formulations longue traine naturelles.",
+      "Ajouter une FAQ structuree.",
+      "Prevoir un maillage interne coherent.",
+    ],
+    "target_city": "Sainte-Savine",
+    "target_keyword": "plombier",
+  },
+]
+`;
+
+exports[`generateBriefPlanWithSignals — le plan entier > lit l existant une fois, ne soumet au modele que les sujets a ecrire, et garde chaque decision > prompt 1`] = `
+"Campagne:
+- Activite: plombier
+- Business: Plomberie Dupont
+- Site: https://exemple.fr
+- Departement: Aube
+- Communes: Troyes, Sainte-Savine
+- Mots-cles de base: plombier, debouchage canalisation, chauffe-eau
+
+Analyse du site:
+Aucune analyse disponible
+
+Analyse concurrents:
+[]
+
+Anti-doublon (pages DEJA en ligne sur le site, qui ne seront ni mises a jour ni remplacees):
+- Slugs deja utilises: plombier-troyes
+- Mots-cles deja cibles: plombier troyes
+
+Donnees Search Console REELLES du site (2026-08-28 -> 2026-11-25).
+Ces chiffres priment sur toute intuition : ils disent ce que Google fait deja de ce site.
+
+Requetes interdites comme target_keyword (cannibalisees ou deja gagnees) : chauffe-eau
+
+
+Ce que la SERP montre reellement (donnees mesurees, pas estimees) :
+Requete "plombier troyes" (SERP lue le 2026-11-25) :
+- Longueur MEDIANE des 1 pages qui rankent : 1100 mots. C'est une mesure, pas une estimation : cale estimated_word_count dessus (+/- 20%).
+- Longueurs observees, de la position 1 vers le bas : 1100.
+- Sections presentes chez plusieurs concurrents (a couvrir dans outline) : Nos tarifs
+- 100% des pages qui rankent ont une FAQ : en prevoir une.
+- Questions posees par Google (reprendre en H2) : Combien coute un debouchage de canalisation ?
+- Recherches associees (pistes de mots-cles secondaires) : plombier troyes pas cher
+
+Regle : quand une mesure ci-dessus contredit ton intuition, suis la mesure. Ne propose pas une page
+de 800 mots sur une requete ou la mediane observee est 2000, ni l'inverse.
+
+
+Ce que Google et Bing proposent quand on tape ces requetes (autocompletion reelle, lue le 2026-11-25) :
+- "debouchage canalisation troyes" -> Google : debouchage canalisation troyes prix
+Ces formulations sont celles des internautes : elles priment sur une phrase redigee pour target_keyword et
+secondary_keywords (regle 15). Elles ne disent rien du volume : une suggestion est tapee, pas forcement souvent.
+
+Slots a transformer en briefs (les sujets bloques par Search Console ont deja ete retires avant cet appel) :
+[
+ {
+  "creneau": 1,
+  "scheduled_date": "2026-11-27",
+  "page_type": "pillar",
+  "target_keyword_seed": "plombier",
+  "target_city": "Troyes",
+  "deja_couvert_par": "https://exemple.fr/plombier-troyes"
+ },
+ {
+  "creneau": 2,
+  "scheduled_date": "2026-11-29",
+  "page_type": "child",
+  "target_keyword_seed": "debouchage canalisation",
+  "target_city": "Troyes"
+ },
+ {
+  "creneau": 3,
+  "scheduled_date": "2026-12-03",
+  "page_type": "child",
+  "target_keyword_seed": "plombier",
+  "target_city": "Sainte-Savine"
+ }
+]
+
+Creneaux dont le sujet de depart est DEJA couvert par une page du site (cette page n'est PAS mise a jour,
+et le brief ne doit pas la concurrencer) :
+Créneau 1 : le sujet « plombier Troyes » est déjà couvert par https://exemple.fr/plombier-troyes (« Plombier a Troyes », mot-clé « plombier troyes »). Propose un sujet DIFFÉRENT et complémentaire pour ce créneau (autre service, autre question, autre intention, autre quartier ou commune de la campagne), avec son propre target_keyword et son propre proposed_slug. N'utilise jamais l'adresse /plombier-troyes ni un mot-clé équivalent.
+
+Objectif:
+Pour chaque slot, produire un brief SEO complet pour une page NEUVE. Ce brief servira le jour J a rediger
+la page avec une autre IA. Reponds avec exactement un item par slot, dans l'ordre de la liste.
+Ne redige pas la page. Ne donne pas de HTML. Ne propose jamais de mettre a jour une page existante.
+
+Regles:
+1. proposed_slug dit ce que la page traite, en 7 mots maximum, et jamais un slug deja utilise.
+   La longue traine decrit la REQUETE, pas l'adresse : un slug rallonge pour atteindre un compte
+   de mots est tronque a la fabrication, et c'est son dernier mot — celui qui distinguait la page
+   de sa soeur — qui tombe.
+2. target_keyword doit etre une intention longue traine, differente des mots-cles deja cibles.
+3. page_type "pillar": vue d'ensemble qui fait autorite sur le sujet. Les liens vers les pages filles se placent
+   dans le texte des sections : jamais un point de la trame qui en parle.
+4. page_type "child": angle specifique, lien retour pilier et pages soeurs.
+5. page_type "alternative": capter "alternative a X", "moins cher que X", "remplacer X".
+6. page_type "comparative": capter "meilleur X", "X vs Y", "comparatif".
+7. page_type "local_pack": informations pratiques pour quelqu'un sur place (zones reellement desservies, acces,
+   disponibilite, avis reels s'il y en a).
+8. outline contient uniquement les H2/H3 attendus, pas les paragraphes, ecrits pour le lecteur : ce qu'il veut
+   savoir. Jamais une tache de referencement ("Maillage interne vers…", "Pages a creer", "Mots-cles a cibler",
+   "Intention de recherche") : la page publiee en ferait un titre visible.
+9. seo_rules contient les contraintes de redaction a respecter plus tard. Aucune ne demande de placer un mot-cle
+   tel quel, d'enumerer des lieux ni de citer des donnees Search Console.
+10. competitor_insights reprend des observations utiles des concurrents, sans copier leur contenu.
+11. Les slugs et mots-cles listes en "Anti-doublon" appartiennent a des pages existantes : ne les reutilise
+    JAMAIS comme target_keyword ni comme proposed_slug, ni tels quels ni paraphrases (pluriel, ordre des
+    mots, mots vides, synonyme, nom de la ville ajoute ou retire). Une page neuve qui reprend le sujet
+    d'une page existante la concurrence : elle sera ecartee.
+12. N'utilise jamais comme target_keyword une requete listee en "requetes interdites", ni une requete
+    deja portee par une page existante (sections A, B et D ci-dessus), ni une reformulation proche.
+13. Un creneau signale "deja couvert" recoit un sujet DIFFERENT et complementaire de la page citee, avec
+    son propre target_keyword et son propre proposed_slug ; mets l'URL de cette page dans
+    internal_link_targets. S'il n'existe vraiment aucun angle distinct, garde le sujet seme : le creneau
+    sera ecarte plutot que de concurrencer la page.
+14. required_entities : 3 a 5 entites au plus, celles dont la page a besoin pour etre utile (une commune, un
+    organisme, un repere qui compte pour le sujet). Chacune devra etre citee dans le texte : une liste de
+    quartiers ou de rues pour faire local deviendrait une enumeration plaquee dans la page.
+15. Quand une suggestion Google/Bing ou une requete de la section E correspond au sujet d'un creneau, prends
+    SA formulation pour target_keyword et secondary_keywords : c'est ce que les gens tapent vraiment. Jamais
+    une suggestion qui contient le nom d'une entreprise, ni une ville hors de la zone de la campagne.
+
+Reponds avec ce JSON:
+{
+  "items": [
+    {
+      "id": "laisser vide ou string",
+      "scheduled_date": "YYYY-MM-DD",
+      "page_type": "pillar|child|alternative|comparative|local_pack",
+      "priority": "high|medium|low",
+      "target_city": "ville",
+      "target_keyword": "mot-cle focus longue traine",
+      "secondary_keywords": ["8 variations minimum"],
+      "search_intent": "transactionnelle|informationnelle|locale|comparative|alternative",
+      "proposed_title": "titre SEO 50-65 caracteres",
+      "proposed_slug": "slug-longue-traine-unique",
+      "page_goal": "objectif de la page en une phrase",
+      "outline": ["H2: ...", "H2: ...", "H3: ..."],
+      "seo_rules": ["regle concrete", "regle concrete"],
+      "required_entities": ["entite utile au sujet", "3 a 5 au plus"],
+      "internal_link_targets": ["slug ou role de page cible"],
+      "competitor_insights": ["observation concurrentielle utile"],
+      "estimated_word_count": 800,
+      "rationale": "pourquoi cette page est prioritaire"
+    }
+  ]
+}"
+`;
