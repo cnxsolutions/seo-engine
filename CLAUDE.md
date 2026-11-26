@@ -162,7 +162,7 @@ La DA est celle de CNX Solutions (site et films), detaillee dans `docs/design.md
 - **Deux polices** : `--font-display` (Plus Jakarta Sans) pour titres, chiffres,
   boutons, onglets ; `--font-sans` (Inter) pour le texte courant.
 - **Aucun nouveau style en ligne** (`style={{…}}`) : une classe de composant.
-  Les existants (675 au cadrage, 531 apres le L6a) se retirent ecran par ecran
+  Les existants (675 au cadrage, 454 apres le L6b) se retirent ecran par ecran
   (lot L6). Une valeur calculee (couleur d'un prop, longueur d'une barre) passe
   par une propriete CSS personnalisee (`style={cssVars({ '--x': … })}`), lue par
   la classe : c'est la seule forme de style en ligne admise. Le style des

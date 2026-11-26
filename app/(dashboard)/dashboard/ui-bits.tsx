@@ -20,6 +20,7 @@
 
 import type { LucideIcon } from 'lucide-react'
 import type { ReactNode } from 'react'
+import './dashboard.css'
 
 export { MagnitudeBar, SourceNote } from '@/components/ui'
 
@@ -41,12 +42,12 @@ export function Panel({
   return (
     <section className="panel">
       <header className="panel__header">
-        <div style={{ minWidth: 0 }}>
-          <h3 className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+        <div className="dashboard-panel__titles">
+          <h3 className="card-title dashboard-panel__title">
             {Icon && <Icon size={15} color="var(--ink-faint)" strokeWidth={2} />}
             {title}
           </h3>
-          {subtitle && <p className="meta" style={{ marginTop: 'var(--space-1)' }}>{subtitle}</p>}
+          {subtitle && <p className="meta dashboard-panel__subtitle">{subtitle}</p>}
         </div>
         {action}
       </header>

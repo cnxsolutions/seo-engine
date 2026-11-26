@@ -30,6 +30,7 @@ import {
 import { EmptyState, PageHeader } from '@/components/ui'
 import { DashboardFilters } from './DashboardFilters'
 import { ProductionTab } from './ProductionTab'
+import './dashboard.css'
 
 export const dynamic = 'force-dynamic'
 
@@ -75,11 +76,11 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
         <>
           <SitesOverview sites={sites} />
 
-          <h2 className="tab-intro__title" style={{ margin: 'var(--space-8) 0 var(--space-3)' }}>
+          <h2 className="tab-intro__title dashboard__section-title">
             Production — tous les sites
           </h2>
 
-          <Suspense fallback={<div style={{ height: 44, marginBottom: 'var(--space-5)' }} />}>
+          <Suspense fallback={<div className="dashboard__filters-placeholder" />}>
             <DashboardFilters days={days} />
           </Suspense>
 
@@ -122,7 +123,7 @@ function SitesOverview({ sites }: { sites: DashboardSite[] }) {
               <tr key={site.id}>
                 <th scope="row">
                   <Link href={`/sites/${site.id}`} className="cell-strong">{site.name}</Link>
-                  <div className="meta truncate" style={{ maxWidth: '22rem' }}>{site.url}</div>
+                  <div className="meta truncate dashboard__site-url">{site.url}</div>
                 </th>
                 <td><span className="chip">{site.type === 'nextjs' ? 'Next.js' : 'WordPress'}</span></td>
                 <td>
@@ -139,7 +140,7 @@ function SitesOverview({ sites }: { sites: DashboardSite[] }) {
                     <Link href={`/sites/${site.id}/performances`} className="btn-link">Reliée — voir les performances</Link>
                   )}
                 </td>
-                <td style={{ textAlign: 'right' }}>
+                <td className="dashboard__cell-end">
                   <Link href={`/sites/${site.id}`} className="btn-ghost btn-sm" aria-label={`Ouvrir ${site.name}`}>
                     Ouvrir <ChevronRight size={14} aria-hidden="true" />
                   </Link>

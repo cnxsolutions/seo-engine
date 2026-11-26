@@ -1,0 +1,299 @@
+/* ─────────────────────────────────────────────────────────────────────────────
+   The dashboard and the Performances views — their own classes (L6b, UX-7)
+   ─────────────────────────────────────────────────────────────────────────────
+
+   Read by the cross-site dashboard and by a site's Performances tab, which
+   renders the same ProductionTab and PerformanceTab. These rules were inline
+   styles; they render exactly as those did (pixel comparison before/after).
+   ───────────────────────────────────────────────────────────────────────────── */
+
+/* ── Shared rows and grids ── */
+
+.kpi-row.dashboard-row {
+  margin-bottom: var(--space-6);
+}
+
+.dashboard-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+  gap: var(--space-6);
+}
+
+.dashboard-grid.dashboard-grid--spaced {
+  margin-top: var(--space-6);
+}
+
+.dashboard-grid.dashboard-grid--gap-below {
+  margin-bottom: var(--space-6);
+}
+
+.dashboard-block {
+  margin-bottom: var(--space-6);
+}
+
+.meta.dashboard__flush {
+  margin: 0;
+}
+
+.meta.dashboard__lead {
+  margin: 0;
+  line-height: var(--lh-normal);
+}
+
+.meta.dashboard__note {
+  margin-top: var(--space-2);
+}
+
+.meta.dashboard__after {
+  margin-top: var(--space-3);
+}
+
+.meta.dashboard__after-lead {
+  margin-top: var(--space-3);
+  line-height: var(--lh-normal);
+}
+
+.dashboard__strong {
+  color: var(--ink-primary);
+}
+
+/* ── A warning in a panel ── */
+
+.panel.dashboard-alert {
+  display: flex;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  margin-bottom: var(--space-5);
+}
+
+.dashboard-alert__text {
+  font-size: var(--fs-sm);
+  color: var(--ink-secondary);
+  margin: 0;
+}
+
+.panel.dashboard-notice {
+  padding: var(--space-4);
+  margin-bottom: var(--space-5);
+}
+
+.dashboard-notice__row {
+  display: flex;
+  gap: var(--space-3);
+  align-items: flex-start;
+}
+
+.dashboard-notice__text {
+  font-size: var(--fs-sm);
+  color: var(--ink-secondary);
+  line-height: var(--lh-normal);
+}
+
+/* ── Lists of slots and pages ── */
+
+.dashboard-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+}
+
+.dashboard-list__item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.dashboard-list__item.dashboard-list__item--split {
+  justify-content: space-between;
+}
+
+.num.dashboard-list__date {
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  color: var(--ink-secondary);
+  min-width: 92px;
+}
+
+.dashboard-list__body {
+  flex: 1;
+  min-width: 0;
+}
+
+.truncate.dashboard-list__title {
+  display: block;
+  font-size: var(--fs-sm);
+  color: var(--ink-primary);
+}
+
+.truncate.dashboard-list__title.dashboard-list__title--strong {
+  font-weight: 600;
+}
+
+.dashboard-list__end {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+/* ── Run history ── */
+
+.dashboard-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-bottom: var(--space-4);
+}
+
+.data-table .cell-num.dashboard-cell--when {
+  white-space: nowrap;
+  text-align: left;
+}
+
+.data-table .cell-num.dashboard-cell--nowrap,
+.data-table th.dashboard-cell--nowrap {
+  white-space: nowrap;
+}
+
+.meta.dashboard-cell__error {
+  margin-top: 3px;
+  max-width: 320px;
+}
+
+/* ── The cross-site page ── */
+
+.tab-intro__title.dashboard__section-title {
+  margin: var(--space-8) 0 var(--space-3);
+}
+
+.dashboard__filters-placeholder {
+  height: 44px;
+  margin-bottom: var(--space-5);
+}
+
+.meta.truncate.dashboard__site-url {
+  max-width: 22rem;
+}
+
+.data-table td.dashboard__cell-end {
+  text-align: right;
+}
+
+/* ── Panel heading (ui-bits) ── */
+
+.dashboard-panel__titles {
+  min-width: 0;
+}
+
+.card-title.dashboard-panel__title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.meta.dashboard-panel__subtitle {
+  margin-top: var(--space-1);
+}
+
+/* ── The filter row: held at reduced opacity while the server re-renders ── */
+
+.toolbar.dashboard-filters {
+  opacity: 1;
+  transition: opacity var(--dur) var(--ease);
+}
+
+.toolbar.dashboard-filters.dashboard-filters--pending {
+  opacity: 0.6;
+}
+
+/* ── PerformanceTab ── */
+
+.meta.performance__lag {
+  margin: calc(-1 * var(--space-3)) 0 var(--space-5);
+}
+
+.panel.performance__lead {
+  margin-bottom: var(--space-6);
+  border-left: 3px solid var(--accent);
+}
+
+.panel__body.performance__lead-body {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-8);
+}
+
+.performance__figure {
+  min-width: 190px;
+}
+
+.performance__claim {
+  flex: 1;
+  min-width: 260px;
+}
+
+.performance__claim-text {
+  font-size: var(--fs-md);
+  color: var(--ink-primary);
+  font-weight: 600;
+  margin: 0;
+}
+
+.meta.performance__claim-note {
+  margin-top: var(--space-2);
+  line-height: var(--lh-normal);
+}
+
+.btn-primary.performance__cta {
+  flex-shrink: 0;
+}
+
+.data-table th.performance__col-impressions {
+  min-width: 140px;
+}
+
+.data-table th.performance__col-impressions--band {
+  min-width: 150px;
+}
+
+.data-table th.performance__col-impressions--page {
+  min-width: 130px;
+}
+
+.meta.performance__page-link {
+  color: var(--ink-secondary);
+}
+
+.performance__bar-cell {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.num.performance__bar-value {
+  text-align: right;
+  font-weight: 600;
+}
+
+.performance__bar-value--44 { min-width: 44px; }
+.performance__bar-value--48 { min-width: 48px; }
+.performance__bar-value--38 { min-width: 38px; }
+
+.performance__bar {
+  flex: 1;
+}
+
+.performance__bar--60 { min-width: 60px; }
+.performance__bar--56 { min-width: 56px; }
+.performance__bar--50 { min-width: 50px; }
+
+.cell-strong.performance__band,
+.cell-strong.performance__page {
+  display: block;
+}
+
+.chip.performance__band-chip {
+  margin-left: var(--space-2);
+}

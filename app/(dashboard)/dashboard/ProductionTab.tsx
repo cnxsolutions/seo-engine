@@ -27,6 +27,7 @@ import { LineChart } from '@/components/charts'
 import { EmptyState, Meter, StatTile, StatusBadge } from '@/components/ui'
 import { pageTypeLabel } from '@/lib/types'
 import { Panel, SourceNote } from './ui-bits'
+import './dashboard.css'
 import { formatCount, formatDateTime, formatDay, formatDayLong, formatDuration } from './viz'
 
 const JOB_TYPE_LABELS: Record<string, string> = {
@@ -67,18 +68,15 @@ export function ProductionTab({
   return (
     <div>
       <SourceNote
-        source="tables generations, editorial_calendar et job_executions du moteur"
+        source="le calendrier éditorial, les rédactions et les exécutions du moteur"
         period={period}
         note={<>Scope : {scopeLabel}</>}
       />
 
       {metrics.unreadable.length > 0 && (
-        <div
-          className="panel"
-          style={{ display: 'flex', gap: 'var(--space-3)', padding: 'var(--space-4)', marginBottom: 'var(--space-5)' }}
-        >
-          <TriangleAlert size={16} color="var(--status-critical)" style={{ flexShrink: 0, marginTop: 2 }} />
-          <p style={{ fontSize: 'var(--fs-sm)', color: 'var(--ink-secondary)', margin: 0 }}>
+        <div className="panel dashboard-alert">
+          <TriangleAlert size={16} color="var(--status-critical)" className="notice__icon" />
+          <p className="dashboard-alert__text">
             Impossible de lire {metrics.unreadable.join(', ')}. Les compteurs qui en dépendent sont incomplets — ils ne
             valent pas zéro.
           </p>
@@ -95,12 +93,12 @@ export function ProductionTab({
         />
       ) : (
         <>
-          <div className="kpi-row" style={{ marginBottom: 'var(--space-6)' }}>
+          <div className="kpi-row dashboard-row">
             <StatTile
               icon={CalendarClock}
               label="Créneaux à venir"
               value={metrics.plannedSlots}
-              hint="Slots planifiés, pas encore générés"
+              hint="Créneaux planifiés, pas encore rédigés"
             />
             <StatTile
               icon={FileText}
@@ -122,7 +120,7 @@ export function ProductionTab({
             />
           </div>
 
-          <div className="kpi-row" style={{ marginBottom: 'var(--space-6)' }}>
+          <div className="kpi-row dashboard-row">
             <div className="stat-card">
               <Meter
                 label="Taux d'échec technique"
@@ -139,7 +137,7 @@ export function ProductionTab({
                 tone="auto"
                 thresholds={{ warning: 0.1, critical: 0.25 }}
               />
-              <p className="meta" style={{ marginTop: 'var(--space-2)' }}>
+              <p className="meta dashboard__note">
                 {metrics.failureRate === null
                   ? 'Aucune tentative sur la période — pas de taux à calculer.'
                   : `${formatCount(counts.failed)} échec${counts.failed > 1 ? 's' : ''} sur ${formatCount(counts.attempted)} tentative${counts.attempted > 1 ? 's' : ''}.`}
@@ -159,7 +157,7 @@ export function ProductionTab({
             />
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: 'var(--space-6)' }}>
+          <div className="dashboard-grid">
             <Panel title="Rythme de production" subtitle="Pages générées par jour" icon={FileText}>
               {metrics.activeDays >= MIN_DAYS_FOR_A_CURVE ? (
                 <LineChart
@@ -176,7 +174,7 @@ export function ProductionTab({
                   emptyMessage="Aucun point sur la période."
                 />
               ) : (
-                <p className="meta" style={{ margin: 0, lineHeight: 'var(--lh-normal)' }}>
+                <p className="meta dashboard__lead">
                   {metrics.activeDays === 0
                     ? 'Aucune génération sur la période — rien à tracer.'
                     : `Production sur ${metrics.activeDays} jour${metrics.activeDays > 1 ? 's' : ''} seulement : une courbe donnerait une fausse impression de tendance. Le compteur ci-dessus dit tout.`}
@@ -191,36 +189,19 @@ export function ProductionTab({
               action={<Link href={links.calendar} className="btn-link">Calendrier</Link>}
             >
               {metrics.upcomingSlots.length === 0 ? (
-                <p className="meta" style={{ margin: 0, lineHeight: 'var(--lh-normal)' }}>
+                <p className="meta dashboard__lead">
                   Aucun créneau planifié devant nous. Le moteur ne produira rien tant qu&apos;un cycle n&apos;est pas
                   confirmé.
                 </p>
               ) : (
-                <ul style={{ listStyle: 'none', display: 'flex', flexDirection: 'column' }}>
+                <ul className="dashboard-list">
                   {metrics.upcomingSlots.map((slot) => (
-                    <li
-                      key={slot.id}
-                      style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: 'var(--space-3)',
-                        padding: 'var(--space-2) 0',
-                        borderBottom: '1px solid var(--line)',
-                      }}
-                    >
-                      <span
-                        className="num"
-                        style={{
-                          fontSize: 'var(--fs-xs)',
-                          fontWeight: 600,
-                          color: 'var(--ink-secondary)',
-                          minWidth: 92,
-                        }}
-                      >
+                    <li key={slot.id} className="dashboard-list__item">
+                      <span className="num dashboard-list__date">
                         {formatDayLong(slot.scheduledDate)}
                       </span>
-                      <span style={{ flex: 1, minWidth: 0 }}>
-                        <span className="truncate" style={{ display: 'block', fontSize: 'var(--fs-sm)', color: 'var(--ink-primary)' }}>
+                      <span className="dashboard-list__body">
+                        <span className="truncate dashboard-list__title">
                           {slot.targetKeyword}
                         </span>
                         <span className="meta">
@@ -236,27 +217,20 @@ export function ProductionTab({
             </Panel>
           </div>
 
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))',
-              gap: 'var(--space-6)',
-              marginTop: 'var(--space-6)',
-            }}
-          >
+          <div className="dashboard-grid dashboard-grid--spaced">
             <Panel
               title="Exécutions du moteur"
               subtitle={`Historique conservé ${JOB_HISTORY_DAYS} jours seulement, quelle que soit la période choisie. Une exécution de créneau déclenche aussi une exécution de génération : les familles ne s'additionnent pas.`}
               icon={Timer}
             >
               {metrics.runs.length === 0 ? (
-                <p className="meta" style={{ margin: 0 }}>Aucune exécution enregistrée sur la période.</p>
+                <p className="meta dashboard__flush">Aucune exécution enregistrée sur la période.</p>
               ) : (
                 <>
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--space-2)', marginBottom: 'var(--space-4)' }}>
+                  <div className="dashboard-chips">
                     {metrics.runStats.map((family) => (
                       <span key={family.jobType} className="chip">
-                        <strong style={{ color: 'var(--ink-primary)' }}>
+                        <strong className="dashboard__strong">
                           {JOB_TYPE_LABELS[family.jobType] ?? family.jobType}
                         </strong>{' '}
                         {family.total} exéc. · {family.failed} échec{family.failed > 1 ? 's' : ''}
@@ -277,17 +251,17 @@ export function ProductionTab({
                       <tbody>
                         {metrics.runs.map((run, index) => (
                           <tr key={`${run.executedAt}-${index}`}>
-                            <td className="cell-num" style={{ whiteSpace: 'nowrap', textAlign: 'left' }}>
+                            <td className="cell-num dashboard-cell--when">
                               {formatDateTime(run.executedAt)}
                             </td>
                             <td>{JOB_TYPE_LABELS[run.jobType] ?? run.jobType}</td>
                             <td>
                               <StatusBadge status={run.status} />
                               {run.errorMessage && (
-                                <div className="meta" style={{ marginTop: 3, maxWidth: 320 }}>{run.errorMessage}</div>
+                                <div className="meta dashboard-cell__error">{run.errorMessage}</div>
                               )}
                             </td>
-                            <td className="cell-num" style={{ whiteSpace: 'nowrap' }}>{formatDuration(run.durationMs)}</td>
+                            <td className="cell-num dashboard-cell--nowrap">{formatDuration(run.durationMs)}</td>
                           </tr>
                         ))}
                       </tbody>
@@ -297,28 +271,15 @@ export function ProductionTab({
               )}
             </Panel>
 
-            <Panel title="Dernières pages produites" subtitle="Table generations" icon={FileText}>
+            <Panel title="Dernières pages produites" subtitle="Les plus récentes d’abord" icon={FileText}>
               {metrics.recent.length === 0 ? (
-                <p className="meta" style={{ margin: 0 }}>Aucune page produite sur la période.</p>
+                <p className="meta dashboard__flush">Aucune page produite sur la période.</p>
               ) : (
-                <ul style={{ listStyle: 'none', display: 'flex', flexDirection: 'column' }}>
+                <ul className="dashboard-list">
                   {metrics.recent.map((generation) => (
-                    <li
-                      key={generation.id}
-                      style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'space-between',
-                        gap: 'var(--space-3)',
-                        padding: 'var(--space-2) 0',
-                        borderBottom: '1px solid var(--line)',
-                      }}
-                    >
-                      <span style={{ flex: 1, minWidth: 0 }}>
-                        <span
-                          className="truncate"
-                          style={{ display: 'block', fontSize: 'var(--fs-sm)', fontWeight: 600, color: 'var(--ink-primary)' }}
-                        >
+                    <li key={generation.id} className="dashboard-list__item dashboard-list__item--split">
+                      <span className="dashboard-list__body">
+                        <span className="truncate dashboard-list__title dashboard-list__title--strong">
                           {generation.title || 'Sans titre'}
                         </span>
                         <span className="meta">
@@ -326,7 +287,7 @@ export function ProductionTab({
                           {generation.city ? ` · ${generation.city}` : ''} · {formatDateTime(generation.createdAt)}
                         </span>
                       </span>
-                      <span style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+                      <span className="dashboard-list__end">
                         <StatusBadge status={generation.status} />
                         {generation.publishedUrl && (
                           <a href={generation.publishedUrl} target="_blank" rel="noopener noreferrer" className="btn-link">
