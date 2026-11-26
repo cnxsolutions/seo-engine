@@ -12,78 +12,29 @@
 // may reach a client. Each query below names its columns, is bounded, and its
 // result is turned into the client's words by src/core/domain/client-space.
 
+import { readSitePeriod } from '@/lib/period'
 import { createServiceClient } from '@/lib/supabase'
 import {
   clientPageState,
   parisDay,
-  planTitles,
-  summarizePeriod,
   type ClientPageState,
-  type CycleRow,
   type PeriodSummary,
-  type SlotRow,
 } from '@/src/core/domain/client-space/overview'
 import type { ClientSiteDto } from './dto'
-
-/** A site with more campaigns than this is not a client site; it is a test bench. */
-const CAMPAIGNS_PER_SITE_MAX = 20
-/** A period holds a few dozen pages at most. */
-const SLOTS_PER_PERIOD_MAX = 200
-
-export const ONLINE_PAGES_PER_SCREEN = 20
 
 function fail(action: string, message: string): never {
   throw new Error(`[espace] ${action} : ${message}`)
 }
 
-async function campaignIdsOf(siteId: string): Promise<string[]> {
-  const { data, error } = await createServiceClient()
-    .from('campaigns').select('id').eq('site_id', siteId).limit(CAMPAIGNS_PER_SITE_MAX)
-  if (error) fail('campagnes du site', error.message)
-  return (data ?? []).map((row) => row.id as string)
-}
+export const ONLINE_PAGES_PER_SCREEN = 20
 
 /**
- * The period in progress: the executing cycles of the site's campaigns, their
- * pages in the calendar (pages only — Business Profile posts live in the same
- * table), and the titles their plans proposed. Three queries, whatever the
- * number of pages.
+ * The period in progress, for a site of the member's (ESP-2). The reading
+ * itself is shared with the console's site header (lib/period.ts); this door
+ * only takes the ClientSiteDto that lib/client-space/scope.ts hands out.
  */
 export async function readPeriod(site: ClientSiteDto, today: string = parisDay(new Date())): Promise<PeriodSummary | null> {
-  const campaignIds = await campaignIdsOf(site.id)
-  if (campaignIds.length === 0) return null
-
-  const supabase = createServiceClient()
-  const { data: cycles, error: cyclesError } = await supabase
-    .from('cycle_plans')
-    .select('cycle_started_at,cycle_ends_at,plan_data')
-    .in('campaign_id', campaignIds)
-    .eq('status', 'executing')
-    .limit(CAMPAIGNS_PER_SITE_MAX)
-  if (cyclesError) fail('periode en cours', cyclesError.message)
-
-  const rows = (cycles ?? []) as Array<CycleRow & { plan_data: unknown }>
-  const dated = rows.filter((cycle) => cycle.cycle_started_at && cycle.cycle_ends_at)
-  if (dated.length === 0) return null
-
-  const from = dated.map((cycle) => parisDay(cycle.cycle_started_at as string)).sort()[0]
-  const to = dated.map((cycle) => parisDay(cycle.cycle_ends_at as string)).sort().at(-1) as string
-
-  const { data: slots, error: slotsError } = await supabase
-    .from('editorial_calendar')
-    .select('id,scheduled_date,status,target_keyword,target_city,plan_item_id')
-    .in('campaign_id', campaignIds)
-    .eq('artifact_kind', 'page')
-    .gte('scheduled_date', from)
-    .lte('scheduled_date', to)
-    .order('scheduled_date', { ascending: true })
-    .limit(SLOTS_PER_PERIOD_MAX)
-  if (slotsError) fail('pages de la periode', slotsError.message)
-
-  const titles = new Map<string, string>()
-  for (const cycle of dated) for (const [id, title] of planTitles(cycle.plan_data)) titles.set(id, title)
-
-  return summarizePeriod(dated, (slots ?? []) as SlotRow[], titles, today)
+  return readSitePeriod(site.id, today)
 }
 
 export interface OnlinePage {

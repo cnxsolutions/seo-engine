@@ -2,14 +2,17 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   ChevronRight,
   Globe,
   LayoutDashboard,
+  Menu,
   MessageSquarePlus,
+  X,
   type LucideIcon,
 } from 'lucide-react'
+import { SHELL_TEXT } from '@/lib/console-labels'
 import { QUEUE_TEXT } from '@/lib/keyword-requests/operator-labels'
 import { BrandLockup } from './BrandMark'
 import { SITE_TABS, activeSiteTab, siteIdFromPathname, siteTabHref } from './site-tabs'
@@ -131,6 +134,75 @@ function useReviewCount(initial: number | null, pathname: string): number | null
   return count
 }
 
+/**
+ * Under 1 024 px the rail is a drawer (UX-5): it used to keep its 248 px and
+ * crush every screen to a column of single words.
+ *
+ * Open is remembered WITH the path it was opened on, so any navigation — a
+ * link in the drawer, the back button — closes it without an effect having to
+ * reset state. While open: the page does not scroll, Escape closes, Tab stays
+ * in the drawer; focus goes into it, then back to the button that opened it.
+ */
+interface DrawerRefs {
+  toggleRef: React.RefObject<HTMLButtonElement | null>
+  closeRef: React.RefObject<HTMLButtonElement | null>
+  drawerRef: React.RefObject<HTMLElement | null>
+}
+
+function useDrawer(pathname: string, { toggleRef, closeRef, drawerRef }: DrawerRefs) {
+  const [openAt, setOpenAt] = useState<string | null>(null)
+  const open = openAt === pathname
+  const wasOpen = useRef(false)
+
+  // Growing past the breakpoint turns the drawer back into the rail.
+  useEffect(() => {
+    const wide = window.matchMedia('(min-width: 1024px)')
+    const onChange = () => {
+      if (wide.matches) setOpenAt(null)
+    }
+    wide.addEventListener('change', onChange)
+    return () => wide.removeEventListener('change', onChange)
+  }, [])
+
+  useEffect(() => {
+    document.documentElement.classList.toggle('rail-open', open)
+    if (!open) {
+      if (wasOpen.current) toggleRef.current?.focus()
+      wasOpen.current = false
+      return
+    }
+
+    wasOpen.current = true
+    closeRef.current?.focus()
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setOpenAt(null)
+        return
+      }
+      if (event.key !== 'Tab' || !drawerRef.current) return
+      const focusable = drawerRef.current.querySelectorAll<HTMLElement>('a[href], button:not([disabled])')
+      if (focusable.length === 0) return
+      const first = focusable[0]
+      const last = focusable[focusable.length - 1]
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault()
+        last.focus()
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault()
+        first.focus()
+      }
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [open, toggleRef, closeRef, drawerRef])
+
+  return {
+    open,
+    openDrawer: () => setOpenAt(pathname),
+    closeDrawer: () => setOpenAt(null),
+  }
+}
+
 // ─── Component ───────────────────────────────────────────────────────────────
 
 export function Sidebar({ sites: initialSites, environment, reviewCount: initialReviewCount }: {
@@ -142,6 +214,10 @@ export function Sidebar({ sites: initialSites, environment, reviewCount: initial
   const pathname = usePathname()
   const sites = useSiteList(initialSites, pathname)
   const reviewCount = useReviewCount(initialReviewCount, pathname)
+  const toggleRef = useRef<HTMLButtonElement>(null)
+  const closeRef = useRef<HTMLButtonElement>(null)
+  const drawerRef = useRef<HTMLElement>(null)
+  const { open: drawerOpen, openDrawer, closeDrawer } = useDrawer(pathname, { toggleRef, closeRef, drawerRef })
 
   /**
    * One row lights up at a time. « Sites » owns the list and the creation form;
@@ -156,10 +232,43 @@ export function Sidebar({ sites: initialSites, environment, reviewCount: initial
   const activeSiteId = sites.find((site) => site.id === currentSiteId)?.id
 
   return (
-    <aside className="sidebar">
-      <Link href="/dashboard" className="sidebar-logo" aria-label="CNX SEO Engine — tableau de bord">
+    <>
+    {/* Below 1 024 px only (globals.css): the bar that opens the drawer. */}
+    <div className="topbar">
+      <button
+        ref={toggleRef}
+        type="button"
+        className="topbar__menu"
+        aria-label={SHELL_TEXT.openMenu}
+        aria-expanded={drawerOpen}
+        aria-controls="rail"
+        onClick={openDrawer}
+      >
+        <Menu size={20} aria-hidden="true" />
+      </button>
+      <Link href="/dashboard" className="topbar__brand" aria-label={SHELL_TEXT.home}>
         <BrandLockup />
       </Link>
+      {reviewCount !== null && reviewCount > 0 && (
+        <Link href="/demandes" className="topbar__count nav-count">
+          {reviewCount}
+          <span className="sr-only"> {QUEUE_TEXT.railCount(reviewCount)}</span>
+        </Link>
+      )}
+    </div>
+
+    <aside
+      id="rail"
+      ref={drawerRef}
+      className={`sidebar${drawerOpen ? ' sidebar--open' : ''}`}
+      {...(drawerOpen ? { role: 'dialog', 'aria-modal': true, 'aria-label': SHELL_TEXT.navigation } : {})}
+    >
+      <Link href="/dashboard" className="sidebar-logo" aria-label={SHELL_TEXT.home}>
+        <BrandLockup />
+      </Link>
+      <button ref={closeRef} type="button" className="sidebar__close" aria-label={SHELL_TEXT.closeMenu} onClick={closeDrawer}>
+        <X size={20} aria-hidden="true" />
+      </button>
 
       <nav aria-label="Navigation principale" style={{ flex: 1, padding: '0.5rem 0', overflowY: 'auto' }}>
         <div style={{ height: 8 }} />
@@ -207,6 +316,9 @@ export function Sidebar({ sites: initialSites, environment, reviewCount: initial
         </div>
       </div>
     </aside>
+    {/* The rest of the page, dimmed: a click on it closes the drawer (Escape and the close button do too). */}
+    <div className={`rail-scrim${drawerOpen ? ' rail-scrim--open' : ''}`} aria-hidden="true" onClick={closeDrawer} />
+    </>
   )
 }
 

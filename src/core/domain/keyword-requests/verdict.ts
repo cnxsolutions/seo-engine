@@ -152,18 +152,18 @@ export function fitVerdict(subject: RequestSubject, context: VerdictContext, opi
 
 function opinionVerdict(subject: RequestSubject, context: VerdictContext, opinion: FitOpinion | null): RequestVerdict {
   if (!opinion) {
-    return review('OPINION_UNAVAILABLE', ["L'avis automatique sur le metier n'a pas pu etre obtenu : la demande attend un regard humain."])
+    return review('OPINION_UNAVAILABLE', ["L'avis automatique sur le métier n'a pas pu être obtenu : la demande attend un regard humain."])
   }
   const opinionEvidence: Evidence = { kind: 'opinion', fit: opinion.fit, service: opinion.service, intent: opinion.intent }
 
   if (opinion.city && context.zone) {
     const zone = zoneVerdict(context.zone, [opinion.city])
-    if (zone) return { ...zone, reasons: [...zone.reasons, `Ville reconnue par le modele : ${opinion.city}.`], evidence: [...zone.evidence, opinionEvidence] }
+    if (zone) return { ...zone, reasons: [...zone.reasons, `Ville reconnue par le modèle : ${opinion.city}.`], evidence: [...zone.evidence, opinionEvidence] }
   }
   if (opinion.fit !== 'in') {
     return {
       ...review(opinion.fit === 'out' ? 'OUT_OF_TRADE' : 'UNSURE_TRADE', [
-        `Avis du modele : ${opinion.fit === 'out' ? 'hors metier' : 'incertain'} — ${opinion.reason}`,
+        `Avis du modèle : ${opinion.fit === 'out' ? 'hors métier' : 'incertain'} — ${opinion.reason}`,
       ]),
       evidence: [opinionEvidence],
     }
@@ -172,7 +172,7 @@ function opinionVerdict(subject: RequestSubject, context: VerdictContext, opinio
     status: 'deferred',
     reasonCode: 'NEXT_PERIOD',
     reasons: [
-      `Recevable${opinion.service ? ` (service reconnu : ${opinion.service})` : ''}. Gardee pour le plan de la periode suivante, ou elle passe en priorite.`,
+      `Recevable${opinion.service ? ` (service reconnu : ${opinion.service})` : ''}. Gardée pour le plan de la période suivante, où elle passe en priorité.`,
     ],
     evidence: [opinionEvidence],
   }
@@ -186,7 +186,7 @@ function plannedVerdict(subject: RequestSubject, context: VerdictContext): Reque
   return {
     status: 'scheduled',
     reasonCode: 'ALREADY_PLANNED',
-    reasons: [`Deja visee par un brief de la periode en cours${brief.day ? `, prevu le ${brief.day}` : ''} : « ${brief.targetKeyword} ».`],
+    reasons: [`Déjà visée par un brief de la période en cours${brief.day ? `, prévu le ${brief.day}` : ''} : « ${brief.targetKeyword} ».`],
     evidence: [{ kind: 'planned', day: brief.day, planItemId: brief.planItemId }],
     plan: { cyclePlanId: brief.cyclePlanId, planItemId: brief.planItemId, scheduledFor: brief.day },
   }
@@ -209,7 +209,7 @@ function wonVerdict(subject: RequestSubject, context: VerdictContext): RequestVe
   return {
     status: 'covered',
     reasonCode: 'ALREADY_WON',
-    reasons: [`Search Console : « ${won.query} » est deja en position ${won.position.toFixed(1)} sur ${won.pageUrl}. Une page de plus lui prendrait ses signaux.`],
+    reasons: [`Search Console : « ${won.query} » est déjà en position ${won.position.toFixed(1)} sur ${won.pageUrl}. Une page de plus lui prendrait ses signaux.`],
     evidence: [
       { kind: 'position', query: won.query, position },
       { kind: 'page', url: won.pageUrl },
@@ -236,7 +236,7 @@ function coveredVerdict(subject: RequestSubject, context: VerdictContext): Reque
   )
   if (same) {
     const url = addressOf(same, context.siteUrl)
-    return covered([`La page ${url} vise deja cette recherche comme mot-cle principal.`], url)
+    return covered([`La page ${url} vise déjà cette recherche comme mot-clé principal.`], url)
   }
 
   const action = decideEditorialAction(subject.target, context.editorial)
@@ -294,12 +294,12 @@ export function detectPlaces(normalizedSearch: string, knownPlaces: readonly str
 
 function zoneVerdict(zone: CampaignZone | null, cities: readonly string[]): RequestVerdict | null {
   if (!zone) {
-    return review('NO_CAMPAIGN', ["Aucune campagne sur ce site : rien a quoi confronter la demande."])
+    return review('NO_CAMPAIGN', ["Aucune campagne sur ce site : rien à quoi confronter la demande."])
   }
   if (cities.length === 0) return null
   if (zone.national) {
     return {
-      ...review('CITY_ON_NATIONAL', [`La demande vise ${cities[0]}, sur une campagne nationale : une page locale est un choix a faire avec le client.`]),
+      ...review('CITY_ON_NATIONAL', [`La demande vise ${cities[0]}, sur une campagne nationale : une page locale est un choix à faire avec le client.`]),
       evidence: [{ kind: 'city', city: cities[0] }],
     }
   }
@@ -323,6 +323,6 @@ function withDataNotes(verdict: RequestVerdict, context: VerdictContext): Reques
   if (context.editorial.gsc.available) return verdict
   return {
     ...verdict,
-    reasons: [...verdict.reasons, `Decide ${WITHOUT_SEARCH_CONSOLE} : les regles de position n'ont pas pu etre appliquees.`],
+    reasons: [...verdict.reasons, `Décidé ${WITHOUT_SEARCH_CONSOLE} : les règles de position n'ont pas pu être appliquées.`],
   }
 }

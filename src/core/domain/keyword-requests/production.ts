@@ -59,7 +59,7 @@ export function productionChange(
       from: 'scheduled',
       status: 'deferred',
       reason_code: 'NEXT_PERIOD',
-      reasons: ["Le creneau prevu n'existe plus (nouveau cycle) : gardee pour le suivant."],
+      reasons: ["Le créneau prévu n'existe plus (nouveau cycle) : gardée pour le suivant."],
       cycle_plan_id: null,
       plan_item_id: null,
       scheduled_for: null,
@@ -82,7 +82,7 @@ export function productionChange(
       from: request.status,
       status: 'review',
       reason_code: 'PRODUCTION_STOPPED',
-      reasons: [slot.error_message || generation?.error_message || "La production de la page s'est arretee."],
+      reasons: [slot.error_message || generation?.error_message || "La production de la page s'est arrêtée."],
     }
   }
 

@@ -118,7 +118,7 @@ describe('planOutcome — ce qu un plan qui demarre dit a chaque demande', () =>
     expect(changes).toEqual([
       {
         id: 'a', from: 'deferred', status: 'scheduled', reason_code: 'PLANNED',
-        reasons: ['Prevue au plan du cycle, creneau du 2026-11-28.'],
+        reasons: ['Prévue au plan du cycle, créneau du 2026-11-28.'],
         campaign_id: 'camp-1', cycle_plan_id: 'plan-2', plan_item_id: 'item-a', scheduled_for: '2026-11-28',
       },
       {
@@ -147,7 +147,7 @@ describe('planOutcome — ce qu un plan qui demarre dit a chaque demande', () =>
       { id: 'patiente', from: 'deferred', from_deferred_cycles: 0, status: 'deferred', deferred_cycles: 1 },
       {
         id: 'trop-longue', from: 'deferred', from_deferred_cycles: 2, status: 'review', reason_code: 'WAITED_TOO_LONG',
-        reasons: ['Gardee 3 cycles sans trouver de creneau : a examiner.'], deferred_cycles: 3,
+        reasons: ['Gardée 3 cycles sans trouver de créneau : à examiner.'], deferred_cycles: 3,
       },
     ])
   })
@@ -157,7 +157,7 @@ describe('releaseChanges — un creneau supprime rend la demande a la file', () 
   it('sans perte : de nouveau gardee, detachee du creneau', () => {
     expect(releaseChanges([{ id: 'r1' }])).toEqual([{
       id: 'r1', from: 'scheduled', status: 'deferred', reason_code: 'NEXT_PERIOD',
-      reasons: ["Le creneau prevu n'a pas ete produit avant la fin du cycle : gardee pour le suivant."],
+      reasons: ["Le créneau prévu n'a pas été produit avant la fin du cycle : gardée pour le suivant."],
       cycle_plan_id: null, plan_item_id: null, scheduled_for: null,
     }])
   })

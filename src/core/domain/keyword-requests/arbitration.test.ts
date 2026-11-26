@@ -29,7 +29,7 @@ describe('operatorDecision', () => {
   it('integrer marque la demande pour le cycle en cours, sans la sortir de la file', () => {
     expect(operatorDecision('integrate', 'review')).toEqual({
       ok: true,
-      decision: { from: 'review', status: 'deferred', reason_code: 'OPERATOR_INTEGRATE', reasons: ['Integration au cycle en cours demandee par CNX.'], detach: true },
+      decision: { from: 'review', status: 'deferred', reason_code: 'OPERATOR_INTEGRATE', reasons: ['Intégration au cycle en cours demandée par CNX.'], detach: true },
     })
     expect(operatorDecision('integrate', 'deferred')).toMatchObject({ ok: true, decision: { from: 'deferred', status: 'deferred' } })
   })

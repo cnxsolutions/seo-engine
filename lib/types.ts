@@ -20,10 +20,10 @@ export type PageType = 'pillar' | 'child' | 'alternative' | 'comparative' | 'loc
  * dependency graph backwards. `lib/types.ts` already declares `PageType`, has no
  * imports at all, and is already imported by both `lib/` and `app/`.
  *
- * ARBITRATION, since a shared dictionary settles wording: 'Enfant' and
- * 'Local pack' win the two labels that actually diverged. `comparative` keeps
- * 'Comparatif' — all five copies agreed on it, and a shared home is no reason to
- * put a word on screen the product has never used.
+ * The words are those of the glossary (docs/design.md § 10, lib/glossary.ts,
+ * L5b): « Page pilier », « Page détaillée », « Page locale » — what the page is
+ * for its reader, not the planner's tree. They stay HERE because this file has
+ * no import; the glossary reads them from it.
  *
  * NOT the place for the hub-block labels of `lib/seo/smart-linking.ts`
  * (« Guide complet », « Détail »): those are rendered inside a generated page
@@ -31,11 +31,11 @@ export type PageType = 'pillar' | 'child' | 'alternative' | 'comparative' | 'loc
  * audience, different sentence.
  */
 export const PAGE_TYPE_LABELS: Record<PageType, string> = {
-  pillar: 'Pilier',
-  child: 'Enfant',
+  pillar: 'Page pilier',
+  child: 'Page détaillée',
   alternative: 'Alternative',
   comparative: 'Comparatif',
-  local_pack: 'Local pack',
+  local_pack: 'Page locale',
 }
 
 /**

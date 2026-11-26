@@ -60,9 +60,9 @@ export function operatorDecision(
 
   switch (action) {
     case 'integrate':
-      return decided(status, rule.to, INTEGRATE_REASON_CODE, ['Integration au cycle en cours demandee par CNX.'])
+      return decided(status, rule.to, INTEGRATE_REASON_CODE, ['Intégration au cycle en cours demandée par CNX.'])
     case 'defer':
-      return decided(status, rule.to, 'OPERATOR_DEFERRED', ['Reportee au cycle suivant par CNX : le prochain plan la prend en premier.'])
+      return decided(status, rule.to, 'OPERATOR_DEFERRED', ['Reportée au cycle suivant par CNX : le prochain plan la prend en premier.'])
     case 'reopen':
       return decided(status, rule.to, 'OPERATOR_REOPENED', ['Rouverte par CNX.'])
     case 'decline': {

@@ -19,8 +19,10 @@ import { TriangleAlert } from 'lucide-react'
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import type { ReactNode } from 'react'
+import { SiteHero } from '@/components/SiteHero'
 import { SiteTabs } from '@/components/SiteTabs'
-import { PageHeader } from '@/components/ui'
+import { SITE_HEADER_TEXT } from '@/lib/console-labels'
+import { readSitePeriod } from '@/lib/period'
 import { connectorOf, loadSite } from './site-data'
 
 export const dynamic = 'force-dynamic'
@@ -37,27 +39,28 @@ export default async function SiteLayout({
   if (!site) notFound()
 
   const connector = connectorOf(site.type)
+  // The band's thread: the cycle in progress. A failed read draws no thread rather than a wrong one.
+  const period = await readSitePeriod(site.id).catch(() => null)
 
   return (
     <div className="site-shell">
-      <PageHeader
+      <SiteHero
         icon={connector.icon}
-        iconColor={connector.color}
-        badge={connector.label}
-        title={site.name}
-        backHref="/sites"
+        connectorLabel={connector.label}
+        name={site.name}
+        url={site.url}
+        period={period}
         meta={
           <>
-            <a href={site.url} target="_blank" rel="noopener noreferrer">{site.url}</a>
             {site.type === 'nextjs' && site.github_repo && (
-              <span>dépôt {site.github_repo} · branche {site.github_branch || 'par défaut'}</span>
+              <span>{SITE_HEADER_TEXT.repository(site.github_repo, site.github_branch)}</span>
             )}
-            {site.type === 'wordpress' && site.wp_username && <span>utilisateur {site.wp_username}</span>}
+            {site.type === 'wordpress' && site.wp_username && <span>{SITE_HEADER_TEXT.wordpressUser(site.wp_username)}</span>}
           </>
         }
       >
         <SiteTabs siteId={site.id} />
-      </PageHeader>
+      </SiteHero>
 
       {/* Sur chaque onglet, pas seulement la vue d'ensemble : c'est depuis le
           calendrier ou la publication qu'on se demande pourquoi rien ne part. */}
