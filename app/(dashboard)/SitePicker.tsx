@@ -75,7 +75,7 @@ export async function SitePicker({
   const ordered = [...active, ...sites.filter((site) => !site.isActive)]
 
   return (
-    <div style={{ maxWidth: 720 }}>
+    <div className="site-picker-page">
       <PageHeader icon={icon} badge={title} title="Choisissez un site" subtitle={description} />
 
       {ordered.length === 0 ? (
@@ -101,7 +101,7 @@ export async function SitePicker({
                   </span>
                   <span className="chip">{site.type === 'nextjs' ? 'Next.js' : 'WordPress'}</span>
                   {!site.isActive && <span className="badge badge-muted">Désactivé</span>}
-                  <ChevronRight size={15} aria-hidden="true" style={{ flexShrink: 0, color: 'var(--ink-faint)' }} />
+                  <ChevronRight size={15} aria-hidden="true" className="site-picker__chevron" />
                 </Link>
               </li>
             ))}

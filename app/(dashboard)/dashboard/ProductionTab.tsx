@@ -70,7 +70,7 @@ export function ProductionTab({
       <SourceNote
         source="le calendrier éditorial, les rédactions et les exécutions du moteur"
         period={period}
-        note={<>Scope : {scopeLabel}</>}
+        note={<>Périmètre : {scopeLabel}</>}
       />
 
       {metrics.unreadable.length > 0 && (

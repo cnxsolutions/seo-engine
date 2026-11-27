@@ -533,8 +533,8 @@ function PublicationSection({ site, hub, highlighted }: { site: SiteRow; hub: Hu
         </p>
       </div>
       {hub.metrics && hub.metrics.unreadable.length > 0 && (
-        <p className="meta" style={{ marginTop: 'var(--space-3)' }}>
-          Compteurs partiels : {hub.metrics.unreadable.join(', ')} illisible{hub.metrics.unreadable.length > 1 ? 's' : ''}.
+        <p className="meta hub-counters__partial">
+          Compteurs partiels : impossible de lire {hub.metrics.unreadable.join(', ')}.
         </p>
       )}
     </Section>

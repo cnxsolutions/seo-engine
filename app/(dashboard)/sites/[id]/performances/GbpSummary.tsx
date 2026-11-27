@@ -20,6 +20,7 @@ import Link from 'next/link'
 import { EmptyState, StatTile, UnknownValue, formatDayLong, formatMetric } from '@/components/ui'
 import { getGoogleSyncState } from '@/lib/google/sync'
 import { readGbpPostStats, readGbpReviewSummary } from '../gbp-stats'
+import './performances.css'
 
 export async function GbpSummary({ siteId }: { siteId: string }) {
   const [state, posts, reviews] = await Promise.all([
@@ -55,8 +56,8 @@ export async function GbpSummary({ siteId }: { siteId: string }) {
   const waiting = posts ? posts.pending + posts.uncertain : 0
 
   return (
-    <div style={{ display: 'grid', gap: 'var(--space-5)' }}>
-      <p className="meta" style={{ margin: 0 }}>
+    <div className="listing-figures">
+      <p className="meta">
         {reviews?.businessName ? `Fiche « ${reviews.businessName} »` : 'Fiche d’établissement'}
         {reviews?.syncedAt ? ` · lue le ${formatDayLong(reviews.syncedAt)}` : ' · jamais lue en entier'}
       </p>
@@ -83,7 +84,7 @@ export async function GbpSummary({ siteId }: { siteId: string }) {
         <StatTile
           label="Posts publiés par le moteur"
           icon={Send}
-          value={posts ? posts.published : <UnknownValue why="Le comptage des posts n’a pas pu être établi — la migration 019 n’est peut-être pas appliquée." />}
+          value={posts ? posts.published : <UnknownValue why="Le comptage des posts n’a pas pu être établi." />}
           hint={posts?.lastPublishedAt ? `dernier le ${formatDayLong(posts.lastPublishedAt)}` : 'Aucun post publié'}
         />
         <StatTile
@@ -95,13 +96,13 @@ export async function GbpSummary({ siteId }: { siteId: string }) {
         />
       </div>
 
-      <div className="inset" style={{ fontSize: 'var(--fs-sm)', color: 'var(--ink-secondary)', lineHeight: 'var(--lh-normal)' }}>
+      <div className="inset listing-figures__absent">
         Ce qui n’est pas affiché, et pourquoi : Google ne fournit plus aucune statistique par post (vues, clics)
         depuis 2023, et le moteur n’importe pas les indicateurs de la fiche (vues, appels, demandes d’itinéraire).
         Aucun chiffre n’est donc montré pour eux plutôt qu’un zéro qui passerait pour une mesure.
       </div>
 
-      <div style={{ display: 'flex', gap: 'var(--space-3)', flexWrap: 'wrap' }}>
+      <div className="listing-figures__links">
         <Link href={`/sites/${siteId}/publication?canal=fiche`} className="btn-secondary btn-sm">Piloter les posts</Link>
         <Link href={`/sites/${siteId}/reglages#google`} className="btn-ghost btn-sm">État de la synchronisation</Link>
       </div>

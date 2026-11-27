@@ -6,6 +6,7 @@ import { CheckCircle2, ScanSearch, TriangleAlert } from 'lucide-react'
 import { Button } from '@/components/ui'
 import type { IndexCheckJob } from '@/lib/indexing/check'
 import { summarizeIndexCheck } from '@/lib/indexing/summary'
+import './performances.css'
 
 const POLL_MS = 3000
 
@@ -70,19 +71,18 @@ export function CheckIndexingButton({ siteId }: { siteId: string }) {
   const failed = error !== null || summary?.failed === true
 
   return (
-    <span style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'flex-start', gap: 'var(--space-1)' }}>
+    <span className="index-check">
       <Button variant="secondary" size="sm" icon={ScanSearch} loading={running} onClick={start} disabled={running}>
         {running ? runningLabel(job) : 'Vérifier maintenant'}
       </Button>
       {message && (
         <span
-          className="meta"
+          className={`meta index-check__message${failed ? ' index-check__message--failed' : ''}`}
           role={failed ? 'alert' : undefined}
-          style={{ display: 'flex', gap: 4, alignItems: 'flex-start', maxWidth: 420, color: failed ? 'var(--status-critical-text)' : 'var(--status-good-text)' }}
         >
           {failed
-            ? <TriangleAlert size={12} style={{ flexShrink: 0, marginTop: 2 }} />
-            : <CheckCircle2 size={12} style={{ flexShrink: 0, marginTop: 2 }} />}
+            ? <TriangleAlert size={12} className="index-check__icon" />
+            : <CheckCircle2 size={12} className="index-check__icon" />}
           {message}
         </span>
       )}

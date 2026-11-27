@@ -480,6 +480,21 @@
   }
 }
 
+/* ── Error page — an address outside every screen, or a layout that failed:
+   no rail around it, one card in the middle of the page ── */
+
+.error-page {
+  display: grid;
+  place-items: center;
+  min-height: 100dvh;
+  padding: var(--space-6) var(--space-4);
+  background: var(--surface-page);
+}
+
+.error-page > .empty {
+  width: min(100%, 32rem);
+}
+
 /* ── Loading card — a spinner and its sentence, while a list is read ── */
 
 .glass-card.loading-card {
@@ -646,45 +661,6 @@
 
 .chart__num {
   font-variant-numeric: tabular-nums;
-}
-
-.site-select {
-  position: relative;
-  min-width: 232px;
-}
-
-.site-select.site-select--sm {
-  min-width: 180px;
-}
-
-.btn-secondary.site-select__button {
-  width: 100%;
-  justify-content: space-between;
-  font-weight: 500;
-}
-
-.site-select__current {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-2);
-  min-width: 0;
-}
-
-.site-select__check {
-  opacity: 0;
-}
-
-.site-select__check.site-select__check--on {
-  opacity: 1;
-}
-
-.site-select__option {
-  min-width: 0;
-  flex: 1;
-}
-
-.truncate.site-select__line {
-  display: block;
 }
 
 /* ── Modal, ConfirmModal ── */

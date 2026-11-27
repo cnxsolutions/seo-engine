@@ -56,6 +56,7 @@ import type { InventoryOrigin } from '@/src/core/domain/existing/inventory'
 import { loadSite } from '../site-data'
 import { TabIntro } from '../TabIntro'
 import { RefreshPagesButton } from '../../RefreshPagesButton'
+import './pages.css'
 
 export const dynamic = 'force-dynamic'
 
@@ -105,7 +106,7 @@ export default async function SitePagesPage({
         actions={
           // Re-read the site's pages, nothing else — it used to go through the
           // whole strategy wizard (lib/existing/refresh.ts).
-          <span style={{ display: 'inline-flex', alignItems: 'flex-start', gap: 'var(--space-3)' }}>
+          <span className="inventory-actions">
             <StatusBadge status={summary.freshness} />
             <RefreshPagesButton siteId={id} />
           </span>
@@ -120,11 +121,11 @@ export default async function SitePagesPage({
         <Notice
           tone="warning"
           title="Inventaire partiel"
-          body={`Le plafond de crawl a été atteint : ${countLabel(summary.crawledCount)} lues, il y en a davantage. Les seuils anti-doublon sont durcis en conséquence — un inventaire partiel rend le moteur plus prudent, jamais plus confiant.`}
+          body={`L’analyse s’est arrêtée à sa limite : ${countLabel(summary.crawledCount)} lues, il y en a davantage. Les seuils anti-doublon sont durcis en conséquence — un inventaire partiel rend le moteur plus prudent, jamais plus confiant.`}
         />
       )}
 
-      <div className="kpi-row" style={{ marginBottom: 'var(--space-6)' }}>
+      <div className="kpi-row inventory-kpis">
         <StatTile
           label="Pages vues sur le site"
           // JAMAIS de repli à zéro. Un crawl qui a tourné et n'a rien rapporté
@@ -138,7 +139,7 @@ export default async function SitePagesPage({
           icon={Library}
           hint={
             summary.truncated
-              ? 'Crawl plafonné — inventaire partiel, seuils durcis'
+              ? 'Analyse plafonnée — inventaire partiel, seuils durcis'
               : summary.crawledCount === null
                 ? 'Une analyse remplira ce compteur'
                 : 'Relevées par l’analyse du site'
@@ -170,15 +171,14 @@ export default async function SitePagesPage({
           repart de la première page au lieu d'atterrir sur une page vide. */}
       <form method="GET" className="toolbar">
         <input
-          className="input"
+          className="input inventory-search"
           type="search"
           name="q"
           defaultValue={q}
           placeholder="Filtrer par adresse ou par titre"
           aria-label="Filtrer par adresse ou par titre"
-          style={{ maxWidth: '22rem' }}
         />
-        <select className="input" name="origin" defaultValue={origin ?? ''} aria-label="Origine des pages">
+        <select className="input inventory-origin" name="origin" defaultValue={origin ?? ''} aria-label="Origine des pages">
           <option value="">Toutes les origines</option>
           <option value="crawl">Vues sur le site</option>
           <option value="engine">Publiées par le moteur</option>
@@ -190,7 +190,7 @@ export default async function SitePagesPage({
 
       <section className="panel">
         <div className="panel__header">
-          <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', minWidth: 0 }}>
+          <div className="inventory-title">
             <h2 className="card-title">Inventaire</h2>
             {summary.truncated && <RiskBadge level="inconnu" label="Partiel" size="sm" />}
           </div>
@@ -211,14 +211,9 @@ export default async function SitePagesPage({
           </div>
         ) : (
           <div className="panel__body--flush">
-            {/* Huit colonnes débordent `.main-content` bien avant 1280 px, et la
-                chaîne Tailwind de ce projet ne compile AUCUNE règle de point de
-                rupture : le tableau doit défiler dans son propre conteneur,
-                sinon c'est le corps de la page qui défile latéralement. Le
-                minWidth est ce qui rend `.scroll-x` effectif — sans lui, la
-                table à `width: 100%` se comprime au lieu de déborder. */}
+            {/* Le tableau défile dans son propre cadre (pages.css). */}
             <div className="scroll-x">
-              <table className="data-table" style={{ minWidth: '68rem' }}>
+              <table className="data-table inventory-table">
                 <thead>
                   <tr>
                     <th scope="col">Adresse</th>
@@ -246,18 +241,9 @@ export default async function SitePagesPage({
               jamais analysé se lirait comme une mesure, et l'état vide au-dessus
               a déjà dit ce qui manque. */}
           {total > 0 && (
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                gap: 'var(--space-3)',
-                flexWrap: 'wrap',
-                marginBottom: 'var(--space-2)',
-              }}
-            >
+            <div className="inventory-pager">
               <span className="num">{`${firstRow}–${lastRow} sur ${total}`}</span>
-              <span style={{ display: 'flex', gap: 'var(--space-2)' }}>
+              <span className="inventory-pager__links">
                 {view.page > 1 && (
                   <Link className="btn-ghost btn-sm" href={inventoryHref(id, q, origin, view.page - 1)}>
                     Précédent
@@ -271,8 +257,8 @@ export default async function SitePagesPage({
               </span>
             </div>
           )}
-          <p style={{ margin: 0 }}>
-            Source&nbsp;: la table site_pages (analyse du site) et les générations publiées. Le corps des
+          <p>
+            Source&nbsp;: l&apos;analyse du site et les pages publiées par le moteur. Le corps des
             pages n&apos;est jamais affiché ni chargé&nbsp;: seul un extrait par page est conservé, et c&apos;est
             pourquoi une comparaison de contenu ne prouve jamais l&apos;originalité d&apos;une page.
           </p>
@@ -290,7 +276,7 @@ function InventoryRow({ entry }: { entry: InventoryEntryDto }) {
   return (
     <tr>
       <th scope="row">
-        <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', flexWrap: 'wrap' }}>
+        <div className="inventory-path">
           <span className="chip">{entry.path}</span>
           {entry.url && (
             <a className="btn-link" href={entry.url} target="_blank" rel="noopener noreferrer">
@@ -302,7 +288,7 @@ function InventoryRow({ entry }: { entry: InventoryEntryDto }) {
             servie. Rendre son chemin sans le dire ferait compter au propriétaire
             une page qui n'existe nulle part. */}
         {!entry.url && (
-          <div className="meta" style={{ marginTop: 'var(--space-1)' }}>
+          <div className="meta inventory-reserved">
             Adresse réservée, pas encore en ligne
           </div>
         )}
@@ -310,7 +296,7 @@ function InventoryRow({ entry }: { entry: InventoryEntryDto }) {
 
       <td>
         {entry.title ? (
-          <div className="cell-strong truncate" title={entry.title} style={{ maxWidth: '22rem' }}>
+          <div className="cell-strong truncate inventory-cell--title" title={entry.title}>
             {entry.title}
           </div>
         ) : (
@@ -320,7 +306,7 @@ function InventoryRow({ entry }: { entry: InventoryEntryDto }) {
 
       <td>
         {entry.metaDescription ? (
-          <div className="truncate" title={entry.metaDescription} style={{ maxWidth: '26rem' }}>
+          <div className="truncate inventory-cell--description" title={entry.metaDescription}>
             {entry.metaDescription}
           </div>
         ) : (
@@ -335,7 +321,7 @@ function InventoryRow({ entry }: { entry: InventoryEntryDto }) {
       <td>
         {canonicalElsewhere ? (
           <span
-            style={{ display: 'inline-flex', alignItems: 'center', gap: 'var(--space-2)', flexWrap: 'wrap' }}
+            className="inventory-signals"
             title={`Cette page déclare que la version de référence est ${entry.canonicalPath}.`}
           >
             <RiskBadge level="avertissement" label="Canonique ailleurs" size="sm" />
@@ -349,7 +335,7 @@ function InventoryRow({ entry }: { entry: InventoryEntryDto }) {
       </td>
 
       <td>
-        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 'var(--space-2)', flexWrap: 'wrap' }}>
+        <span className="inventory-signals">
           {entry.noindex && (
             <span title="Cette page demande à Google de ne pas l’afficher.">
               <RiskBadge level="inconnu" label="Non indexable" size="sm" />
@@ -373,10 +359,10 @@ function InventoryRow({ entry }: { entry: InventoryEntryDto }) {
             sortiraient dans la même couleur, qui affirmerait un « succès » sans
             aucun sens ici. Une catégorie prend le `.chip`, comme page_type
             partout ailleurs dans le produit. */}
-        <span className="chip">{entry.origin === 'engine' ? 'Moteur' : 'Crawl'}</span>
+        <span className="chip">{entry.origin === 'engine' ? 'Moteur' : 'Analyse'}</span>
       </td>
 
-      <td className="cell-num" style={{ whiteSpace: 'nowrap' }}>
+      <td className="cell-num inventory-date">
         {entry.observedAt ? (
           formatDay(entry.observedAt)
         ) : (

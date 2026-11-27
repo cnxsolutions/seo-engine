@@ -29,6 +29,7 @@ import {
 } from '@/lib/google/tracking'
 import { Panel, SourceNote } from '@/app/(dashboard)/dashboard/ui-bits'
 import { formatCount, formatPercent, formatPosition, shortenUrl } from '@/app/(dashboard)/dashboard/viz'
+import './performances.css'
 
 export const BADGE: Record<TrackingTone, string> = {
   good: 'badge badge-success',
@@ -65,7 +66,7 @@ export async function PublishedTracking({ site }: { site: { id: string; name: st
       <EmptyState
         variant="error"
         title="Les mesures Search Console sont illisibles"
-        description="La table gsc_performance n’a pas pu être lue. Ce n’est pas une absence de trafic : rien ne peut être conclu tant qu’elle ne répond pas."
+        description="Les mesures Search Console enregistrées n’ont pas pu être lues. Ce n’est pas une absence de trafic : rien ne peut être conclu tant qu’elles ne sont pas lisibles."
       />
     )
   }
@@ -85,19 +86,19 @@ export async function PublishedTracking({ site }: { site: { id: string; name: st
   return (
     <div>
       <SourceNote
-        source="pages publiées par le moteur × table gsc_performance"
+        source="pages publiées par le moteur × Search Console"
         period={`depuis la publication de chaque page — données jusqu’au ${formatDayLong(tracking.lastDataDate ?? '')}`}
         note={<>{tracking.pages.length} page{tracking.pages.length > 1 ? 's' : ''} suivie{tracking.pages.length > 1 ? 's' : ''}</>}
       />
 
-      <p className="meta" style={{ margin: 'calc(-1 * var(--space-3)) 0 var(--space-5)', lineHeight: 'var(--lh-normal)' }}>
+      <p className="meta tracking-lede">
         Search Console publie avec deux à trois jours de retard, et une page neuve met une à deux semaines à apparaître :
         le verdict tient compte de l’âge de chaque page. Les positions sont calculées hors requêtes de marque.
       </p>
 
       <VerdictSummary pages={tracking.pages} />
 
-      <div style={{ display: 'grid', gap: 'var(--space-4)', marginBottom: 'var(--space-6)' }}>
+      <div className="tracking-pages">
         {tracking.pages.map((page) => <PageCard key={page.generationId} page={page} />)}
       </div>
 
@@ -115,7 +116,7 @@ function VerdictSummary({ pages }: { pages: readonly TrackedPage[] }) {
   }
 
   return (
-    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--space-2)', marginBottom: 'var(--space-5)' }}>
+    <div className="tracking-verdicts">
       {[...counts.values()].map((entry) => (
         <span key={entry.label} className={BADGE[entry.tone]}>
           {entry.count} · {entry.label}
@@ -131,25 +132,25 @@ function PageCard({ page }: { page: TrackedPage }) {
 
   return (
     <section className="panel">
-      <header className="panel__header" style={{ alignItems: 'flex-start' }}>
-        <div style={{ minWidth: 0 }}>
-          <h3 className="card-title" style={{ margin: 0 }}>
-            <a href={page.pageUrl} target="_blank" rel="noopener noreferrer" style={{ color: 'inherit' }}>
+      <header className="panel__header tracking-card__header">
+        <div className="tracking-card__titles">
+          <h3 className="card-title">
+            <a href={page.pageUrl} target="_blank" rel="noopener noreferrer" className="tracking-card__link">
               {page.title || shortenUrl(page.pageUrl)}
-              <ExternalLink size={12} aria-hidden="true" style={{ marginLeft: 6, verticalAlign: 'baseline' }} />
+              <ExternalLink size={12} aria-hidden="true" className="external-mark" />
             </a>
           </h3>
-          <p className="meta" style={{ marginTop: 'var(--space-1)' }}>
+          <p className="meta tracking-card__context">
             Publiée le {formatDayLong(page.publishedAt.slice(0, 10))} · J+{page.daysLive}
             {page.firstImpressionOn && ` · première impression le ${formatDayLong(page.firstImpressionOn)}`}
             {page.focusKeyword && <> · visée : « {page.focusKeyword} »</>}
           </p>
         </div>
-        <span className={BADGE[interpretation.tone]} style={{ flexShrink: 0 }}>{interpretation.label}</span>
+        <span className={`${BADGE[interpretation.tone]} verdict-badge`}>{interpretation.label}</span>
       </header>
 
-      <div className="panel__body" style={{ display: 'grid', gap: 'var(--space-3)' }}>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--space-2) var(--space-6)' }}>
+      <div className="panel__body tracking-card__body">
+        <div className="tracking-figures">
           <Figure label="Impressions" value={formatCount(page.impressions)} />
           <Figure label="Clics" value={formatCount(page.clicks)} />
           <Figure label="CTR" value={page.impressions > 0 ? formatPercent(page.ctr, 1) : '—'} />
@@ -157,25 +158,25 @@ function PageCard({ page }: { page: TrackedPage }) {
           <Figure label="Sur le mot-clé visé" value={page.targetPosition === null ? 'jamais affichée' : formatPosition(page.targetPosition)} />
         </div>
 
-        <p style={{ margin: 0, fontSize: 'var(--fs-sm)', color: 'var(--ink-primary)', lineHeight: 'var(--lh-normal)' }}>
+        <p className="tracking-card__text">
           {interpretation.explanation}
         </p>
-        <p style={{ margin: 0, fontSize: 'var(--fs-sm)', lineHeight: 'var(--lh-normal)' }}>
+        <p className="tracking-card__text">
           <strong>À faire :</strong> {interpretation.action}
         </p>
 
         {interpretation.insights.length > 0 && (
-          <ul className="meta" style={{ margin: 0, paddingLeft: '1.1rem', lineHeight: 'var(--lh-normal)' }}>
+          <ul className="meta tracking-card__insights">
             {interpretation.insights.map((line) => <li key={line}>{line}</li>)}
           </ul>
         )}
 
         {shownQueries > 0 && (
           <details>
-            <summary className="meta" style={{ cursor: 'pointer' }}>
+            <summary className="meta tracking-card__toggle">
               Les {shownQueries} requête{shownQueries > 1 ? 's' : ''} qui l’ont montrée
             </summary>
-            <div className="scroll-x" style={{ marginTop: 'var(--space-2)' }}>
+            <div className="scroll-x tracking-card__queries">
               <table className="data-table">
                 <thead>
                   <tr>
@@ -210,7 +211,7 @@ function Figure({ label, value }: { label: string; value: string }) {
   return (
     <div>
       <div className="meta">{label}</div>
-      <div className="num" style={{ fontWeight: 600, color: 'var(--ink-primary)' }}>{value}</div>
+      <div className="num tracking-figure__value">{value}</div>
     </div>
   )
 }
@@ -223,7 +224,7 @@ function UnexpectedPanel({ tracking }: { tracking: PublicationTracking }) {
       icon={Compass}
     >
       {tracking.unexpected.length === 0 ? (
-        <p className="meta" style={{ margin: 0, lineHeight: 'var(--lh-normal)' }}>
+        <p className="meta tracking-none">
           Aucune pour l’instant : chaque page n’est montrée que sur son sujet, ses variantes proches ou le nom du site.
         </p>
       ) : (
@@ -257,7 +258,7 @@ function UnexpectedPanel({ tracking }: { tracking: PublicationTracking }) {
           </table>
         </div>
       )}
-      <p className="meta" style={{ margin: 'var(--space-3) 0 0', display: 'flex', gap: 'var(--space-2)', alignItems: 'center' }}>
+      <p className="meta tracking-planner-note">
         <CalendarClock size={12} aria-hidden="true" />
         Le planificateur relit ces requêtes sur 90 jours à chaque nouveau plan, pas seulement celles des pages du moteur.
       </p>

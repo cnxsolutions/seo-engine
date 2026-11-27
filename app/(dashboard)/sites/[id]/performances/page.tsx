@@ -36,6 +36,7 @@ import { TabIntro } from '../TabIntro'
 import { GbpSummary } from './GbpSummary'
 import { IndexingStatus } from './IndexingStatus'
 import { PublishedTracking } from './PublishedTracking'
+import './performances.css'
 
 export const dynamic = 'force-dynamic'
 
@@ -86,13 +87,13 @@ export default async function SitePerformancePage({
       />
 
       <TabNav items={tabItems} active={view} ariaLabel="Nature des mesures" />
-      <p className="meta" style={{ margin: 'calc(-1 * var(--space-3)) 0 var(--space-4)' }}>{meta.caption}</p>
+      <p className="meta performance-caption">{meta.caption}</p>
 
       {/* La période ne s'applique ni à la fiche — avis et posts sont des
           totaux, pas des séries — ni au suivi, qui part de la publication de
           chaque page. Le filtre n'y apparaît donc pas. */}
       {view !== 'fiche' && view !== 'suivi' && view !== 'indexation' && (
-        <Suspense fallback={<div style={{ height: 44, marginBottom: 'var(--space-5)' }} />}>
+        <Suspense fallback={<div className="performance-filters-placeholder" />}>
           <DashboardFilters days={days} />
         </Suspense>
       )}

@@ -3,21 +3,20 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // One filter row, above everything it scopes
 //
-// Site and period live in the URL rather than in component state: the choice
+// The period lives in the URL rather than in component state: the choice
 // survives a reload, is shareable as a link, and the server components re-read
 // it without a client fetch. Per-chart filters are deliberately absent — every
 // panel on the active tab answers to this single row.
 //
-// Both controls are the SHARED ones (components/charts.tsx). The local
-// `SiteSwitcher.tsx` stand-in this file used to import has been deleted: the
-// same switcher already runs on /generate and /publish, and a second one would
-// have drifted the moment either changed.
+// There is no site in it any more: the dashboard measures every site, and a
+// site's Performances tab IS the site. The site switcher both used to carry was
+// rendered nowhere and has been removed from components/charts.tsx (L6f).
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { RefreshCw } from 'lucide-react'
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import { useTransition } from 'react'
-import { SiteSwitcher, Tabs, type SiteOption } from '@/components/charts'
+import { Tabs } from '@/components/charts'
 import './dashboard.css'
 
 const PERIODS = [
@@ -26,52 +25,27 @@ const PERIODS = [
   { id: '90', label: '90 j' },
 ]
 
-export function DashboardFilters({
-  sites,
-  siteId = null,
-  days,
-}: {
-  /**
-   * Omitted on a site's own Performances tab: the site is the page, not a
-   * filter, and a switcher there would offer to leave the site without saying
-   * so. The period stays — it is the only scope a site tab still has.
-   */
-  sites?: SiteOption[]
-  siteId?: string | null
-  days: number
-}) {
+export function DashboardFilters({ days }: { days: number }) {
   const router = useRouter()
   const pathname = usePathname()
   const searchParams = useSearchParams()
   const [pending, startTransition] = useTransition()
 
-  function apply(patch: Record<string, string | null>) {
+  function applyPeriod(days: string) {
     const next = new URLSearchParams(searchParams.toString())
-    for (const [key, value] of Object.entries(patch)) {
-      if (value === null) next.delete(key)
-      else next.set(key, value)
-    }
+    next.set('days', days)
     startTransition(() => router.replace(`${pathname}?${next.toString()}`, { scroll: false }))
   }
 
   return (
     // Held at reduced opacity while the server re-renders: no skeleton flash, no layout jump.
     <div className={`toolbar dashboard-filters${pending ? ' dashboard-filters--pending' : ''}`}>
-      {sites && (
-        <SiteSwitcher
-          sites={sites}
-          value={siteId}
-          onChange={(value) => apply({ site: value })}
-          size="sm"
-        />
-      )}
-
       <span className="toolbar__spacer" />
 
       <Tabs
         items={PERIODS}
         value={String(days)}
-        onChange={(value) => apply({ days: value })}
+        onChange={applyPeriod}
         variant="segmented"
         ariaLabel="Période"
       />
