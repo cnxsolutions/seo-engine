@@ -1,0 +1,99 @@
+/* ─────────────────────────────────────────────────────────────────────────────
+   The Pages tab of a site — the inventory of what is already online.
+
+   Three changes from the inline styles this file replaces, all on a desktop:
+     · the filter row holds on one line: the address field and the origin list
+       each took a whole line of their own (`.input` is 100 % wide), and
+       « Filtrer » sat alone on a third;
+     · an address stays on one line in its cell: the column, squeezed to its
+       narrowest, broke « /depannage-plomberie-troyes » at every hyphen;
+     · the table no longer widens the page: see `.scroll-x` in globals.css.
+   ───────────────────────────────────────────────────────────────────────────── */
+
+.inventory-actions {
+  display: inline-flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+}
+
+.kpi-row.inventory-kpis {
+  margin-bottom: var(--space-6);
+}
+
+/* ── The filter row ── */
+
+.input.inventory-search {
+  flex: 1 1 14rem;
+  width: auto;
+  max-width: 22rem;
+}
+
+.input.inventory-origin {
+  width: auto;
+}
+
+/* ── The table ── */
+
+.inventory-title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+/* Eight columns overflow `.main-content` well before 1280 px: the table scrolls
+   in its own `.scroll-x` frame, and this minimum is what makes it scroll rather
+   than squeeze. */
+.data-table.inventory-table {
+  min-width: 68rem;
+}
+
+.inventory-path {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.inventory-path > .chip {
+  white-space: nowrap;
+}
+
+.meta.inventory-reserved {
+  margin-top: var(--space-1);
+}
+
+.truncate.inventory-cell--title {
+  max-width: 22rem;
+}
+
+.truncate.inventory-cell--description {
+  max-width: 26rem;
+}
+
+.inventory-signals {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.cell-num.inventory-date {
+  white-space: nowrap;
+}
+
+/* ── The footer: where the rows are, and the source ── */
+
+.inventory-pager {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-bottom: var(--space-2);
+}
+
+.inventory-pager__links {
+  display: flex;
+  gap: var(--space-2);
+}

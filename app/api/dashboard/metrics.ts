@@ -97,7 +97,12 @@ async function readAll<T>(query: PageQuery<T>, max = MAX_ROWS): Promise<T[] | nu
 
   for (let from = 0; from < max; from += PAGE_SIZE) {
     const { data, error } = await query(from, Math.min(from + PAGE_SIZE, max) - 1)
-    if (error) return null
+    if (error) {
+      // The screen says « impossible de lire les rédactions »; the cause, with
+      // the table's name, is for the server log only.
+      console.warn('[dashboard] lecture impossible :', error.message)
+      return null
+    }
     if (!data || data.length === 0) break
     rows.push(...data)
     if (data.length < PAGE_SIZE) break
@@ -220,7 +225,10 @@ export interface ProductionMetrics {
   runs: JobRun[]
   runStats: JobFamilyStats[]
   recent: RecentGeneration[]
-  /** A table could not be read (missing/renamed). Displayed, never swallowed. */
+  /**
+   * What could not be read, in words (« les rédactions »): displayed as is,
+   * never swallowed. The cause is logged by `readAll`.
+   */
   unreadable: string[]
 }
 
@@ -293,7 +301,7 @@ export async function getProductionMetrics(siteId: string | null, days: number):
     return query.order('created_at', { ascending: false }).range(from, to)
   })
 
-  if (generations === null) unreadable.push('generations')
+  if (generations === null) unreadable.push('les rédactions')
 
   const slots: SlotRow[] | null = scopedToNoCampaign
     ? []
@@ -305,7 +313,7 @@ export async function getProductionMetrics(siteId: string | null, days: number):
         return query.order('scheduled_date', { ascending: true }).range(from, to)
       })
 
-  if (slots === null) unreadable.push('editorial_calendar')
+  if (slots === null) unreadable.push('le calendrier éditorial')
 
   // Scoped in JS rather than in the query, on purpose. `logJobExecution()` fills
   // `campaign_id` for the slot and publish jobs but NOT for the generation job,
@@ -322,7 +330,7 @@ export async function getProductionMetrics(siteId: string | null, days: number):
       .range(from, to)
   )
 
-  if (runs === null) unreadable.push('job_executions')
+  if (runs === null) unreadable.push('les exécutions du moteur')
 
   // ── Generation counters ──
   const rows = generations ?? []

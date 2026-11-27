@@ -39,7 +39,7 @@ production n'est touchee que pour appliquer une migration avant un merge.
 npm run dev          # http://localhost:3000
 npm run lint         # ESLint          — 0 erreur attendue (33 warnings tolerees)
 npm run typecheck    # tsc --noEmit    — 0 erreur attendue
-npm test             # Vitest          — 1 459 tests (106 fichiers), tous verts
+npm test             # Vitest          — 1 462 tests (107 fichiers), tous verts
 npm run build        # build local (sans sortie standalone, voir next.config.ts)
 ```
 
@@ -161,14 +161,15 @@ La DA est celle de CNX Solutions (site et films), detaillee dans `docs/design.md
   (`cnx-solutions/.../assets/css/theme.css`). Aucune valeur brute ailleurs.
 - **Deux polices** : `--font-display` (Plus Jakarta Sans) pour titres, chiffres,
   boutons, onglets ; `--font-sans` (Inter) pour le texte courant.
-- **Aucun nouveau style en ligne** (`style={{…}}`) : une classe de composant.
-  Les existants (675 au cadrage, 62 apres le L6e) se retirent ecran par ecran
-  (lot L6). Une valeur calculee (couleur d'un prop, longueur d'une barre) passe
-  par une propriete CSS personnalisee (`style={cssVars({ '--x': … })}`), lue par
-  la classe : c'est la seule forme de style en ligne admise. Le style des
-  composants partages vit dans `components/ui.css`.
+- **Aucun style en ligne** (`style={{…}}`) : une classe de composant. Il n'en
+  reste aucun depuis le L6f (675 au cadrage). Une valeur calculee (couleur d'un
+  prop, longueur d'une barre) passe par une propriete CSS personnalisee
+  (`style={cssVars({ '--x': … })}`), lue par la classe : c'est la seule forme de
+  style en ligne admise. Le style des composants partages vit dans
+  `components/ui.css`, celui d'un ecran dans le fichier `.css` de son dossier.
 - **Jamais `window.confirm()`** : `components/ConfirmDialog.tsx`, qui garde le
-  refus du serveur sous les yeux. **Jamais de jargon interne** dans un texte
+  refus du serveur sous les yeux. Ces deux regles sont verifiees par
+  `components/ui-rules.test.ts` : la CI echoue au premier ecart. **Jamais de jargon interne** dans un texte
   visible (nom de table, « gate », « slot »).
 - Tout nouveau couple texte/fond se mesure (AA, 4,5:1) avant d'entrer dans les jetons.
 
@@ -225,7 +226,7 @@ Auth). Une fuite d'un client vers un autre est LE risque du chantier :
 - **Cache GitHub Actions cloisonne par branche** : `main` ne lit pas le cache
   cree sur une branche de PR. Le premier build apres un merge repart de zero.
 - **Vitest echoue en bloc sous Git Bash** quand le chemin courant commence par
-  un lecteur en minuscule (`c:/laragon/...`) : les 106 fichiers tombent avec
+  un lecteur en minuscule (`c:/laragon/...`) : les 107 fichiers tombent avec
   « Cannot read properties of undefined (reading 'config') », zero test lance.
   Ce n'est pas le code : lancer `npm test` depuis PowerShell, ou `cd /C/laragon/...`.
 

@@ -20,6 +20,7 @@ import { countIndexStates, lastInspectionAt, listIndexingPage, type PageIndexing
 import { INDEX_STATE_GROUPS, type IndexStateGroup } from '@/src/core/domain/indexing/status'
 import { CheckIndexingButton } from './CheckIndexingButton'
 import { BADGE } from './PublishedTracking'
+import './performances.css'
 
 const PAGE_SIZE = 50
 
@@ -51,7 +52,7 @@ export async function IndexingStatus({ siteId, group, page }: { siteId: string; 
     )
   }
 
-  const summary = await Promise.all([countIndexStates(siteId), lastInspectionAt(siteId)]).catch(() => null)
+  const summary = await Promise.all([countIndexStates(siteId), lastInspectionAt(siteId)]).catch(logUnreadable)
   if (!summary) return <Unreadable />
   const [counts, lastCheck] = summary
 
@@ -65,12 +66,12 @@ export async function IndexingStatus({ siteId, group, page }: { siteId: string; 
         period={lastCheck ? `dernière vérification le ${formatDayLong(lastCheck)}` : 'aucune vérification encore'}
         note={<>{total} page{total > 1 ? 's' : ''} suivie{total > 1 ? 's' : ''}</>}
       />
-      <p className="meta" style={{ margin: 'calc(-1 * var(--space-3)) 0 var(--space-4)', lineHeight: 'var(--lh-normal)' }}>
+      <p className="meta indexing-lede">
         Chaque nuit à 5 h, le moteur inspecte les pages dues — une page non indexée à J+2, J+4, J+7 puis chaque semaine,
         une page indexée chaque mois. Google n’offre aucune API pour « Demander l’indexation » : pour une page qu’il
         n’a pas encore explorée, le moteur renvoie le sitemap (et IndexNow pour Bing). Les autres cas se corrigent sur le site.
       </p>
-      <div style={{ marginBottom: 'var(--space-5)' }}>
+      <div className="indexing-check">
         <CheckIndexingButton siteId={siteId} />
       </div>
     </>
@@ -95,7 +96,7 @@ export async function IndexingStatus({ siteId, group, page }: { siteId: string; 
   const listing = await listIndexingPage(siteId, INDEX_STATE_GROUPS[active], {
     offset: (currentPage - 1) * PAGE_SIZE,
     limit: PAGE_SIZE,
-  }).catch(() => null)
+  }).catch(logUnreadable)
   if (!listing) return <Unreadable />
   const { rows, total: groupTotal } = listing
   const lastPage = Math.max(1, Math.ceil(groupTotal / PAGE_SIZE))
@@ -113,15 +114,15 @@ export async function IndexingStatus({ siteId, group, page }: { siteId: string; 
       />
 
       {rows.length === 0 ? (
-        <p className="meta" style={{ lineHeight: 'var(--lh-normal)' }}>Aucune page dans cet état.</p>
+        <p className="meta indexing-none">Aucune page dans cet état.</p>
       ) : (
-        <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'grid', gap: 'var(--space-3)' }}>
+        <ul className="indexing-list">
           {rows.map((row) => <IndexRow key={row.id} row={row} />)}
         </ul>
       )}
 
       {lastPage > 1 && (
-        <nav aria-label="Pages de résultats" className="meta" style={{ display: 'flex', gap: 'var(--space-4)', alignItems: 'center', marginTop: 'var(--space-5)' }}>
+        <nav aria-label="Pages de résultats" className="meta indexing-pager">
           {currentPage > 1 && <a href={hrefFor(active, currentPage - 1)}>← Précédentes</a>}
           <span>Page {currentPage} sur {lastPage}</span>
           {currentPage < lastPage && <a href={hrefFor(active, currentPage + 1)}>Suivantes →</a>}
@@ -131,12 +132,18 @@ export async function IndexingStatus({ siteId, group, page }: { siteId: string; 
   )
 }
 
+/** The cause goes to the server log, never on screen: a table name means nothing to whoever reads it. */
+function logUnreadable(error: unknown): null {
+  console.warn('[indexing] page_indexing illisible (migration 020 appliquée ?) :', error instanceof Error ? error.message : error)
+  return null
+}
+
 function Unreadable() {
   return (
     <EmptyState
       variant="error"
       title="L’état d’indexation est illisible"
-      description="La table page_indexing n’a pas pu être lue (migration 020 appliquée ?). Ce n’est pas une absence d’indexation : rien ne peut être conclu tant qu’elle ne répond pas."
+      description="Les vérifications enregistrées n’ont pas pu être lues. Ce n’est pas une absence d’indexation : rien ne peut être conclu tant qu’elles ne sont pas lisibles."
     />
   )
 }
@@ -145,30 +152,24 @@ function IndexRow({ row }: { row: PageIndexingRow }) {
   const description = describeIndexState(row)
 
   return (
-    <li className="panel" style={{ padding: 'var(--space-4)' }}>
-      <div style={{ display: 'flex', gap: 'var(--space-3)', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-        <a
-          href={row.url}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="cell-strong"
-          style={{ color: 'inherit', minWidth: 0, overflowWrap: 'anywhere' }}
-        >
+    <li className="panel indexing-row">
+      <div className="indexing-row__head">
+        <a href={row.url} target="_blank" rel="noopener noreferrer" className="cell-strong indexing-row__link">
           {shortenUrl(row.url)}
-          <ExternalLink size={12} aria-hidden="true" style={{ marginLeft: 6, verticalAlign: 'baseline' }} />
+          <ExternalLink size={12} aria-hidden="true" className="external-mark" />
         </a>
-        <span className={BADGE[description.tone]} style={{ flexShrink: 0 }}>{description.label}</span>
+        <span className={`${BADGE[description.tone]} verdict-badge`}>{description.label}</span>
       </div>
 
       {row.coverage_state && (
-        <p className="meta" style={{ margin: 'var(--space-1) 0 0' }}>Google : « {row.coverage_state} »</p>
+        <p className="meta indexing-row__coverage">Google : « {row.coverage_state} »</p>
       )}
 
-      <p style={{ margin: 'var(--space-2) 0 0', fontSize: 'var(--fs-sm)', lineHeight: 'var(--lh-normal)' }}>
+      <p className="indexing-row__advice">
         {description.advice}
       </p>
 
-      <p className="meta" style={{ margin: 'var(--space-2) 0 0', display: 'flex', flexWrap: 'wrap', gap: 'var(--space-1) var(--space-3)' }}>
+      <p className="meta indexing-row__facts">
         {row.generation_id && <span>Page du moteur</span>}
         {row.last_crawl_at && <span>Dernier passage de Google le {formatDayLong(row.last_crawl_at)}</span>}
         {row.inspected_at && <span>Vérifiée le {formatDayLong(row.inspected_at)}</span>}
@@ -180,7 +181,7 @@ function IndexRow({ row }: { row: PageIndexingRow }) {
       </p>
 
       {row.last_error && (
-        <p className="meta" role="status" style={{ margin: 'var(--space-1) 0 0', color: 'var(--status-critical-text)' }}>
+        <p className="meta indexing-row__error" role="status">
           Dernier appel en échec : {row.last_error}
         </p>
       )}

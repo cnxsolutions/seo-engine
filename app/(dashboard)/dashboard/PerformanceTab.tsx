@@ -62,7 +62,7 @@ export function PerformanceTab({
         <SourceNote
           source="Google Search Console, synchronisé chaque nuit"
           period={requested}
-          note={<>Scope : {scopeLabel}</>}
+          note={<>Périmètre : {scopeLabel}</>}
         />
         <UnavailableState metrics={metrics} siteId={siteId} />
       </div>
@@ -460,7 +460,7 @@ function UnavailableState({ metrics, siteId }: { metrics: PerformanceMetrics; si
           variant="error"
           icon={Link2Off}
           title="Lecture impossible"
-          description="La table gsc_performance n'a pas pu être lue. Aucun chiffre n'est affiché plutôt que des zéros trompeurs."
+          description="Les mesures Search Console enregistrées n'ont pas pu être lues. Aucun chiffre n'est affiché plutôt que des zéros trompeurs."
         />
       )
   }

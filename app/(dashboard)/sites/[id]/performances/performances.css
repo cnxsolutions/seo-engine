@@ -1,0 +1,241 @@
+/* ─────────────────────────────────────────────────────────────────────────────
+   The Performances tab of a site — the views of the engine's own pages:
+   « Pages publiées » (PublishedTracking), « Indexation » (IndexingStatus and
+   its « Vérifier maintenant » button), « Fiche Google » (GbpSummary). The
+   Search Console and Production views are the dashboard's (dashboard.css).
+
+   Two changes from the inline styles this file replaces, both on a phone:
+     · a page card's title no longer shares its line with the verdict badge,
+       which squeezed it to a word per line;
+     · a card whose queries are open no longer widens past the screen, cutting
+       its sentences: its body is a grid column that may shrink below the
+       table, and the table scrolls in its own frame.
+   ───────────────────────────────────────────────────────────────────────────── */
+
+/* ── The tab: one line under the view tabs, a placeholder for the filters ── */
+
+.meta.performance-caption {
+  margin: calc(-1 * var(--space-3)) 0 var(--space-4);
+}
+
+/* The period filter's height while it loads: no jump when it arrives. */
+.performance-filters-placeholder {
+  height: 44px;
+  margin-bottom: var(--space-5);
+}
+
+/* ── Shared by the two lists of pages ── */
+
+.meta.tracking-lede,
+.meta.indexing-lede {
+  margin: calc(-1 * var(--space-3)) 0 var(--space-5);
+  line-height: var(--lh-normal);
+}
+
+.meta.indexing-lede {
+  margin-bottom: var(--space-4);
+}
+
+.external-mark {
+  margin-left: 6px;
+  vertical-align: baseline;
+}
+
+.badge.verdict-badge {
+  flex-shrink: 0;
+}
+
+/* ── Pages publiées ── */
+
+.tracking-verdicts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-bottom: var(--space-5);
+}
+
+.tracking-pages {
+  display: grid;
+  gap: var(--space-4);
+  margin-bottom: var(--space-6);
+}
+
+.panel__header.tracking-card__header {
+  align-items: flex-start;
+}
+
+.tracking-card__titles {
+  min-width: 0;
+}
+
+.tracking-card__link {
+  color: inherit;
+}
+
+.meta.tracking-card__context {
+  margin-top: var(--space-1);
+}
+
+.panel__body.tracking-card__body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-3);
+}
+
+.tracking-figures {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-6);
+}
+
+.num.tracking-figure__value {
+  font-weight: 600;
+  color: var(--ink-primary);
+}
+
+.tracking-card__text {
+  font-size: var(--fs-sm);
+  line-height: var(--lh-normal);
+}
+
+.meta.tracking-card__insights {
+  margin: 0;
+  padding-left: 1.1rem;
+  line-height: var(--lh-normal);
+}
+
+.meta.tracking-card__toggle {
+  cursor: pointer;
+}
+
+.scroll-x.tracking-card__queries {
+  margin-top: var(--space-2);
+}
+
+.meta.tracking-none {
+  line-height: var(--lh-normal);
+}
+
+.meta.tracking-planner-note {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+
+@media (max-width: 560px) {
+  .panel__header.tracking-card__header {
+    flex-wrap: wrap;
+  }
+
+  .tracking-card__titles {
+    flex-basis: 100%;
+  }
+}
+
+/* ── Indexation ── */
+
+.indexing-check {
+  margin-bottom: var(--space-5);
+}
+
+.index-check {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-1);
+}
+
+.meta.index-check__message {
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
+  max-width: 420px;
+  color: var(--status-good-text);
+}
+
+.meta.index-check__message--failed {
+  color: var(--status-critical-text);
+}
+
+.index-check__icon {
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.meta.indexing-none {
+  line-height: var(--lh-normal);
+}
+
+.indexing-list {
+  display: grid;
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.meta.indexing-pager {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  margin-top: var(--space-5);
+}
+
+.panel.indexing-row {
+  padding: var(--space-4);
+}
+
+.indexing-row__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.cell-strong.indexing-row__link {
+  min-width: 0;
+  color: inherit;
+  overflow-wrap: anywhere;
+}
+
+.meta.indexing-row__coverage {
+  margin-top: var(--space-1);
+}
+
+.indexing-row__advice {
+  margin-top: var(--space-2);
+  font-size: var(--fs-sm);
+  line-height: var(--lh-normal);
+}
+
+.meta.indexing-row__facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-3);
+  margin-top: var(--space-2);
+}
+
+.meta.indexing-row__error {
+  margin-top: var(--space-1);
+  color: var(--status-critical-text);
+}
+
+/* ── Fiche Google ── */
+
+.listing-figures {
+  display: grid;
+  gap: var(--space-5);
+}
+
+.inset.listing-figures__absent {
+  font-size: var(--fs-sm);
+  line-height: var(--lh-normal);
+  color: var(--ink-secondary);
+}
+
+.listing-figures__links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
