@@ -46,7 +46,7 @@ import {
   RowHead,
   freshnessNotice,
   hasDuplicateEvidence,
-  rowStyle,
+  rowClass,
 } from './queue-bits'
 // Le partage de la file et le compteur qui s'en déduit : un module de données
 // pur, testé sans rendu (./counts.test.ts).
@@ -215,7 +215,7 @@ export function PublishQueue({ siteId }: { siteId: string }) {
         />
       )}
 
-      <div className="kpi-row" style={{ marginBottom: 'var(--space-6)' }}>
+      <div className="kpi-row publication-kpis">
         <StatTile label="À publier" value={toPublish} icon={Clock} />
         <StatTile label="En cours" value={counts.publishing} icon={Send} />
         <StatTile label="Publiées" value={counts.published} icon={CheckCircle} />
@@ -231,7 +231,7 @@ export function PublishQueue({ siteId }: { siteId: string }) {
         </div>
       ) : loading ? (
         <div className="panel">
-          <div className="panel__body" style={{ display: 'flex', justifyContent: 'center', padding: 'var(--space-10)' }}>
+          <div className="panel__body publication-loading">
             <Loader2 size={22} className="animate-spin" color="var(--ink-faint)" />
           </div>
         </div>
@@ -273,7 +273,7 @@ export function PublishQueue({ siteId }: { siteId: string }) {
               et une ligne sans bouton au milieu de la file se lirait comme une
               panne du bouton. */}
           {legacyRefresh.length > 0 && (
-            <p className="meta" style={{ margin: 'calc(-1 * var(--space-3)) 0 var(--space-6)' }}>
+            <p className="meta publication-legacy-note">
               {legacyRefresh.length === 1
                 ? 'Une ancienne demande de mise à jour est ignorée : le moteur ne remplace plus les pages existantes, elle ne sera pas publiée.'
                 : `${legacyRefresh.length} anciennes demandes de mise à jour sont ignorées : le moteur ne remplace plus les pages existantes, elles ne seront pas publiées.`}
@@ -329,8 +329,8 @@ function QueueRow({
   const auto = g.campaign?.auto_publish ?? false
 
   return (
-    <div style={rowStyle(last, true)}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-4)', flexWrap: 'wrap' }}>
+    <div className={rowClass(last, true)}>
+      <div className="queue-row__line">
         <RowHead generation={g} extra={auto ? 'publication automatique' : 'publication manuelle'} />
         <StatusBadge status={g.status} />
         <DuplicateFlag verdict={g.duplicate_verdict} />
@@ -365,8 +365,8 @@ function RefusedRow({ generation: g, last }: { generation: FeedGeneration; last:
   const reasons = splitReasons(g.error_message)
 
   return (
-    <div style={rowStyle(last, true)}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-4)', flexWrap: 'wrap' }}>
+    <div className={rowClass(last, true)}>
+      <div className="queue-row__line">
         <RowHead generation={g} extra={new Date(g.updated_at).toLocaleDateString('fr-FR')} />
         <StatusBadge status={g.status} />
       </div>
@@ -396,8 +396,8 @@ function PublishedRow({ generation: g, last }: { generation: FeedGeneration; las
   const verdict = g.duplicate_verdict
 
   return (
-    <div style={rowStyle(last, hasDuplicateEvidence(verdict))}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-4)', flexWrap: 'wrap' }}>
+    <div className={rowClass(last, hasDuplicateEvidence(verdict))}>
+      <div className="queue-row__line">
         <RowHead generation={g} extra={`en ligne le ${new Date(when).toLocaleDateString('fr-FR')}`} />
         <StatusBadge status={g.status} />
         <DuplicateFlag verdict={verdict} />

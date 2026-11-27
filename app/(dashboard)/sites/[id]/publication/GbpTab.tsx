@@ -8,7 +8,7 @@
 // de la publication du site : le patron de file de ./PublishQueue (panneau,
 // ligne, une action par ligne avec `busy` et son erreur locale) et le patron de
 // lancement de ./GenerationPanel sont réemployés tels quels, jusqu'aux
-// composants — `Panel` et `rowStyle` viennent de ./queue-bits, sans un pixel
+// composants — `Panel` et `rowClass` viennent de ./queue-bits, sans un pixel
 // réécrit.
 //
 // LE SITE EST FIXÉ. L'onglet vit sous /sites/[id] et reçoit `siteId` : plus de
@@ -75,7 +75,7 @@ import {
   type GbpPostFeedResponse,
   type GbpPostPublishResponse,
 } from '@/app/api/gbp/posts/feed-types'
-import { Panel, rowStyle } from './queue-bits'
+import { Panel, rowClass } from './queue-bits'
 
 // ─── Vocabulaire ─────────────────────────────────────────────────────────────
 
@@ -401,7 +401,7 @@ export function GbpTab({ siteId }: { siteId: string }) {
 
   return (
     <div>
-      <div className="kpi-row" style={{ marginBottom: 'var(--space-6)' }}>
+      <div className="kpi-row publication-kpis">
         <StatTile label="À publier" value={countValue(counts.generated)} icon={Clock} />
         <StatTile label="En ligne" value={countValue(counts.published)} icon={CheckCircle} />
         <StatTile label="Refusés" value={countValue(counts.rejected)} icon={ShieldAlert} />
@@ -438,7 +438,7 @@ export function GbpTab({ siteId }: { siteId: string }) {
         </div>
       ) : loading ? (
         <div className="panel">
-          <div className="panel__body" style={{ display: 'flex', justifyContent: 'center', padding: 'var(--space-10)' }}>
+          <div className="panel__body publication-loading">
             <Loader2 size={22} className="animate-spin" color="var(--ink-faint)" />
           </div>
         </div>
@@ -579,17 +579,17 @@ function ComposePanel({
   const linkTarget = eligibility?.nextLinkTarget ?? null
 
   return (
-    <div className="panel" style={{ marginBottom: 'var(--space-6)' }}>
+    <div className="panel queue-panel">
       <div className="panel__header">
-        <div style={{ minWidth: 0 }}>
+        <div className="queue-panel__titles">
           <h2 className="card-title">Composer un post</h2>
-          <p className="meta" style={{ marginTop: 2 }}>
+          <p className="meta queue-panel__hint">
             Vous choisissez l’angle ; le moteur écrit le texte à partir de ce que la fiche déclare, et rien d’autre.
           </p>
         </div>
       </div>
 
-      <div className="panel__body" style={{ display: 'grid', gap: 'var(--space-4)' }}>
+      <div className="panel__body gbp-compose">
         {eligibility?.credentialsReady === false && (
           <Notice
             inline
@@ -613,8 +613,8 @@ function ComposePanel({
           />
         ) : (
           <>
-            <div style={{ display: 'grid', gap: 'var(--space-3)', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))' }}>
-              <label style={{ display: 'grid', gap: 'var(--space-1)' }}>
+            <div className="gbp-compose__fields">
+              <label className="gbp-compose__field">
                 <span className="field-label">Campagne</span>
                 <select className="input" value={campaignId} onChange={(e) => onCampaignChange(e.target.value)}>
                   <option value="">Choisir une campagne…</option>
@@ -624,7 +624,7 @@ function ComposePanel({
                 </select>
               </label>
 
-              <label style={{ display: 'grid', gap: 'var(--space-1)' }}>
+              <label className="gbp-compose__field">
                 <span className="field-label">Angle</span>
                 {/* Les angles fermés restent VISIBLES, grisés, avec leur motif en
                     infobulle. Les retirer laisserait l'opérateur devant une liste
@@ -649,9 +649,9 @@ function ComposePanel({
                 Elle est donc affichée en lecture seule — la politique la choisit,
                 l'opérateur la constate. */}
             {linkTarget ? (
-              <div className="inset" style={{ display: 'grid', gap: 'var(--space-1)' }}>
+              <div className="inset gbp-compose__target">
                 <span className="field-label">Page annoncée par ce post</span>
-                <span style={{ fontSize: 'var(--fs-sm)', color: 'var(--ink-secondary)', fontWeight: 600 }}>
+                <span className="gbp-compose__target-title">
                   {linkTarget.title ?? linkTarget.slug ?? 'Page sans titre'}
                 </span>
                 {linkTarget.published_url && (
@@ -659,13 +659,12 @@ function ComposePanel({
                     href={linkTarget.published_url}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="btn-link"
-                    style={{ justifySelf: 'start' }}
+                    className="btn-link gbp-compose__target-link"
                   >
                     {shortenUrl(linkTarget.published_url)} <ExternalLink size={12} />
                   </a>
                 )}
-                <span style={{ fontSize: 'var(--fs-xs)', color: 'var(--ink-secondary)' }}>
+                <span className="gbp-compose__target-note">
                   Ce post pointera vers cette page. Le maillage post → page est une précondition, pas un bonus.
                 </span>
               </div>
@@ -703,7 +702,7 @@ function ComposeOutcomeBlock({
 }) {
   if (outcome.ok) {
     return (
-      <div style={{ display: 'grid', gap: 'var(--space-3)' }}>
+      <div className="gbp-outcome">
         <Notice
           inline
           tone="good"
@@ -719,7 +718,7 @@ function ComposeOutcomeBlock({
   }
 
   return (
-    <div style={{ display: 'grid', gap: 'var(--space-3)' }}>
+    <div className="gbp-outcome">
       <ReasonList title={outcome.message} reasons={outcome.reasons} />
       {outcome.refusalKind === 'identifiants' && (
         <Notice
@@ -767,16 +766,7 @@ function PostPreview({ post, businessName }: { post: FeedGbpPost; businessName: 
 /** Le résumé COMPLET, jamais tronqué : c'est tout l'objet à relire avant de publier. */
 function FullSummary({ summary }: { summary: string }) {
   return (
-    <p
-      style={{
-        margin: 0,
-        fontSize: 'var(--fs-sm)',
-        color: 'var(--ink-secondary)',
-        whiteSpace: 'pre-wrap',
-        wordBreak: 'break-word',
-        lineHeight: 'var(--lh-normal)',
-      }}
-    >
+    <p className="gbp-summary">
       {summary}
     </p>
   )
@@ -784,7 +774,7 @@ function FullSummary({ summary }: { summary: string }) {
 
 function AngleChip({ post }: { post: FeedGbpPost }) {
   return (
-    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 'var(--space-2)', flexWrap: 'wrap' }}>
+    <span className="angle-chip">
       <span className="chip">{angleLabel(post.angle)}</span>
       {post.source === 'remote' && <span className="chip">écrit à la main</span>}
     </span>
@@ -808,9 +798,9 @@ function LinkedPage({ post }: { post: FeedGbpPost }) {
 function Cta({ post }: { post: FeedGbpPost }) {
   if (!post.cta_action_type) return null
   return (
-    <span className="meta" style={{ display: 'inline-flex', gap: 'var(--space-1)', minWidth: 0 }}>
+    <span className="meta gbp-cta">
       {ctaLabel(post.cta_action_type)}
-      {post.cta_url && <span className="mono truncate" style={{ maxWidth: 260 }}>{post.cta_url}</span>}
+      {post.cta_url && <span className="mono truncate gbp-cta__url">{post.cta_url}</span>}
     </span>
   )
 }
@@ -833,12 +823,12 @@ function QueueRow({
   onPublish: () => void
 }) {
   return (
-    <div style={rowStyle(last, true)}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-4)', flexWrap: 'wrap' }}>
+    <div className={rowClass(last, true)}>
+      <div className="queue-row__line">
         <AngleChip post={post} />
         <StatusBadge status={post.status} />
         {post.scheduled_for && <span className="meta">créneau du {formatDay(post.scheduled_for)}</span>}
-        <span style={{ flex: 1 }} />
+        <span className="queue-row__spacer" />
         <Button
           variant="secondary"
           size="sm"
@@ -853,14 +843,14 @@ function QueueRow({
 
       <FullSummary summary={post.summary} />
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-4)', flexWrap: 'wrap' }}>
+      <div className="queue-row__line">
         <LinkedPage post={post} />
         <Cta post={post} />
       </div>
 
       <details>
-        <summary className="meta" style={{ cursor: 'pointer' }}>Voir l’aperçu de la fiche</summary>
-        <div style={{ marginTop: 'var(--space-3)' }}>
+        <summary className="meta gbp-row__preview-toggle">Voir l’aperçu de la fiche</summary>
+        <div className="gbp-row__preview">
           <PostPreview post={post} businessName={siteName} />
         </div>
       </details>
@@ -895,8 +885,8 @@ function UncertainRow({
   onVerify: () => void
 }) {
   return (
-    <div style={rowStyle(last, true)}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-4)', flexWrap: 'wrap' }}>
+    <div className={rowClass(last, true)}>
+      <div className="queue-row__line">
         <AngleChip post={post} />
         <StatusBadge status={post.status} label="État inconnu" />
         <span className="meta">tentative du {formatDay(post.updated_at)}</span>
@@ -904,11 +894,11 @@ function UncertainRow({
 
       <FullSummary summary={post.summary} />
 
-      <div className="inset" style={{ display: 'grid', gap: 'var(--space-2)' }}>
-        <strong style={{ fontSize: 'var(--fs-sm)', color: 'var(--status-warning-text)' }}>
+      <div className="inset gbp-doubt">
+        <strong className="gbp-doubt__title">
           Le moteur ne sait pas si ce post a été publié
         </strong>
-        <p style={{ margin: 0, fontSize: 'var(--fs-sm)', color: 'var(--ink-secondary)', lineHeight: 1.55 }}>
+        <p className="gbp-doubt__text">
           L’envoi a été tenté et la fiche n’a ni confirmé ni refusé. Le post a peut-être été créé. Rien ne sera
           renvoyé tant que ce doute n’est pas levé : la vérification relit les posts de la fiche et les compare à
           celui-ci.
@@ -919,23 +909,14 @@ function UncertainRow({
             de format.ts, et la reformuler suffirait à la rendre inutilisable. */}
         {post.error_message && (
           <div className="scroll-x">
-            <pre
-              className="mono"
-              style={{
-                margin: 0,
-                fontSize: 'var(--fs-xs)',
-                color: 'var(--ink-secondary)',
-                whiteSpace: 'pre-wrap',
-                wordBreak: 'break-word',
-              }}
-            >
+            <pre className="mono gbp-doubt__response">
               {post.error_message}
             </pre>
           </div>
         )}
       </div>
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)', flexWrap: 'wrap' }}>
+      <div className="gbp-doubt__actions">
         <Button variant="secondary" size="sm" icon={Search} loading={busy} disabled={disabled} onClick={onVerify}>
           Vérifier maintenant
         </Button>
@@ -957,8 +938,8 @@ function RefusedRow({ post, siteId, last }: { post: FeedGbpPost; siteId: string;
   const help = kind ? REFUSAL_LABELS[kind]?.help : undefined
 
   return (
-    <div style={rowStyle(last, true)}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-4)', flexWrap: 'wrap' }}>
+    <div className={rowClass(last, true)}>
+      <div className="queue-row__line">
         <AngleChip post={post} />
         <StatusBadge status={post.status} />
         <span className="meta">{formatDay(post.updated_at)}</span>
@@ -968,7 +949,7 @@ function RefusedRow({ post, siteId, last }: { post: FeedGbpPost; siteId: string;
 
       <ReasonList title={refusalTitle(kind, post.status)} reasons={reasons} />
 
-      {help && <p className="meta" style={{ margin: 0 }}>{help}</p>}
+      {help && <p className="meta">{help}</p>}
 
       {kind === 'identifiants' && (
         <a href={`/sites/${siteId}/reglages#google`} className="btn-link">Voir la connexion Google</a>
@@ -981,11 +962,11 @@ function PublishedRow({ post, last }: { post: FeedGbpPost; last: boolean }) {
   const when = post.published_at ?? post.updated_at
 
   return (
-    <div style={rowStyle(last, false)}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-4)', flexWrap: 'wrap' }}>
-        <span className="meta" style={{ minWidth: 56 }}>{formatDay(when)}</span>
+    <div className={rowClass(last, false)}>
+      <div className="queue-row__line">
+        <span className="meta gbp-published__day">{formatDay(when)}</span>
         <AngleChip post={post} />
-        <span className="truncate" style={{ flex: 1, minWidth: 180, fontSize: 'var(--fs-sm)' }} title={post.summary}>
+        <span className="truncate gbp-published__summary" title={post.summary}>
           {post.summary}
         </span>
         {post.remote_state && post.remote_state !== 'LIVE' && (
@@ -1011,7 +992,7 @@ function PublishedRow({ post, last }: { post: FeedGbpPost; last: boolean }) {
  */
 function RowErrorBlock({ error }: { error: RowError }) {
   return (
-    <div style={{ display: 'grid', gap: 'var(--space-2)' }}>
+    <div className="gbp-row-error">
       <ReasonList title={error.message} reasons={error.reasons} />
       {error.written && (
         <Notice

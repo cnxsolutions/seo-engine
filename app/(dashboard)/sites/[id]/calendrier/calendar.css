@@ -1,0 +1,292 @@
+/* ─────────────────────────────────────────────────────────────────────────────
+   Calendrier — l'onglet d'un site : la barre de filtres, le récapitulatif par
+   statut, la grille du mois, la liste, le détail d'un créneau (L6e).
+
+   Ces règles rendent ce que rendaient les styles en ligne, avec deux écarts
+   voulus :
+   - la grille du mois a sept colonnes ÉGALES. Avant, le texte d'un créneau
+     (une ligne insécable) élargissait sa colonne : lundi étroit, vendredi
+     large sur ordinateur, et sur téléphone vendredi à dimanche sortaient du
+     panneau. Le titre d'un créneau se coupe désormais en « … » dans sa case ;
+   - la navigation du mois (précédent, mois, suivant) ne se sépare plus sur
+     deux lignes quand la barre passe à la ligne.
+   La couleur de chaque statut est définie ici, une fois, par ton
+   (`.slot-tone--*`) : la pastille, son point et la puce de la grille la lisent.
+   ───────────────────────────────────────────────────────────────────────────── */
+
+.slot-tone--muted { --slot-color: var(--ink-faint); }
+.slot-tone--warning { --slot-color: var(--status-warning); }
+.slot-tone--accent { --slot-color: var(--accent); }
+.slot-tone--good { --slot-color: var(--status-good); }
+.slot-tone--critical { --slot-color: var(--status-critical); }
+
+/* ── La barre ── */
+
+.input.calendar-filter--campaign { max-width: 240px; }
+.input.calendar-filter--status { max-width: 180px; }
+.input.calendar-filter--kind { max-width: 200px; }
+
+.calendar-nav {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.calendar-month {
+  font-weight: 600;
+  min-width: 150px;
+  text-align: center;
+  text-transform: capitalize;
+}
+
+/* ── Le récapitulatif du mois, une pastille par statut ── */
+
+.calendar-recap {
+  display: flex;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  margin-bottom: var(--space-4);
+}
+
+.badge.calendar-recap__item {
+  border: 1px solid transparent;
+  cursor: pointer;
+}
+
+.badge.calendar-recap__item--on {
+  border-color: var(--slot-color);
+}
+
+.calendar-recap__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--slot-color);
+}
+
+.glass-card.calendar-alert {
+  border-left: 3px solid var(--status-critical);
+  margin-bottom: var(--space-4);
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.calendar-alert__icon {
+  flex-shrink: 0;
+}
+
+.calendar-alert__text {
+  flex: 1;
+  font-size: var(--fs-sm);
+}
+
+/* ── La grille du mois ── */
+
+.month-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+}
+
+.month-grid__weekday {
+  padding: var(--space-2);
+  text-align: center;
+  font-size: var(--fs-2xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: var(--ls-eyebrow);
+  color: var(--ink-muted);
+  background: var(--surface-inset);
+  border-bottom: 1px solid var(--line);
+}
+
+.month-grid__blank,
+.month-grid__day {
+  min-height: 98px;
+  border-bottom: 1px solid var(--line);
+  border-right: 1px solid var(--line);
+}
+
+.month-grid__day {
+  padding: var(--space-1);
+}
+
+.month-grid__day--today {
+  background: var(--accent-wash);
+}
+
+.month-grid__date {
+  font-size: var(--fs-2xs);
+  font-weight: 500;
+  color: var(--ink-muted);
+  margin-bottom: 3px;
+  padding-left: 2px;
+}
+
+.month-grid__date--today {
+  font-weight: 700;
+  color: var(--accent-text);
+}
+
+.btn-link.month-grid__more {
+  padding: 2px 4px;
+}
+
+.slot-chip {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  width: 100%;
+  padding: 2px 5px;
+  margin-bottom: 2px;
+  border-radius: var(--radius-xs);
+  background: color-mix(in srgb, var(--slot-color) 12%, transparent);
+  border: none;
+  border-left: 2px solid var(--slot-color);
+  font-size: var(--fs-2xs);
+  color: var(--ink-primary);
+  text-align: left;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.slot-chip__icon {
+  flex-shrink: 0;
+}
+
+/* ── La liste ── */
+
+.slot-row {
+  cursor: pointer;
+}
+
+.slot-row__date {
+  white-space: nowrap;
+}
+
+.cell-strong.slot-row__title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.truncate.slot-row__error {
+  font-size: var(--fs-xs);
+  color: var(--status-critical-text);
+  margin-top: 2px;
+  max-width: 380px;
+}
+
+.badge.slot-row__stalled {
+  margin-left: 4px;
+}
+
+.truncate.slot-outcome__summary {
+  display: inline-block;
+  max-width: 280px;
+}
+
+/* ── Le détail d'un créneau ── */
+
+.panel__body.slot-detail {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.slot-detail__badges {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+/* Un report n'est pas une panne : il garde le ton de l'avertissement. */
+.inset.slot-detail__message {
+  border-left: 3px solid var(--status-critical);
+}
+
+.inset.slot-detail__message--postponed {
+  border-left-color: var(--status-warning);
+}
+
+.slot-detail__message-title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--status-critical-text);
+  font-weight: 600;
+  font-size: var(--fs-xs);
+  margin-bottom: 4px;
+}
+
+.slot-detail__message--postponed .slot-detail__message-title {
+  color: var(--status-warning-text);
+}
+
+/* Un message d'erreur ou le texte d'un post : retours à la ligne gardés,
+   un jeton insécable ne pousse pas le dialogue hors de l'écran. */
+.slot-detail__text {
+  font-size: var(--fs-sm);
+  color: var(--ink-secondary);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.slot-detail__text--after-label {
+  margin-top: var(--space-1);
+}
+
+.inset.slot-detail__reschedule {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.slot-detail__reschedule-title {
+  font-size: var(--fs-xs);
+  font-weight: 600;
+}
+
+.slot-detail__reschedule-row {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.input.slot-detail__date {
+  max-width: 180px;
+}
+
+.slot-detail__save-error {
+  font-size: var(--fs-xs);
+  color: var(--status-critical-text);
+}
+
+.btn-secondary.slot-detail__open {
+  justify-self: start;
+}
+
+.slot-detail__links {
+  display: flex;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
+.detail-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-4);
+}
+
+.meta.detail-row__label {
+  flex-shrink: 0;
+}
+
+.detail-row__value {
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  text-align: right;
+  word-break: break-word;
+}

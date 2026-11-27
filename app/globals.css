@@ -829,6 +829,14 @@ textarea.input {
   gap: var(--space-3);
 }
 
+/* On a phone five or six tiles on one line squeezed until their labels were
+   cut: they wrap, two or three to a row. */
+@media (max-width: 720px) {
+  .kpi-row {
+    grid-template-columns: repeat(auto-fit, minmax(min(9rem, 100%), 1fr));
+  }
+}
+
 .stat-card {
   background: var(--surface-card);
   border: 1px solid var(--line);

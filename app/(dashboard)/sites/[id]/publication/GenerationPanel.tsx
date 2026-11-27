@@ -62,7 +62,7 @@ import {
   RowHead,
   freshnessNotice,
   hasDuplicateEvidence,
-  rowStyle,
+  rowClass,
 } from './queue-bits'
 
 const EMPTY_COUNTS: GenerationCounts = {
@@ -244,7 +244,7 @@ export function GenerationPanel({ siteId }: { siteId: string }) {
       </div>
 
       {/* Counts — the whole scope, not the filtered page */}
-      <div className="kpi-row" style={{ marginBottom: 'var(--space-6)' }}>
+      <div className="kpi-row publication-kpis">
         <StatTile label="En attente" value={counts.pending} icon={Clock} />
         <StatTile label="En cours" value={counts.generating} icon={Loader2} />
         <StatTile label="Prêtes à publier" value={counts.generated} icon={CheckCircle} />
@@ -270,11 +270,11 @@ export function GenerationPanel({ siteId }: { siteId: string }) {
       )}
 
       {/* Launch */}
-      <div className="panel" style={{ marginBottom: 'var(--space-6)' }}>
+      <div className="panel queue-panel">
         <div className="panel__header">
           <h2 className="card-title">Lancer une génération</h2>
         </div>
-        <div className="panel__body" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
+        <div className="panel__body generation-launch">
           {eligibleCampaigns.length === 0 ? (
             <EmptyState
               bare
@@ -285,13 +285,12 @@ export function GenerationPanel({ siteId }: { siteId: string }) {
             />
           ) : (
             <>
-              <div style={{ display: 'flex', gap: 'var(--space-2)', flexWrap: 'wrap', alignItems: 'center' }}>
+              <div className="generation-launch__controls">
                 <select
-                  className="input"
+                  className="input generation-launch__campaign"
                   value={campaignId}
                   onChange={(e) => setCampaignId(e.target.value)}
                   aria-label="Campagne"
-                  style={{ width: 'auto', minWidth: 260 }}
                 >
                   <option value="">Choisir une campagne…</option>
                   {eligibleCampaigns.map((c) => (
@@ -303,12 +302,11 @@ export function GenerationPanel({ siteId }: { siteId: string }) {
                 </select>
 
                 <input
-                  className="input"
+                  className="input generation-launch__city"
                   value={city}
                   onChange={(e) => setCity(e.target.value)}
                   placeholder="Commune (facultatif)"
                   aria-label="Commune"
-                  style={{ width: 'auto', minWidth: 200 }}
                 />
 
                 <button className="btn-primary" onClick={launch} disabled={!campaignId || running}>
@@ -348,7 +346,7 @@ export function GenerationPanel({ siteId }: { siteId: string }) {
             <EmptyState bare variant="error" description={loadError} action={{ label: 'Réessayer', onClick: load }} />
           </div>
         ) : loading ? (
-          <div className="panel__body" style={{ display: 'flex', justifyContent: 'center', padding: 'var(--space-10)' }}>
+          <div className="panel__body publication-loading">
             <Loader2 size={22} className="animate-spin" color="var(--ink-faint)" />
           </div>
         ) : generations.length === 0 ? (
@@ -409,8 +407,8 @@ function GenerationRow({
   const verdict = g.duplicate_verdict
 
   return (
-    <div style={rowStyle(last, (refused && reasons.length > 0) || hasDuplicateEvidence(verdict))}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-4)', flexWrap: 'wrap' }}>
+    <div className={rowClass(last, (refused && reasons.length > 0) || hasDuplicateEvidence(verdict))}>
+      <div className="queue-row__line">
         <RowHead generation={g} extra={new Date(g.created_at).toLocaleDateString('fr-FR')} />
 
         <StatusBadge status={g.status} />
@@ -604,8 +602,8 @@ function RefusalActions({ generation: g, onChanged }: { generation: FeedGenerati
   }
 
   return (
-    <div className="inset" style={{ display: 'grid', gap: 'var(--space-3)' }}>
-      <div style={{ display: 'flex', gap: 'var(--space-2)', flexWrap: 'wrap' }}>
+    <div className="inset refusal-actions">
+      <div className="refusal-actions__buttons">
         {/* « Réessayer » n'a de sens que sur un refus de destination : un
             doublon ne se dissout pas en republiant le même texte au même
             endroit, et le proposer ferait tourner l'opérateur en rond. */}
@@ -641,7 +639,7 @@ function RefusalActions({ generation: g, onChanged }: { generation: FeedGenerati
       </div>
 
       {duplicate && (
-        <p className="meta" style={{ margin: 0 }}>
+        <p className="meta">
           {canRelaunch
             ? 'Relancer ne remplace pas la page en cause. Le moteur ne supprime, ne fusionne, ne redirige ni ne met à jour aucune page existante.'
             : 'Cette génération n’appartient à aucune campagne : il n’y a rien à relancer depuis ici. Les motifs ci-dessus disent ce qui a été relevé.'}
@@ -696,23 +694,12 @@ function RefusalActions({ generation: g, onChanged }: { generation: FeedGenerati
 
 function OutcomeBlock({ outcome }: { outcome: RunOutcome }) {
   return (
-    <div
-      className="inset"
-      style={{
-        borderLeft: `2px solid ${outcome.ok ? 'var(--status-good)' : 'var(--status-critical)'}`,
-      }}
-    >
-      <div
-        style={{
-          fontSize: 'var(--fs-sm)',
-          fontWeight: 600,
-          color: outcome.ok ? 'var(--status-good-text)' : 'var(--status-critical-text)',
-        }}
-      >
+    <div className={`inset run-outcome${outcome.ok ? ' run-outcome--ok' : ''}`}>
+      <div className="run-outcome__message">
         {outcome.message}
       </div>
       {outcome.reasons && outcome.reasons.length > 0 && (
-        <ul style={{ margin: 'var(--space-2) 0 0', paddingLeft: '1.1rem', fontSize: 'var(--fs-xs)', color: 'var(--ink-secondary)', lineHeight: 1.7 }}>
+        <ul className="run-outcome__reasons">
           {outcome.reasons.map((reason, i) => (
             <li key={i}>{reason}</li>
           ))}

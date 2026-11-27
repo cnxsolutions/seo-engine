@@ -325,7 +325,7 @@ export default function EditCampaignPage() {
       )}
 
       {!loadError && (!campaign || !form) && (
-        <div className="glass-card strategy-loading">
+        <div className="glass-card loading-card">
           <Loader2 size={22} className="animate-spin" color="var(--ink-faint)" />
           <span className="meta">Chargement de la campagne…</span>
         </div>

@@ -24,6 +24,7 @@ import { PAGE_TYPE_LABELS, type Campaign, type CalendarSlot } from '@/lib/types'
 // nés. Les deux modules sont des composants clients : l'import ne traverse
 // aucune frontière serveur.
 import { angleLabel } from '../publication/GbpTab'
+import './calendar.css'
 
 // ─── View model ──────────────────────────────────────────────
 //
@@ -39,10 +40,13 @@ import { angleLabel } from '../publication/GbpTab'
 
 // ─── Status & type dictionaries ──────────────────────────────
 
+/** The colour behind a tone lives in calendar.css (`.slot-tone--<tone>`). */
+type SlotTone = 'muted' | 'warning' | 'accent' | 'good' | 'critical'
+
 interface StatusMeta {
   label: string
-  /** Token, not a hex: the same six colours drive the badge and the month grid. */
-  color: string
+  /** One tone drives the recap pill, its dot and the month grid's chip. */
+  tone: SlotTone
   badge: string
 }
 
@@ -52,21 +56,16 @@ interface StatusMeta {
  * month grid needs the matching colour for the chip rule anyway.
  */
 const STATUS_META: Record<string, StatusMeta> = {
-  planned: { label: 'Planifié', color: 'var(--ink-faint)', badge: 'badge badge-muted' },
-  generating: { label: 'Génération…', color: 'var(--status-warning)', badge: 'badge badge-warning' },
-  generated: { label: 'Généré', color: 'var(--accent)', badge: 'badge badge-info' },
-  published: { label: 'Publié', color: 'var(--status-good)', badge: 'badge badge-success' },
-  failed: { label: 'Échec', color: 'var(--status-critical)', badge: 'badge badge-danger' },
-  skipped: { label: 'Ignoré', color: 'var(--ink-faint)', badge: 'badge badge-muted' },
+  planned: { label: 'Planifié', tone: 'muted', badge: 'badge badge-muted' },
+  generating: { label: 'Génération…', tone: 'warning', badge: 'badge badge-warning' },
+  generated: { label: 'Généré', tone: 'accent', badge: 'badge badge-info' },
+  published: { label: 'Publié', tone: 'good', badge: 'badge badge-success' },
+  failed: { label: 'Échec', tone: 'critical', badge: 'badge badge-danger' },
+  skipped: { label: 'Ignoré', tone: 'muted', badge: 'badge badge-muted' },
 }
 
 function statusMeta(status: string): StatusMeta {
-  return STATUS_META[status] ?? { label: status || 'Inconnu', color: 'var(--ink-faint)', badge: 'badge badge-muted' }
-}
-
-/** A tint that works whether the colour is a token or a literal. */
-function tint(color: string, percent: number): string {
-  return `color-mix(in srgb, ${color} ${percent}%, transparent)`
+  return STATUS_META[status] ?? { label: status || 'Inconnu', tone: 'muted', badge: 'badge badge-muted' }
 }
 
 /**
@@ -360,8 +359,7 @@ export function CalendarView({ siteId }: { siteId: string }) {
           <select
             value={campaignId}
             onChange={(e) => setCampaignId(e.target.value)}
-            className="input"
-            style={{ maxWidth: 240 }}
+            className="input calendar-filter--campaign"
             aria-label="Campagne"
           >
             <option value="">Toutes les campagnes</option>
@@ -372,8 +370,7 @@ export function CalendarView({ siteId }: { siteId: string }) {
         <select
           value={statusFilter}
           onChange={(e) => setStatusFilter(e.target.value)}
-          className="input"
-          style={{ maxWidth: 180 }}
+          className="input calendar-filter--status"
           aria-label="Statut"
         >
           <option value="">Tous les statuts</option>
@@ -390,8 +387,7 @@ export function CalendarView({ siteId }: { siteId: string }) {
         <select
           value={artifactFilter}
           onChange={(e) => setArtifactFilter(e.target.value)}
-          className="input"
-          style={{ maxWidth: 200 }}
+          className="input calendar-filter--kind"
           aria-label="Nature du créneau"
         >
           <option value="">Tous les types</option>
@@ -413,21 +409,23 @@ export function CalendarView({ siteId }: { siteId: string }) {
           items={[{ id: 'month', label: 'Mois' }, { id: 'list', label: 'Liste' }]}
         />
 
-        <button type="button" onClick={() => goToMonth(-1)} className="btn-icon" aria-label="Mois précédent">
-          <ChevronLeft size={15} />
-        </button>
-        <span style={{ fontWeight: 600, minWidth: 150, textAlign: 'center', textTransform: 'capitalize' }}>
-          {cursor ? monthLabel(cursor) : '—'}
+        <span className="calendar-nav">
+          <button type="button" onClick={() => goToMonth(-1)} className="btn-icon" aria-label="Mois précédent">
+            <ChevronLeft size={15} />
+          </button>
+          <span className="calendar-month">
+            {cursor ? monthLabel(cursor) : '—'}
+          </span>
+          <button type="button" onClick={() => goToMonth(1)} className="btn-icon" aria-label="Mois suivant">
+            <ChevronRight size={15} />
+          </button>
         </span>
-        <button type="button" onClick={() => goToMonth(1)} className="btn-icon" aria-label="Mois suivant">
-          <ChevronRight size={15} />
-        </button>
         <Button variant="ghost" size="sm" onClick={goToToday}>Aujourd’hui</Button>
       </div>
 
       {/* Status recap for the visible month */}
       {scopedSlots.length > 0 && (
-        <div style={{ display: 'flex', gap: 'var(--space-2)', flexWrap: 'wrap', marginBottom: 'var(--space-4)' }}>
+        <div className="calendar-recap">
           {Object.entries(counts).map(([status, count]) => {
             const meta = statusMeta(status)
             return (
@@ -435,14 +433,10 @@ export function CalendarView({ siteId }: { siteId: string }) {
                 key={status}
                 type="button"
                 onClick={() => setStatusFilter(statusFilter === status ? '' : status)}
-                className={meta.badge}
+                className={`${meta.badge} calendar-recap__item slot-tone--${meta.tone}${statusFilter === status ? ' calendar-recap__item--on' : ''}`}
                 aria-pressed={statusFilter === status}
-                style={{
-                  border: statusFilter === status ? `1px solid ${meta.color}` : '1px solid transparent',
-                  cursor: 'pointer',
-                }}
               >
-                <span aria-hidden="true" style={{ width: 6, height: 6, borderRadius: '50%', background: meta.color }} />
+                <span aria-hidden="true" className="calendar-recap__dot" />
                 {count} {meta.label}
               </button>
             )
@@ -452,15 +446,9 @@ export function CalendarView({ siteId }: { siteId: string }) {
 
       {/* Failures first: the whole point of the page */}
       {problemSlots.length > 0 && (
-        <div
-          className="glass-card"
-          style={{
-            borderLeft: '3px solid var(--status-critical)', marginBottom: 'var(--space-4)',
-            display: 'flex', alignItems: 'center', gap: 'var(--space-3)',
-          }}
-        >
-          <AlertTriangle size={16} color="var(--status-critical)" style={{ flexShrink: 0 }} />
-          <span style={{ flex: 1, fontSize: 'var(--fs-sm)' }}>
+        <div className="glass-card calendar-alert">
+          <AlertTriangle size={16} color="var(--status-critical)" className="calendar-alert__icon" />
+          <span className="calendar-alert__text">
             <strong>{problemSlots.length}</strong> créneau{problemSlots.length > 1 ? 'x' : ''} en échec ou bloqué
             {problemSlots.length > 1 ? 's' : ''} ce mois-ci. Un créneau en échec ne repart jamais tout seul.
           </span>
@@ -484,7 +472,7 @@ export function CalendarView({ siteId }: { siteId: string }) {
       )}
 
       {!error && loading && (
-        <div className="glass-card" style={{ display: 'grid', justifyItems: 'center', gap: 'var(--space-3)', padding: 'var(--space-12)' }}>
+        <div className="glass-card loading-card">
           <Loader2 size={22} className="animate-spin" color="var(--ink-faint)" />
           <span className="meta">Chargement des créneaux…</span>
         </div>
@@ -555,23 +543,15 @@ function MonthGrid({
 
   return (
     <div className="panel">
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)' }}>
+      <div className="month-grid">
         {WEEKDAYS.map((day) => (
-          <div
-            key={day}
-            style={{
-              padding: 'var(--space-2)', textAlign: 'center',
-              fontSize: 'var(--fs-2xs)', fontWeight: 600, textTransform: 'uppercase',
-              letterSpacing: 'var(--ls-eyebrow)', color: 'var(--ink-muted)',
-              background: 'var(--surface-inset)', borderBottom: '1px solid var(--line)',
-            }}
-          >
+          <div key={day} className="month-grid__weekday">
             {day}
           </div>
         ))}
 
         {Array.from({ length: blanks }).map((_, i) => (
-          <div key={`blank-${i}`} style={{ minHeight: 98, borderBottom: '1px solid var(--line)', borderRight: '1px solid var(--line)' }} />
+          <div key={`blank-${i}`} className="month-grid__blank" />
         ))}
 
         {Array.from({ length: totalDays }).map((_, i) => {
@@ -581,28 +561,15 @@ function MonthGrid({
           const isToday = key === today
 
           return (
-            <div
-              key={key}
-              style={{
-                padding: 'var(--space-1)', minHeight: 98,
-                borderBottom: '1px solid var(--line)', borderRight: '1px solid var(--line)',
-                background: isToday ? 'var(--accent-wash)' : undefined,
-              }}
-            >
-              <div
-                style={{
-                  fontSize: 'var(--fs-2xs)', fontWeight: isToday ? 700 : 500,
-                  color: isToday ? 'var(--accent-text)' : 'var(--ink-muted)',
-                  marginBottom: 3, paddingLeft: 2,
-                }}
-              >
+            <div key={key} className={`month-grid__day${isToday ? ' month-grid__day--today' : ''}`}>
+              <div className={`month-grid__date${isToday ? ' month-grid__date--today' : ''}`}>
                 {day}
               </div>
               {daySlots.slice(0, 3).map((slot) => (
                 <SlotChip key={slot.id} slot={slot} today={today} onSelect={onSelect} />
               ))}
               {daySlots.length > 3 && (
-                <button type="button" onClick={() => onSelect(daySlots[3])} className="btn-link" style={{ padding: '2px 4px' }}>
+                <button type="button" onClick={() => onSelect(daySlots[3])} className="btn-link month-grid__more">
                   +{daySlots.length - 3} autre{daySlots.length - 3 > 1 ? 's' : ''}
                 </button>
               )}
@@ -619,7 +586,7 @@ function SlotChip({ slot, today, onSelect }: { slot: Slot; today: string; onSele
   const attention = needsAttention(slot, today)
   // A stalled slot keeps its own label but borrows the failure colour: in a
   // month grid the colour is the only thing read at a glance.
-  const color = attention ? statusMeta('failed').color : meta.color
+  const tone = attention ? statusMeta('failed').tone : meta.tone
   const post = isGbpPost(slot)
 
   return (
@@ -627,21 +594,15 @@ function SlotChip({ slot, today, onSelect }: { slot: Slot; today: string; onSele
       type="button"
       onClick={() => onSelect(slot)}
       title={`${post ? 'Post fiche — ' : ''}${slotTitle(slot)}${slot.target_city ? ` — ${slot.target_city}` : ''} · ${meta.label}${isStalled(slot, today) ? ' (bloqué)' : ''}`}
-      style={{
-        display: 'flex', alignItems: 'center', gap: 3, width: '100%',
-        padding: '2px 5px', marginBottom: 2, borderRadius: 'var(--radius-xs)',
-        background: tint(color, 12), border: 'none', borderLeft: `2px solid ${color}`,
-        fontSize: 'var(--fs-2xs)', color: 'var(--ink-primary)', textAlign: 'left', cursor: 'pointer',
-        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-      }}
+      className={`slot-chip slot-tone--${tone}`}
     >
-      {attention && <AlertTriangle size={9} color={color} style={{ flexShrink: 0 }} />}
+      {attention && <AlertTriangle size={9} color="var(--status-critical)" className="slot-chip__icon" />}
       {/* La COULEUR reste le STATUT dans cette grille : elle est déjà prise, et
           une septième teinte pour la nature ne se lirait plus. Le type
           d'artefact passe donc par un GLYPHE, doublé du mot « Post fiche » dans
           l'infobulle et dans le titre de la ligne — deux encodages, dont un non
           chromatique. */}
-      {post && <Store size={9} color="var(--ink-secondary)" style={{ flexShrink: 0 }} aria-hidden="true" />}
+      {post && <Store size={9} color="var(--ink-secondary)" className="slot-chip__icon" aria-hidden="true" />}
       <span className="truncate">{slotTitle(slot)}</span>
     </button>
   )
@@ -673,10 +634,10 @@ function SlotTable({ slots, today, onSelect }: { slots: Slot[]; today: string; o
             const stalled = isStalled(slot, today)
 
             return (
-              <tr key={slot.id} onClick={() => onSelect(slot)} style={{ cursor: 'pointer' }}>
-                <td style={{ whiteSpace: 'nowrap' }}>{formatDay(slot.scheduled_date)}</td>
+              <tr key={slot.id} onClick={() => onSelect(slot)} className="slot-row">
+                <td className="slot-row__date">{formatDay(slot.scheduled_date)}</td>
                 <td>
-                  <div className="cell-strong" style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+                  <div className="cell-strong slot-row__title">
                     {isGbpPost(slot) && (
                       <span className="chip"><Store size={10} aria-hidden="true" /> Post fiche</span>
                     )}
@@ -684,11 +645,7 @@ function SlotTable({ slots, today, onSelect }: { slots: Slot[]; today: string; o
                   </div>
                   {slot.target_city && <div className="meta">{slot.target_city}</div>}
                   {message && (
-                    <div
-                      className="truncate"
-                      style={{ fontSize: 'var(--fs-xs)', color: 'var(--status-critical-text)', marginTop: 2, maxWidth: 380 }}
-                      title={message}
-                    >
+                    <div className="truncate slot-row__error" title={message}>
                       {message}
                     </div>
                   )}
@@ -697,7 +654,7 @@ function SlotTable({ slots, today, onSelect }: { slots: Slot[]; today: string; o
                 <td>{slot.campaign?.name ?? '—'}</td>
                 <td>
                   <span className={meta.badge}>{meta.label}</span>
-                  {stalled && <span className="badge badge-danger" style={{ marginLeft: 4 }}>Bloqué</span>}
+                  {stalled && <span className="badge badge-danger slot-row__stalled">Bloqué</span>}
                 </td>
                 <td>
                   <SlotOutcome slot={slot} />
@@ -736,7 +693,7 @@ function SlotOutcome({ slot }: { slot: Slot }) {
       )
     }
     return (
-      <span className="meta truncate" style={{ display: 'inline-block', maxWidth: 280 }} title={post?.summary}>
+      <span className="meta truncate slot-outcome__summary" title={post?.summary}>
         {post?.summary ?? 'Pas encore composé'}
       </span>
     )
@@ -823,8 +780,8 @@ function SlotDetail({
       onClose={onClose}
       size="md"
     >
-      <div className="panel__body" style={{ display: 'grid', gap: 'var(--space-4)' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+      <div className="panel__body slot-detail">
+        <div className="slot-detail__badges">
           <span className={meta.badge}>{meta.label}</span>
           {stalled && <span className="badge badge-danger">Bloqué</span>}
           {slot.attempt_count ? <span className="chip">{slot.attempt_count} tentative{slot.attempt_count > 1 ? 's' : ''}</span> : null}
@@ -842,18 +799,18 @@ function SlotDetail({
             l'avertissement, jamais celui de l'échec — peindre en rouge une
             décision correcte apprend à l'opérateur à ignorer le rouge. */}
         {message && (
-          <div className="inset" style={{ borderLeft: `3px solid ${postponed ? 'var(--status-warning)' : 'var(--status-critical)'}` }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', color: postponed ? 'var(--status-warning-text)' : 'var(--status-critical-text)', fontWeight: 600, fontSize: 'var(--fs-xs)', marginBottom: 4 }}>
+          <div className={`inset slot-detail__message${postponed ? ' slot-detail__message--postponed' : ''}`}>
+            <div className="slot-detail__message-title">
               <AlertTriangle size={13} /> {slotErrorTitle(slot)}
             </div>
-            <p style={{ margin: 0, fontSize: 'var(--fs-sm)', color: 'var(--ink-secondary)', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+            <p className="slot-detail__text">
               {message}
             </p>
           </div>
         )}
 
         {stalled && !message && (
-          <p className="meta" style={{ margin: 0 }}>
+          <p className="meta">
             Le créneau est resté en génération après sa date prévue : la tâche planifiée n’est jamais revenue.
             Le planificateur le reprend automatiquement au bout de 30 minutes — s’il est toujours dans cet état
             après le prochain quart d’heure, c’est que le planificateur lui-même ne tourne pas.
@@ -861,13 +818,12 @@ function SlotDetail({
         )}
 
         {slot.status === 'planned' && (
-          <div className="inset" style={{ display: 'grid', gap: 'var(--space-2)' }}>
-            <span style={{ fontSize: 'var(--fs-xs)', fontWeight: 600 }}>Reporter ce créneau</span>
-            <div style={{ display: 'flex', gap: 'var(--space-2)', alignItems: 'center', flexWrap: 'wrap' }}>
+          <div className="inset slot-detail__reschedule">
+            <span className="slot-detail__reschedule-title">Reporter ce créneau</span>
+            <div className="slot-detail__reschedule-row">
               <input
                 type="date"
-                className="input"
-                style={{ maxWidth: 180 }}
+                className="input slot-detail__date"
                 value={date}
                 onChange={(e) => setDate(e.target.value)}
                 aria-label="Nouvelle date de publication"
@@ -882,7 +838,7 @@ function SlotDetail({
                 Enregistrer
               </Button>
             </div>
-            {saveError && <span style={{ fontSize: 'var(--fs-xs)', color: 'var(--status-critical-text)' }}>{saveError}</span>}
+            {saveError && <span className="slot-detail__save-error">{saveError}</span>}
             <span className="meta">
               Seul un créneau encore planifié peut être déplacé : au-delà, le planificateur détient déjà le créneau.
             </span>
@@ -909,8 +865,7 @@ function PageSlotDetail({ slot }: { slot: Slot }) {
           href={slot.generation.published_url}
           target="_blank"
           rel="noopener noreferrer"
-          className="btn-secondary"
-          style={{ justifySelf: 'start' }}
+          className="btn-secondary slot-detail__open"
         >
           Ouvrir la page publiée <ExternalLink size={13} />
         </a>
@@ -946,11 +901,11 @@ function GbpSlotDetail({ post, postsHref }: { post: CalendarSlotGbpPost | null; 
       {post.remote_state && <DetailRow label="État sur Google" value={post.remote_state} />}
       <div className="inset">
         <span className="field-label">Texte du post</span>
-        <p style={{ margin: 'var(--space-1) 0 0', fontSize: 'var(--fs-sm)', color: 'var(--ink-secondary)', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+        <p className="slot-detail__text slot-detail__text--after-label">
           {post.summary}
         </p>
       </div>
-      <div style={{ display: 'flex', gap: 'var(--space-3)', flexWrap: 'wrap' }}>
+      <div className="slot-detail__links">
         {post.remote_search_url && (
           <a href={post.remote_search_url} target="_blank" rel="noopener noreferrer" className="btn-secondary">
             Ouvrir le post sur la fiche <ExternalLink size={13} />
@@ -964,9 +919,9 @@ function GbpSlotDetail({ post, postsHref }: { post: CalendarSlotGbpPost | null; 
 
 function DetailRow({ label, value }: { label: string; value: ReactNode }) {
   return (
-    <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 'var(--space-4)' }}>
-      <span className="meta" style={{ flexShrink: 0 }}>{label}</span>
-      <span style={{ fontSize: 'var(--fs-sm)', fontWeight: 500, textAlign: 'right', wordBreak: 'break-word' }}>{value}</span>
+    <div className="detail-row">
+      <span className="meta detail-row__label">{label}</span>
+      <span className="detail-row__value">{value}</span>
     </div>
   )
 }
