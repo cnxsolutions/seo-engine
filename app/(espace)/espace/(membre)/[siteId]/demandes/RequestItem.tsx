@@ -8,10 +8,11 @@ import type { ReactNode } from 'react'
 import { Check, Circle, CircleDot, ExternalLink } from 'lucide-react'
 import { formatDay } from '@/components/ui'
 import {
-  REQUEST_DETAIL_TEXT,
   REQUEST_STATE_LABELS,
   REQUEST_TEXT,
   TIMELINE_LABELS,
+  requestDetailSentence,
+  requestStateLabel,
 } from '@/lib/client-space/labels'
 import type { ClientRequestView, TimelineStep } from '@/src/core/domain/keyword-requests/client-view'
 
@@ -19,13 +20,6 @@ const BADGE: Record<(typeof REQUEST_STATE_LABELS)[keyof typeof REQUEST_STATE_LAB
   neutral: 'badge badge-muted',
   info: 'badge badge-info',
   good: 'badge badge-success',
-}
-
-function stateLabel(request: ClientRequestView): string {
-  if (request.state === 'scheduled' && request.detail.kind === 'planned' && request.detail.day) {
-    return `Prévue le ${formatDay(request.detail.day)}`
-  }
-  return REQUEST_STATE_LABELS[request.state].label
 }
 
 function PageLink({ url }: { url: string | null }) {
@@ -40,32 +34,8 @@ function PageLink({ url }: { url: string | null }) {
 }
 
 function Detail({ request }: { request: ClientRequestView }) {
-  const { detail } = request
-  switch (request.state) {
-    case 'analysing':
-      return <>{REQUEST_DETAIL_TEXT.analysing}</>
-    case 'review':
-      return <>{detail.kind === 'city' ? REQUEST_DETAIL_TEXT.reviewCity(detail.city) : REQUEST_DETAIL_TEXT.review}</>
-    case 'deferred':
-      return <>{REQUEST_DETAIL_TEXT.deferred}</>
-    case 'scheduled': {
-      const day = detail.kind === 'planned' && detail.day ? formatDay(detail.day) : null
-      return <>{detail.kind === 'planned' && detail.already ? REQUEST_DETAIL_TEXT.alreadyPlanned(day) : REQUEST_DETAIL_TEXT.planned(day)}</>
-    }
-    case 'in_production':
-      return <>{REQUEST_DETAIL_TEXT.inProduction}</>
-    case 'published':
-      return <>{REQUEST_DETAIL_TEXT.published} {detail.kind === 'page' && <PageLink url={detail.url} />}</>
-    case 'covered':
-      if (detail.kind === 'won') return <>{REQUEST_DETAIL_TEXT.won(detail.position)} <PageLink url={detail.url} /></>
-      return detail.kind === 'page' && detail.url
-        ? <>{REQUEST_DETAIL_TEXT.covered} <PageLink url={detail.url} /></>
-        : <>{REQUEST_DETAIL_TEXT.coveredNoPage}</>
-    case 'declined':
-      return <>{detail.kind === 'declined' && detail.reason ? detail.reason : REQUEST_DETAIL_TEXT.declined}</>
-    case 'withdrawn':
-      return <>{REQUEST_DETAIL_TEXT.withdrawn}</>
-  }
+  const { text, url } = requestDetailSentence(request)
+  return <>{text}{url && <> <PageLink url={url} /></>}</>
 }
 
 const STEP_ICON = { done: Check, current: CircleDot, upcoming: Circle } as const
@@ -92,7 +62,7 @@ export function RequestItem({ request, action }: { request: ClientRequestView; a
           {request.keyword}
           {request.city && <span className="espace-request__city"> · {request.city}</span>}
         </p>
-        <span className={BADGE[tone]}>{stateLabel(request)}</span>
+        <span className={BADGE[tone]}>{requestStateLabel(request)}</span>
       </div>
       <p className="espace-request__detail"><Detail request={request} /></p>
       <ol className="espace-request__steps" aria-label="Étapes de la demande">

@@ -40,6 +40,7 @@ import { checkCycleCompletion } from './cycle-manager'
 import { analyzeReceivedRequests } from '@/lib/keyword-requests/analyze'
 import { placeRequestedByOperator } from '@/lib/keyword-requests/placement'
 import { followProduction } from '@/lib/keyword-requests/progress'
+import { sendDueEmails } from '@/lib/email/send-due'
 import {
   claimEditorialSlot,
   claimGenerationForPublishing,
@@ -248,6 +249,18 @@ export function initScheduler(): void {
       )
       await followProduction().catch((error) =>
         log('ERROR', 'keywordRequests', 'Keyword request production follow-up failed', undefined, error instanceof Error ? error : new Error(String(error)))
+      )
+    })
+  })
+
+  // The e-mails of the requests (KW-12, L7) — every two minutes, apart from
+  // the task above: a slow SMTP must not hold back the verdicts. The outbox is
+  // filled by a trigger of migration 027, in the transaction of each status
+  // change; lib/email/send-due.ts says who receives what.
+  cron.schedule('*/2 * * * *', async () => {
+    await runWithConcurrencyControl('emails', async () => {
+      await sendDueEmails().catch((error) =>
+        log('ERROR', 'emails', 'E-mail pass failed', undefined, error instanceof Error ? error : new Error(String(error)))
       )
     })
   })

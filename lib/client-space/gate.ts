@@ -25,13 +25,21 @@ import { SIGN_IN_TEXT } from './labels'
 /** Same segment-shaped form as the webhook exception of proxy.ts: `/espacex` is NOT in. */
 const CLIENT_SPACE_PATH = /^\/(?:espace|api\/espace|auth)(?:\/|$)/
 
-/** Reached without a session: the sign-in page, its two API calls, the e-mail link and sign-out. */
-const PUBLIC_CLIENT_PATH = /^\/(?:espace\/connexion|api\/espace\/connexion|auth)(?:\/|$)/
+/**
+ * Reached without a session: the sign-in page, its two API calls, the e-mail
+ * link and sign-out — and the unsubscribe page and its POST (L7), which must
+ * work from any mailbox; the token they carry opens one setting, nothing else.
+ */
+const PUBLIC_CLIENT_PATH = /^\/(?:espace\/connexion|api\/espace\/connexion|espace\/desinscription|api\/espace\/desinscription|auth)(?:\/|$)/
 
 const NO_STORE = 'private, no-store'
 
 export function isClientSpacePath(pathname: string): boolean {
   return CLIENT_SPACE_PATH.test(pathname)
+}
+
+export function isPublicClientPath(pathname: string): boolean {
+  return PUBLIC_CLIENT_PATH.test(pathname)
 }
 
 export async function clientSpaceGate(req: NextRequest): Promise<NextResponse> {
@@ -55,7 +63,7 @@ export async function clientSpaceGate(req: NextRequest): Promise<NextResponse> {
   const signedIn = Boolean(data?.claims?.sub)
   const { pathname, search } = req.nextUrl
 
-  if (signedIn || PUBLIC_CLIENT_PATH.test(pathname)) return noStore(response)
+  if (signedIn || isPublicClientPath(pathname)) return noStore(response)
 
   if (pathname.startsWith('/api/')) {
     return noStore(carryCookies(response, NextResponse.json({ error: SIGN_IN_TEXT.sessionRequired }, { status: 401 })))

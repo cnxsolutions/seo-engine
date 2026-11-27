@@ -24,7 +24,13 @@ npm run db:local:reset -- --keep   # rejoue migrations + demonstration sans tout
 | API (ce que lit l'application) | `http://127.0.0.1:54321` |
 | Postgres | `postgresql://postgres:postgres@127.0.0.1:54322/postgres` |
 | Studio | `http://127.0.0.1:54323` |
-| Mailpit (e-mails d'authentification, jamais envoyes) | `http://127.0.0.1:54324` |
+| Mailpit (e-mails d'authentification et des demandes, jamais envoyes) | `http://127.0.0.1:54324` |
+| SMTP de Mailpit (les e-mails des demandes, L7) | `127.0.0.1:54325` |
+
+Les e-mails des demandes (L7) partent du planificateur de `npm run dev` vers ce
+Mailpit, et vers lui seul : `.env.local` porte `SMTP_HOST=127.0.0.1` et
+`SMTP_PORT=54325`, et `lib/email/config.ts` refuse tout autre SMTP hors
+production. Ne jamais y recopier le SMTP du site CNX.
 
 `db/seed-local.sql` charge trois sites **fictifs** (`*.test`, sans identifiant de
 publication) et des campagnes **inactives** : le planificateur de `npm run dev`

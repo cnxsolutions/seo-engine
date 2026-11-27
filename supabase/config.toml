@@ -113,7 +113,10 @@ enabled = true
 # Port to use for the email testing server web interface.
 port = 54324
 # Uncomment to expose additional ports for testing user applications that send emails.
-# smtp_port = 54325
+# SEO Engine (L7) : expose, c'est le SMTP local des e-mails des demandes
+# (SMTP_HOST=127.0.0.1, SMTP_PORT=54325) — lib/email/config.ts n'accepte que lui
+# hors production, et db/email-outbox.db.test.ts y envoie pour de vrai.
+smtp_port = 54325
 # pop3_port = 54326
 # admin_email = "admin@email.com"
 # sender_name = "Admin"

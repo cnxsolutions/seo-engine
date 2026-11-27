@@ -107,7 +107,7 @@ reprendre · ❌ absent · ❓ à vérifier.
 | KW-9 | Le client retire une demande tant qu'elle n'est pas en rédaction | — | ✅ L3 (modale de confirmation ; retrait conditionnel au statut, jamais écrasé par l'analyse) | L3 |
 | KW-10 | Console opérateur : file de toutes les demandes, filtres, arbitrage (intégrer maintenant, reporter, refuser avec motif, rouvrir), compteur « à examiner » dans le rail | demande | ✅ L5a (`/demandes`, onglet « Demandes » de chaque site, compteur du rail ; « intégrer » est répondu par la tâche des demandes en 2 min au plus) | L5 |
 | KW-11 | Report sans perte : une demande non consommée (plan plein, quota atteint) reste en tête au plan suivant ; au-delà de 3 cycles d'attente, elle passe « à examiner » | demande | ✅ L4b (`deferred_cycles`, compté au démarrage d'un plan ; un créneau remplacé rend sa demande à la file) | L4 |
-| KW-12 | E-mails : au client (verdict, mise en ligne), à l'opérateur (demande à examiner) — par une file d'envoi asynchrone | — | ❌ | L7 |
+| KW-12 | E-mails : au client (verdict, mise en ligne), à l'opérateur (demande à examiner) — par une file d'envoi asynchrone | décisions 20 à 22 | ✅ L7 : file `email_outbox` remplie par un déclencheur dans la transaction du changement de statut (migration 027), tâche `emails` du planificateur toutes les 2 min, nouvelles d'un même membre regroupées, phrases de l'espace client (`labels.ts`, partagées avec `RequestItem`), désinscription par jeton (page publique + désabonnement en un clic RFC 8058), SMTP local seul hors production | L7 |
 | KW-13 | Planification : les demandes en attente entrent dans **les deux** chemins de plan (manuel et renouvellement automatique) ; chaque brief issu d'une demande porte `client_request_id` et un repère « Demande du client » dans l'onglet Stratégie | `lib/planning/brief-plan.ts`, `lib/scheduler/cycle-manager.ts` | ✅ L4b | L4 |
 
 ### UX — Refonte de l'interface (tout le projet)
@@ -421,6 +421,23 @@ Rien ne change dans `cycle_plans` ni `editorial_calendar` : `client_request_id` 
 et le lien créneau → brief existe déjà (`editorial_calendar.plan_item_id`). L'historique des statuts tient dans
 les colonnes horodatées ; une table d'événements n'est ajoutée que si l'audit le demande (YAGNI).
 
+Migration `027_email_outbox.sql` (L7, KW-12) :
+
+```
+client_members   + email_opt_out_at timestamptz (null = abonné)
+                 + unsubscribe_token uuid not null default gen_random_uuid() unique  -- le lien des e-mails
+email_outbox     (id, kind 'client_request'|'operator_review', keyword_request_id fk on delete cascade,
+                  request_status, dedupe_key unique  -- demande + statut : une seule annonce par statut
+                  status 'pending'|'sent'|'skipped'|'failed', attempts, next_attempt_at, last_error,
+                  sent_at, created_at)
+déclencheur      AFTER UPDATE OF status ON keyword_requests : prévue, couverte, reportée, non retenue,
+                 en ligne → client ; à examiner → CNX — dans la transaction du changement
+```
+
+RLS activé, aucune politique. Les destinataires se lisent **au moment d'envoyer** (un membre révoqué ou
+désinscrit entre-temps ne reçoit rien) ; une nouvelle de plus d'un jour ou dépassée par un autre statut est
+écartée, avec son motif dans `last_error`.
+
 Une migration s'écrit et se rejoue **d'abord en local** (remise à zéro, puis une seconde application pour prouver
 son idempotence, puis `npm run test:db`), et ne s'applique en production qu'avant le merge de sa PR, comme
 aujourd'hui. Ensuite : `node scripts/db-baseline.mjs` contre la production, puis `db/README.md`.
@@ -484,6 +501,7 @@ isolation, RLS, transaction), et le parcours complet en recette.
 | Réglages SMTP du site CNX (hôte, port, identifiant, mot de passe) reportés dans le SMTP personnalisé de **Supabase hébergé**, expéditeur `contact@cnx-solutions.fr` ; SPF, DKIM et DMARC du domaine vérifiés pour ce fournisseur | codes de connexion en production (le SMTP intégré de Supabase plafonne à quelques e-mails par heure), invitations, notifications | CNX | **L0** (une correction DNS se propage lentement) |
 | Réglages Supabase Auth du projet hébergé : inscription publique **coupée** (Authentication > Sign In / Providers > « Allow new users to sign up » à off, fournisseur e-mail **laissé actif**), OTP 6 chiffres valable 1 h, Site URL `https://seo.cnx-solutions.fr`, modèle « Magic Link » = `supabase/templates/code-connexion.html` (objet « Votre code d'accès — CNX SEO Engine ») | ACC-2 | CNX (tableau de bord) | **avant le merge du L1** |
 | Liste des premiers clients : nom, e-mail(s), site(s) | invitations, recette réelle | CNX | L2 |
+| Variables du serveur pour les e-mails des demandes : `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD` (le compte SMTP du site CNX, comme pour Supabase), `OPERATOR_EMAIL`, `APP_PUBLIC_URL` dans `/opt/seo-engine/.env` | KW-12 : sans elles, aucun e-mail ne part | CNX | L7 |
 | Relecture des libellés de verdict et des textes de l'espace | ton CNX, aucune promesse intenable | CNX | L3 |
 | Lien « Confidentialité » (traitement de l'e-mail des membres) sur cnx-solutions.fr | RGPD | CNX | L1 |
 | Logo : `cnx-solutions/brand/logo/cnx-mark.svg` et lockups | UX-3 | disponible | L0 |
@@ -504,7 +522,7 @@ Ordonnés par **risque** (sécurité d'abord, planificateur ensuite), puis par *
 | **L4** | Demandes dans le moteur, en trois PR : **L4a** (#37) extraction de la rédaction des briefs **sans changement de comportement** ; **L4b** (#38) consommation au plan suivant, report, suivi de production et retour de publication (migration `025`) ; **L4c** (#39) `swap_plan_item` (migration `026`) et placement dans le cycle en cours | KW-4, KW-5, KW-8, KW-11, KW-13 | L3 | ✅ L4a (#37), L4b (#38) ; L4c en revue |
 | **L5** | Console opérateur des demandes et coquille, en deux PR : **L5a** (#40) file, arbitrage, compteur dans le rail, onglet « Demandes » d'un site ; **L5b** (#41) rail et en-tête de site refaits (tiroir sous 1 024 px), glossaire | KW-10, UX-5, UX-6 | L3 | M · 3 j — ✅ L5a (#40) ; L5b en revue |
 | **L6** | Refonte des écrans opérateur, un par un : tableau de bord, vue d'ensemble, stratégie, calendrier, publication, performances, pages, réglages — styles en ligne retirés, états, mouvement, graphiques, écrans hérités. Peut se scinder en L6a / L6b | UX-6 à UX-12 | L0, L5 | L · 5-6 j — ✅ L6a à L6g (#42 à #48) : styles en ligne à zéro, écrans réparés sur téléphone, pages d’erreur, mouvement CNX, palette des graphiques revalidée |
-| **L7** | E-mails : file d'envoi asynchrone traitée par le planificateur, modèles à la DA, désinscription des notifications | KW-12 | L3, SMTP | S · 2 j |
+| **L7** | E-mails : file d'envoi asynchrone traitée par le planificateur, modèles à la DA, désinscription des notifications | KW-12 | L3, SMTP | S · 2 j — ✅ L7 (#49), migration 027 |
 
 **Après la V1** : relecture des pages par le client avant publication, connexion opérateur par compte (fin de la
 barrière Basic), « voir comme le client » pour le support, mode sombre.
@@ -545,6 +563,9 @@ Une recommandation non contestée s'applique par défaut. Une décision tranché
 | 17 | Quel expéditeur pour les e-mails ? | ✅ **`contact@cnx-solutions.fr`**, par le compte SMTP du site CNX (décidé le 25/11) |
 | 18 | Les tests d'intégration tournent-ils en CI ? | Oui, dans un **job séparé** de `ci.yml` (Supabase CLI + `supabase start` sur le runner, ~2 min), sur les PR seulement : le cloisonnement ne se vérifie pas qu'à la main. `deploy.yml` n'est pas alourdi, une PR n'est mergée que verte |
 | 19 | Comment un script de migration atteint-il la production ? | ✅ Il vise le **local par défaut** ; la production exige `--prod=<ref-du-projet>`, lit `.env.prod-db` (ignoré par git, jamais chargé par Next.js, contrairement à `.env.production.local`) et refuse si la ref tapée n'est pas celle du fichier. `db-reset-data` refuse la production, `db-baseline` n'accepte qu'elle (appliqué au L0a, #30) |
+| 20 | Quand le client reçoit-il un e-mail sur ses demandes ? | ✅ **À la réponse et à la mise en ligne** : prévue (avec sa date), déjà couverte, gardée pour la période suivante, non retenue (avec le motif) ; puis en ligne (avec le lien). Plusieurs nouvelles d'un même passage partent dans un seul e-mail (décidé le 28/11) |
+| 21 | À qui part l'e-mail d'un client qui a plusieurs membres ? | ✅ **Au membre qui a envoyé la demande**, s'il a toujours accès et ne s'est pas désinscrit ; les autres voient tout dans l'espace (décidé le 28/11) |
+| 22 | Où part l'alerte « une demande client est à examiner » ? | ✅ **`contact@cnx-solutions.fr`**, par la variable `OPERATOR_EMAIL` du serveur, modifiable sans redéployer (décidé le 28/11) |
 
 ---
 

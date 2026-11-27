@@ -3,6 +3,7 @@ import {
   LucideIcon, MapPin, Minus, OctagonAlert, PlugZap, SearchX, ShieldAlert, TriangleAlert, X,
 } from 'lucide-react'
 import Link from 'next/link'
+import { formatDay, formatDayLong } from '@/lib/dates'
 import React from 'react'
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -1242,25 +1243,9 @@ export function MagnitudeBar({ value, max }: { value: number; max: number }) {
 // ── Dates & URLs ────────────────────────────────────────────────────
 //
 // `formatDay` was declared FOUR times across the route folders, each with its
-// own idea of what a short French date looks like. It lives here now.
-//
-// `Intl.DateTimeFormat` is safe where `Intl.NumberFormat` was not: the month
-// abbreviations are stable across the Node and browser ICU builds, whereas the
-// NumberFormat grouping character has changed between Node releases — which is
-// why `formatMetric` above does its grouping by hand.
-
-const DAY = new Intl.DateTimeFormat('fr-FR', { day: 'numeric', month: 'short' })
-const DAY_LONG = new Intl.DateTimeFormat('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' })
-
-/** Noon UTC, deliberately: a bare date parsed as midnight lands on the day
- *  before in any negative offset, and the whole app runs on ISO days. */
-export function formatDay(iso: string): string {
-  return DAY.format(new Date(`${iso.slice(0, 10)}T12:00:00Z`))
-}
-
-export function formatDayLong(iso: string): string {
-  return DAY_LONG.format(new Date(`${iso.slice(0, 10)}T12:00:00Z`))
-}
+// own idea of what a short French date looks like. It lives in lib/dates.ts
+// now, where the e-mails reach it too, and the screens keep importing it here.
+export { formatDay, formatDayLong }
 
 /** Pinned to Paris: the container runs in UTC, the browser wherever it is, and both must print the same instant. */
 const MOMENT = new Intl.DateTimeFormat('fr-FR', {

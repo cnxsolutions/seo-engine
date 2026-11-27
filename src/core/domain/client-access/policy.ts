@@ -39,6 +39,13 @@ export const SIGN_IN_CODE_REQUESTS: RateLimitRule = { limit: 5, windowMs: 15 * 6
  */
 export const SIGN_IN_CODE_VERIFICATIONS: RateLimitRule = { limit: 10, windowMs: 15 * 60 * 1000 }
 
+/**
+ * Unsubscribe choices, per IP (L7). A token is a random uuid, guessed by
+ * nobody; the limit only keeps a script from hammering a public route served
+ * by the process that also runs the scheduler.
+ */
+export const EMAIL_PREFERENCE_CHANGES: RateLimitRule = { limit: 30, windowMs: 15 * 60 * 1000 }
+
 /** One spelling per address: what the unique index `lower(email)` compares. */
 export function normalizeEmail(raw: string): string {
   return raw.trim().toLowerCase()
