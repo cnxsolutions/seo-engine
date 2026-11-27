@@ -98,6 +98,12 @@
   gap: 4px;
 }
 
+/* A checkbox or a radio, lined up with the first line of its text. Shared by
+   the Sites and Stratégie forms. */
+.choice-box {
+  margin-top: 3px;
+}
+
 /* ── EmptyState ── */
 
 .empty__glyph {

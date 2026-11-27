@@ -62,6 +62,7 @@ import {
   type ProvenanceGrade,
 } from './provenance'
 import { SerpStatusLine } from './SerpStatusLine'
+import '@/app/(dashboard)/strategy/strategy.css'
 
 const CYCLE_DURATIONS = [7, 14, 21, 30]
 
@@ -258,7 +259,7 @@ export function StrategyView({ siteId, defaultScheduleTime }: { siteId: string; 
       )}
 
       {!loading && !error && campaigns.length > 0 && (
-        <div style={{ display: 'grid', gap: 'var(--space-5)' }}>
+        <div className="strategy-campaigns">
           {campaigns.map((campaign) => (
             <CampaignPanel
               key={campaign.id}
@@ -318,8 +319,8 @@ function CampaignPanel({
 
   return (
     <section className="panel" aria-labelledby={headingId}>
-      <div className="panel__header" style={{ flexWrap: 'wrap', gap: 'var(--space-3)' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', flexWrap: 'wrap', minWidth: 0 }}>
+      <div className="panel__header campaign-panel__header">
+        <div className="campaign-panel__title">
           <h3 id={headingId} className="card-title">{campaign.name}</h3>
           <StatusBadge status={campaign.is_active ? 'active' : 'inactive'} />
         </div>
@@ -328,7 +329,7 @@ function CampaignPanel({
             l'étiquette accessible : une liste de « Supprimer » identiques ne dit
             pas lequel est lequel. « Supprimer » reste un bouton gris ici — le
             rouge est réservé au bouton qui confirme, dans le dialogue. */}
-        <div style={{ display: 'flex', gap: 'var(--space-2)', flexWrap: 'wrap' }}>
+        <div className="campaign-panel__actions">
           <Button
             variant="ghost"
             icon={Pencil}
@@ -409,7 +410,7 @@ function PlanSection({
   if (plan === undefined) {
     return (
       <div className="strategy-plan">
-        <p className="meta" style={{ margin: 0 }}>Lecture du plan en cours…</p>
+        <p className="meta">Lecture du plan en cours…</p>
       </div>
     )
   }
@@ -418,9 +419,9 @@ function PlanSection({
     return (
       <div className="strategy-plan">
         <div className="strategy-plan__head">
-          <div style={{ minWidth: 0 }}>
+          <div className="strategy-plan__text">
             <h4 className="strategy-plan__title">Plan du cycle</h4>
-            <p className="meta" style={{ margin: 0 }}>
+            <p className="meta">
               Aucun plan enregistré — cette campagne n’a jamais été planifiée. Rien ne sera produit avant.
             </p>
           </div>
@@ -497,11 +498,11 @@ function PlanBody({
   return (
     <div className="strategy-plan">
       <div className="strategy-plan__head">
-        <div style={{ minWidth: 0 }}>
+        <div className="strategy-plan__text">
           <h4 className="strategy-plan__title">
             Plan du cycle {plan.cycle_number} <span className={status.badge}>{status.label}</span>
           </h4>
-          <p className="meta" style={{ margin: 0 }}>
+          <p className="meta">
             {hasVerdicts ? (
               <>
                 <span className="num">{groups.create.length}</span> nouvelle{groups.create.length > 1 ? 's' : ''} page
@@ -532,8 +533,7 @@ function PlanBody({
               <label className="meta" htmlFor={`cycle-days-${plan.id}`}>Durée</label>
               <select
                 id={`cycle-days-${plan.id}`}
-                className="input"
-                style={{ width: 110 }}
+                className="input strategy-plan__days"
                 value={days}
                 onChange={(event) => setDays(Number(event.target.value))}
                 disabled={busy}
@@ -584,7 +584,7 @@ function PlanBody({
         </div>
       </div>
 
-      <p className="meta" style={{ margin: 0 }}>
+      <p className="meta">
         {running
           ? 'Ce cycle tourne déjà : génération et publication sont automatiques jusqu’à sa date de fin.'
           : 'Confirmer remplace les créneaux encore planifiés de cette campagne. Les pages déjà générées ou publiées ne bougent pas.'}
@@ -664,7 +664,7 @@ function groupByAction(items: PlanPreviewItem[]): PlanGroups {
 function PlanLede({ groups, hasVerdicts }: { groups: PlanGroups; hasVerdicts: boolean }) {
   if (!hasVerdicts) {
     return (
-      <p className="meta" style={{ margin: 0 }}>
+      <p className="meta">
         Ce plan ne porte aucun verdict sur les pages existantes : tous ses briefs s’affichent comme de nouvelles
         pages, ce qu’ils étaient au moment de sa création.
       </p>
@@ -685,8 +685,8 @@ function PlanLede({ groups, hasVerdicts }: { groups: PlanGroups; hasVerdicts: bo
   if (lines.length === 0) return null
 
   return (
-    <div style={{ display: 'grid', gap: 'var(--space-1)' }}>
-      {lines.map((line) => <p key={line} className="meta" style={{ margin: 0 }}>{line}</p>)}
+    <div className="plan-lede">
+      {lines.map((line) => <p key={line} className="meta">{line}</p>)}
     </div>
   )
 }
@@ -723,11 +723,12 @@ function storedAddressVerdict(item: PlanPreviewItem): AddressVerdict | null {
 
 // ─── Provenance panel ────────────────────────────────────────────────────────
 
-const GRADE_META: Record<ProvenanceGrade, { title: string; color: string; badge: string; icon: LucideIcon }> = {
-  measured: { title: 'Plan mesuré', color: 'var(--status-good)', badge: 'badge badge-success', icon: CheckCircle2 },
-  partial: { title: 'Plan partiellement mesuré', color: 'var(--status-warning)', badge: 'badge badge-warning', icon: TriangleAlert },
-  blind: { title: 'Plan construit à l’aveugle', color: 'var(--status-critical)', badge: 'badge badge-danger', icon: TriangleAlert },
-  unknown: { title: 'Origine des mesures inconnue', color: 'var(--ink-faint)', badge: 'badge badge-muted', icon: Info },
+/** The colour of each grade lives in strategy.css (`.provenance--<grade>`). */
+const GRADE_META: Record<ProvenanceGrade, { title: string; badge: string; icon: LucideIcon }> = {
+  measured: { title: 'Plan mesuré', badge: 'badge badge-success', icon: CheckCircle2 },
+  partial: { title: 'Plan partiellement mesuré', badge: 'badge badge-warning', icon: TriangleAlert },
+  blind: { title: 'Plan construit à l’aveugle', badge: 'badge badge-danger', icon: TriangleAlert },
+  unknown: { title: 'Origine des mesures inconnue', badge: 'badge badge-muted', icon: Info },
 }
 
 function ProvenancePanel({ provenance, items }: { provenance: PlanProvenance; items: PlanPreviewItem[] }) {
@@ -740,21 +741,21 @@ function ProvenancePanel({ provenance, items }: { provenance: PlanProvenance; it
   const cited = countMeasuredBriefs(items)
 
   return (
-    <div className="inset" style={{ borderLeft: `3px solid ${meta.color}`, display: 'grid', gap: 'var(--space-3)' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', flexWrap: 'wrap' }}>
-        <Icon size={16} color={meta.color} aria-hidden="true" />
-        <strong style={{ fontSize: 'var(--fs-sm)' }}>{meta.title}</strong>
+    <div className={`inset provenance provenance--${grade}`}>
+      <div className="provenance__head">
+        <Icon size={16} className="provenance__icon" aria-hidden="true" />
+        <strong className="provenance__title">{meta.title}</strong>
         <span className={meta.badge}>{grade === 'unknown' ? 'non enregistrée' : grade === 'blind' ? 'aucune mesure' : 'sources ci-dessous'}</span>
       </div>
 
       {grade === 'unknown' && (
         <>
-          <p className="meta" style={{ margin: 0 }}>
+          <p className="meta">
             Ce plan a été relu depuis la base. Elle conserve les briefs, pas les preuves qui ont servi à les écrire :
             impossible de dire ici s’il a été construit sur des SERP réellement lues ou à l’aveugle. Régénérer un plan
             affiche ses sources.
           </p>
-          <p className="meta" style={{ margin: 0 }}>
+          <p className="meta">
             {cited > 0
               ? `Seule trace conservée : ${cited} brief${cited > 1 ? 's' : ''} sur ${items.length} cite${cited > 1 ? 'nt' : ''} une mesure Search Console chiffrée (position, impressions, clics ou CTR).`
               : `Aucun des ${items.length} briefs ne cite de mesure Search Console chiffrée : rien dans ce plan ne prouve qu’il ait été construit sur des données.`}
@@ -763,7 +764,7 @@ function ProvenancePanel({ provenance, items }: { provenance: PlanProvenance; it
       )}
 
       {grade === 'blind' && (
-        <p className="meta" style={{ margin: 0 }}>
+        <p className="meta">
           Aucune SERP n’a pu être lue et le site n’a aucun historique Search Console exploitable. Les longueurs, les
           intentions et les trames de ce plan sont des propositions du modèle, <strong>pas des mesures</strong> — à
           traiter comme des hypothèses.
@@ -771,7 +772,7 @@ function ProvenancePanel({ provenance, items }: { provenance: PlanProvenance; it
       )}
 
       {provenance.reported && (
-        <div style={{ display: 'grid', gap: 'var(--space-3)', gridTemplateColumns: 'repeat(auto-fit, minmax(min(280px, 100%), 1fr))' }}>
+        <div className="provenance__sources">
           <SourceBlock
             icon={Search}
             title="SERP lues"
@@ -779,8 +780,8 @@ function ProvenancePanel({ provenance, items }: { provenance: PlanProvenance; it
             empty="Aucune SERP exploitable : les longueurs cibles ne sont calées sur rien d’observé."
           >
             {usableSerp.map((proof) => (
-              <li key={proof.query} style={{ marginBottom: 'var(--space-1)' }}>
-                <span style={{ color: 'var(--ink-primary)' }}>« {proof.query} »</span> —{' '}
+              <li key={proof.query} className="source-block__item">
+                <span className="query-quote">« {proof.query} »</span> —{' '}
                 {proof.competitors} concurrent{proof.competitors > 1 ? 's' : ''} mesuré{proof.competitors > 1 ? 's' : ''}
                 {proof.medianWordCount ? `, médiane ${formatMetric(proof.medianWordCount, 'number')} mots` : ''}
                 {proof.commonSections ? `, ${proof.commonSections} sections communes` : ''}
@@ -821,8 +822,8 @@ function ProvenancePanel({ provenance, items }: { provenance: PlanProvenance; it
             empty="Aucune barre de recherche n’a répondu : les mots-clés n’ont pas été confrontés à ce que les gens tapent."
           >
             {provenance.suggestions.map((proof) => (
-              <li key={proof.query} style={{ marginBottom: 'var(--space-1)' }}>
-                <span style={{ color: 'var(--ink-primary)' }}>« {proof.query} »</span> —{' '}
+              <li key={proof.query} className="source-block__item">
+                <span className="query-quote">« {proof.query} »</span> —{' '}
                 {[...proof.google, ...proof.bing.filter((line) => !proof.google.includes(line))].slice(0, 4).join(' · ')}
               </li>
             ))}
@@ -852,27 +853,27 @@ function ProvenancePanel({ provenance, items }: { provenance: PlanProvenance; it
 function CannibalizationBlock({ gsc }: { gsc: GscProof | null }) {
   return (
     <div>
-      <div style={{ fontSize: 'var(--fs-xs)', fontWeight: 600, marginBottom: 'var(--space-1)' }}>
+      <div className="conflicts__title">
         Requêtes que deux pages du site se disputent
       </div>
 
       {gsc === null ? (
-        <p className="meta" style={{ margin: 0 }}>
+        <p className="meta">
           Search Console n’est pas connectée&nbsp;: impossible de dire si deux pages du site se disputent une
           requête.
         </p>
       ) : gsc.cannibalized.length === 0 ? (
-        <p className="meta" style={{ margin: 0 }}>Aucune requête disputée sur les 28 derniers jours.</p>
+        <p className="meta">Aucune requête disputée sur les 28 derniers jours.</p>
       ) : (
         <>
-          <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'grid', gap: 'var(--space-2)' }}>
+          <ul className="conflicts__list">
             {gsc.cannibalized.map((conflict) => (
               <li key={conflict.query}>
                 <ConflictLine conflict={conflict} />
               </li>
             ))}
           </ul>
-          <p className="meta" style={{ margin: 'var(--space-2) 0 0' }}>
+          <p className="meta conflicts__note">
             Le moteur ne supprime, ne fusionne et ne redirige aucune page. Ces conflits sont signalés pour que
             vous décidiez.
           </p>
@@ -889,8 +890,8 @@ function ConflictLine({ conflict }: { conflict: CannibalizedQuery }) {
 
   return (
     <div>
-      <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--ink-secondary)', lineHeight: 'var(--lh-snug)' }}>
-        <span style={{ color: 'var(--ink-primary)' }}>«&nbsp;{conflict.query}&nbsp;»</span> —{' '}
+      <div className="conflict__line">
+        <span className="query-quote">«&nbsp;{conflict.query}&nbsp;»</span> —{' '}
         <a href={conflict.winner} target="_blank" rel="noopener noreferrer" className="btn-link" title={conflict.winner}>
           {shortenUrl(conflict.winner)}
         </a>{' '}
@@ -901,7 +902,7 @@ function ConflictLine({ conflict }: { conflict: CannibalizedQuery }) {
           : `${rivals} autre${rivals > 1 ? 's' : ''} page${rivals > 1 ? 's' : ''} du site vise${rivals > 1 ? 'nt' : ''} la même requête.`}
       </div>
       {conflict.losers.length > 0 && (
-        <ul className="meta" style={{ margin: 'var(--space-1) 0 0', paddingLeft: '1.1rem' }}>
+        <ul className="meta conflict__losers">
           {conflict.losers.map((url) => (
             <li key={url} className="truncate" title={url}>{shortenUrl(url)}</li>
           ))}
@@ -922,16 +923,16 @@ function SourceBlock({
 }) {
   return (
     <div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', marginBottom: 'var(--space-1)' }}>
+      <div className="source-block__head">
         <Icon size={13} color="var(--ink-muted)" aria-hidden="true" />
-        <span style={{ fontSize: 'var(--fs-xs)', fontWeight: 600 }}>{title}</span>
+        <span className="source-block__title">{title}</span>
         <span className={measured ? 'badge badge-success' : 'badge badge-warning'}>
           {measured ? 'mesuré' : 'non mesuré'}
         </span>
       </div>
       {measured
-        ? <ul className="meta" style={{ margin: 0, paddingLeft: '1.1rem' }}>{children}</ul>
-        : <p className="meta" style={{ margin: 0 }}>{empty}</p>}
+        ? <ul className="meta source-block__list">{children}</ul>
+        : <p className="meta">{empty}</p>}
     </div>
   )
 }
@@ -940,7 +941,7 @@ function SourceBlock({
 
 function LoadingPanel({ label }: { label: string }) {
   return (
-    <div className="glass-card" style={{ display: 'grid', justifyItems: 'center', gap: 'var(--space-3)', padding: 'var(--space-12)' }}>
+    <div className="glass-card strategy-loading">
       <Loader2 size={22} className="animate-spin" color="var(--ink-faint)" />
       <span className="meta">{label}</span>
     </div>

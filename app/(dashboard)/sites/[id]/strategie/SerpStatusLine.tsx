@@ -13,6 +13,7 @@
 
 import { useEffect, useState } from 'react'
 import { CircleCheck, TriangleAlert } from 'lucide-react'
+import '@/app/(dashboard)/strategy/strategy.css'
 
 interface Summary {
   tone: 'good' | 'warning' | 'critical'
@@ -45,15 +46,15 @@ export function SerpStatusLine() {
     }
   }, [])
 
-  if (failed) return <p className="meta" style={{ margin: 0 }}>État de la source SERP illisible pour l’instant.</p>
-  if (!summary) return <p className="meta" style={{ margin: 0 }}>Vérification de la source SERP…</p>
+  if (failed) return <p className="meta">État de la source SERP illisible pour l’instant.</p>
+  if (!summary) return <p className="meta">Vérification de la source SERP…</p>
 
   const Icon = summary.tone === 'good' ? CircleCheck : TriangleAlert
   return (
-    <p className="meta" style={{ margin: 0, display: 'flex', gap: 'var(--space-2)', alignItems: 'flex-start' }}>
-      <Icon size={13} color={COLOR[summary.tone]} aria-hidden="true" style={{ flexShrink: 0, marginTop: 2 }} />
+    <p className="meta serp-status">
+      <Icon size={13} color={COLOR[summary.tone]} aria-hidden="true" className="serp-status__icon" />
       <span>
-        <strong style={{ color: 'var(--ink-primary)' }}>Source SERP (SerpApi)</strong> — {summary.text}
+        <strong className="serp-status__source">Source SERP (SerpApi)</strong> — {summary.text}
         {lastSnapshotAt && ` Dernière page de résultats enregistrée le ${new Date(lastSnapshotAt).toLocaleDateString('fr-FR')}.`}
       </span>
     </p>
