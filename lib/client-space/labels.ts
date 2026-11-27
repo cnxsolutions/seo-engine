@@ -3,7 +3,9 @@
 // docs/design.md § 10 — the tone of the CNX site, never a technical term.
 // ─────────────────────────────────────────────────────────────────────────────
 
+import { formatDay } from '@/lib/dates'
 import { REQUEST_STATUS_TERMS } from '@/lib/glossary'
+import type { ClientRequestView } from '@/src/core/domain/keyword-requests/client-view'
 import type { SubmissionProblem } from '@/src/core/domain/keyword-requests/normalize'
 
 export const SIGN_IN_TEXT = {
@@ -182,6 +184,64 @@ export const REQUEST_DETAIL_TEXT = {
   coveredNoPage: 'Votre site répond déjà à cette recherche.',
   declined: 'CNX Solutions vous en dira plus.',
   withdrawn: 'Vous avez retiré cette demande.',
+} as const
+
+/** A request's state in a word or two — « Prévue le 12 déc. » once a day is known. */
+export function requestStateLabel(request: Pick<ClientRequestView, 'state' | 'detail'>): string {
+  if (request.state === 'scheduled' && request.detail.kind === 'planned' && request.detail.day) {
+    return `Prévue le ${formatDay(request.detail.day)}`
+  }
+  return REQUEST_STATE_LABELS[request.state].label
+}
+
+/**
+ * The one sentence under a request, and the page it points to when there is
+ * one. The same for the space (RequestItem) and for the e-mails (lib/email):
+ * written twice, the two would drift at the first rewording.
+ */
+export function requestDetailSentence(request: Pick<ClientRequestView, 'state' | 'detail'>): { text: string; url: string | null } {
+  const { detail } = request
+  switch (request.state) {
+    case 'analysing':
+      return { text: REQUEST_DETAIL_TEXT.analysing, url: null }
+    case 'review':
+      return { text: detail.kind === 'city' ? REQUEST_DETAIL_TEXT.reviewCity(detail.city) : REQUEST_DETAIL_TEXT.review, url: null }
+    case 'deferred':
+      return { text: REQUEST_DETAIL_TEXT.deferred, url: null }
+    case 'scheduled': {
+      const day = detail.kind === 'planned' && detail.day ? formatDay(detail.day) : null
+      const already = detail.kind === 'planned' && detail.already
+      return { text: already ? REQUEST_DETAIL_TEXT.alreadyPlanned(day) : REQUEST_DETAIL_TEXT.planned(day), url: null }
+    }
+    case 'in_production':
+      return { text: REQUEST_DETAIL_TEXT.inProduction, url: null }
+    case 'published':
+      return { text: REQUEST_DETAIL_TEXT.published, url: detail.kind === 'page' ? detail.url : null }
+    case 'covered':
+      if (detail.kind === 'won') return { text: REQUEST_DETAIL_TEXT.won(detail.position), url: detail.url }
+      return detail.kind === 'page' && detail.url
+        ? { text: REQUEST_DETAIL_TEXT.covered, url: detail.url }
+        : { text: REQUEST_DETAIL_TEXT.coveredNoPage, url: null }
+    case 'declined':
+      return { text: detail.kind === 'declined' && detail.reason ? detail.reason : REQUEST_DETAIL_TEXT.declined, url: null }
+    case 'withdrawn':
+      return { text: REQUEST_DETAIL_TEXT.withdrawn, url: null }
+  }
+}
+
+/** The unsubscribe page of the client e-mails (L7) — /espace/desinscription/[token]. */
+export const EMAIL_PREFERENCE_TEXT = {
+  eyebrow: 'E-mails de suivi',
+  titleSubscribed: 'Ne plus recevoir nos e-mails de suivi ?',
+  titleUnsubscribed: 'Vous ne recevez plus nos e-mails de suivi',
+  intro: (maskedEmail: string) =>
+    `Ces e-mails préviennent ${maskedEmail} quand une demande de mot-clé avance : prévue, en ligne, ou non retenue. Votre espace, lui, reste accessible et à jour.`,
+  unsubscribe: 'Ne plus recevoir ces e-mails',
+  resubscribe: 'Recevoir à nouveau ces e-mails',
+  doneUnsubscribed: { title: 'C’est fait', body: 'Vous ne recevrez plus d’e-mail de suivi. Vous pouvez changer d’avis ici à tout moment.' },
+  doneResubscribed: { title: 'C’est fait', body: 'Vous recevrez de nouveau un e-mail quand une de vos demandes avance.' },
+  openSpace: 'Ouvrir mon espace',
+  tooMany: 'Trop de tentatives : réessayez dans quelques minutes.',
 } as const
 
 export const TIMELINE_LABELS = {

@@ -103,6 +103,15 @@ tableau de bord Supabase du projet heberge, une fois pour toutes :
 - SMTP personnalise (expediteur `contact@cnx-solutions.fr`) : le SMTP integre de
   Supabase plafonne a quelques e-mails par heure.
 
+Les e-mails des demandes (L7) partent de l'application elle-meme, par le
+compte SMTP du site CNX : `SMTP_HOST`, `SMTP_PORT` (`SMTP_SECURE=true` pour
+465), `SMTP_USER`, `SMTP_PASSWORD`, `OPERATOR_EMAIL=contact@cnx-solutions.fr`
+et `APP_PUBLIC_URL=https://seo.mondomaine.fr` (les liens des e-mails). Sans
+`SMTP_HOST` ou sans `APP_PUBLIC_URL`, rien ne part : le journal le dit une fois
+(`[emails] aucun envoi : …`), et les nouvelles en attente sont ecartees au bout
+d'un jour plutot que d'arriver en retard. Apres une modification du fichier :
+`docker compose -f docker-compose.prod.yml up -d` depuis `/opt/seo-engine`.
+
 Si tu branches Google, `GOOGLE_REDIRECT_URI` doit valoir
 `https://seo.mondomaine.fr/api/google/callback`, declare a l'identique dans la
 console Google Cloud.

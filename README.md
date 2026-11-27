@@ -284,8 +284,8 @@ de moins de 16 caracteres — l'application entiere repond `503` : la barriere
 refuse de tourner plutot que de s'ouvrir. Il n'y a ni compte, ni session, ni page
 de connexion : le navigateur affiche sa propre fenetre (HTTP Basic, identifiant
 quelconque, ce secret en mot de passe) ; les scripts envoient `X-App-Secret:` ou
-`Authorization: Bearer`. `next-auth` reste dans les dependances sans etre branche
-nulle part, et peut etre desinstalle.
+`Authorization: Bearer`. (`next-auth`, qui restait dans les dependances sans etre
+branche nulle part, a ete desinstalle au L7.)
 
 > **Deux consequences a ne pas negliger.**
 >

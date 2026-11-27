@@ -39,7 +39,7 @@ production n'est touchee que pour appliquer une migration avant un merge.
 npm run dev          # http://localhost:3000
 npm run lint         # ESLint          — 0 erreur attendue (33 warnings tolerees)
 npm run typecheck    # tsc --noEmit    — 0 erreur attendue
-npm test             # Vitest          — 1 464 tests (107 fichiers), tous verts
+npm test             # Vitest          — 1 499 tests (113 fichiers), tous verts
 npm run build        # build local (sans sortie standalone, voir next.config.ts)
 ```
 
@@ -53,7 +53,7 @@ La base de developpement est un **Supabase local** (Docker Desktop doit tourner)
 ```bash
 npm run db:local:start   # API :54321 · Postgres :54322 · Studio :54323 · Mailpit :54324
 npm run db:local:reset   # baseline + migrations + demonstration (sites fictifs, campagnes inactives)
-npm run test:db          # tests d'integration *.db.test.ts (92) — rejoues en CI dans le job « base »
+npm run test:db          # tests d'integration *.db.test.ts (100) — rejoues en CI dans le job « base »
 ```
 
 `.env.local` pointe sur cette base ; il ne contient **aucun** acces a la
@@ -114,7 +114,7 @@ Sans `--prod`, les scripts ne touchent **que** la base locale. `.env.prod-db`
 chaine de connexion de production.
 
 Les fichiers vivent dans `src/adapters/infrastructure/database/migrations/`
-(`001` a `026`), **jamais** dans `db/` ni dans `supabase/migrations/`. Ils
+(`001` a `027`), **jamais** dans `db/` ni dans `supabase/migrations/`. Ils
 doivent etre idempotents (`IF NOT EXISTS`, `CREATE OR REPLACE`) : la base
 elle-meme fait office de journal, il n'y a pas de table de suivi. Toute nouvelle
 table active son RLS dans sa propre migration (`db/rls.db.test.ts`).
@@ -204,7 +204,10 @@ Auth). Une fuite d'un client vers un autre est LE risque du chantier :
   donnee passe par la cle de service, cote serveur. Le navigateur ne recoit
   aucune cle. Sans `NEXT_PUBLIC_SUPABASE_ANON_KEY`, l'espace repond 503.
 - Chaque nouvelle route `/api/espace` arrive avec son test d'isolation contre
-  le Supabase local (`db/client-space.db.test.ts`).
+  le Supabase local (`db/client-space.db.test.ts`). Seule exception sans
+  session, avec la connexion : la desinscription des e-mails
+  (`/espace/desinscription/[jeton]`, `/api/espace/desinscription/[jeton]`),
+  dont le jeton n'ouvre que le reglage de son membre (`db/email-outbox.db.test.ts`).
 - L'e-mail de code a une seule source, `supabase/templates/code-connexion.html`,
   servie en local et collee telle quelle dans le projet heberge (modele « Magic
   Link »).
@@ -230,9 +233,18 @@ Auth). Une fuite d'un client vers un autre est LE risque du chantier :
 - **Cache GitHub Actions cloisonne par branche** : `main` ne lit pas le cache
   cree sur une branche de PR. Le premier build apres un merge repart de zero.
 - **Vitest echoue en bloc sous Git Bash** quand le chemin courant commence par
-  un lecteur en minuscule (`c:/laragon/...`) : les 107 fichiers tombent avec
+  un lecteur en minuscule (`c:/laragon/...`) : les 113 fichiers tombent avec
   « Cannot read properties of undefined (reading 'config') », zero test lance.
   Ce n'est pas le code : lancer `npm test` depuis PowerShell, ou `cd /C/laragon/...`.
+
+- **Les e-mails des demandes partent aussi en local, vers Mailpit seulement.**
+  Toutes les 2 min, `npm run dev` envoie ce que la file `email_outbox` attend
+  (declencheur de la migration 027 sur chaque changement de statut d'une
+  demande) au SMTP de Mailpit, `127.0.0.1:54325` ; on les lit sur
+  http://127.0.0.1:54324. Hors production, `lib/email/config.ts` refuse tout
+  autre SMTP : ne jamais mettre celui du site CNX dans `.env.local`. Le
+  planificateur charge ses modules au demarrage : apres une modification de
+  `lib/email`, redemarrer `npm run dev` pour qu'un envoi la prenne.
 
 - **La tache des demandes consulte le modele, en local aussi.** Toutes les
   2 min, `npm run dev` analyse les demandes `received` de la base locale ; une
