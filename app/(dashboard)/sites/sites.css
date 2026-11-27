@@ -255,11 +255,6 @@
   cursor: pointer;
 }
 
-/* A checkbox or a radio, lined up with the first line of its text. */
-.choice-box {
-  margin-top: 3px;
-}
-
 /* ── Deleting a site ── */
 
 .panel.danger-zone {

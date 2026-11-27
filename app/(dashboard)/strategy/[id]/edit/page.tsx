@@ -30,6 +30,7 @@ import type { Campaign, PageType, PublishStatus, ScheduleFrequency } from '@/lib
 import { AI_MODEL_OPTIONS } from '@/lib/ai/provider'
 import { CAMPAIGN_SCOPE_OPTIONS, campaignScope, targetCommunes, withoutLocalPack, type CampaignScope } from '@/lib/geo/scope'
 import { DeleteCampaignDialog } from '../../DeleteCampaignDialog'
+import '../../strategy.css'
 
 // Même ordre éditorial que /strategy/new : pilier d'abord. Les libellés viennent
 // du dictionnaire partagé, pour qu'un type ne change pas de nom entre l'écran
@@ -303,7 +304,7 @@ export default function EditCampaignPage() {
   }
 
   return (
-    <div style={{ maxWidth: 820 }}>
+    <div className="campaign-form">
       <PageHeader
         icon={Target}
         badge="Stratégie"
@@ -324,7 +325,7 @@ export default function EditCampaignPage() {
       )}
 
       {!loadError && (!campaign || !form) && (
-        <div className="glass-card" style={{ display: 'grid', justifyItems: 'center', gap: 'var(--space-3)', padding: 'var(--space-12)' }}>
+        <div className="glass-card strategy-loading">
           <Loader2 size={22} className="animate-spin" color="var(--ink-faint)" />
           <span className="meta">Chargement de la campagne…</span>
         </div>
@@ -338,12 +339,12 @@ export default function EditCampaignPage() {
             body="Les créneaux déjà planifiés gardent leurs mots-clés et dates ; les changements s’appliquent au prochain cycle."
           />
 
-          <div style={{ display: 'grid', gap: 'var(--space-4)' }}>
+          <div className="campaign-form__sections">
             {/* ── Activité ── */}
             <section className="panel">
               <div className="panel__header"><h2 className="card-title">Activité</h2></div>
-              <div className="panel__body" style={{ display: 'grid', gap: 'var(--space-4)' }}>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 'var(--space-4)' }}>
+              <div className="panel__body campaign-form__body">
+                <div className="campaign-form__grid">
                   <FormField label="Nom du business" required htmlFor="business-name">
                     <input id="business-name" name="business_name" value={form.business_name} onChange={handle} className="input" />
                   </FormField>
@@ -357,37 +358,37 @@ export default function EditCampaignPage() {
                   )}
                 </div>
 
-                <fieldset style={{ border: 0, padding: 0, margin: 0 }}>
+                <fieldset className="campaign-form__fieldset">
                   <legend className="field-label">Portée</legend>
-                  <div style={{ display: 'flex', gap: 'var(--space-5)', flexWrap: 'wrap' }}>
+                  <div className="campaign-form__scopes">
                     {CAMPAIGN_SCOPE_OPTIONS.map((option) => (
-                      <label key={option.value} htmlFor={`scope-${option.value}`} style={{ display: 'flex', gap: 'var(--space-2)', alignItems: 'flex-start', cursor: 'pointer', fontSize: 'var(--fs-sm)', color: 'var(--ink-primary)' }}>
-                        <input id={`scope-${option.value}`} type="radio" name="scope" value={option.value} checked={form.scope === option.value} onChange={() => chooseScope(option.value)} style={{ marginTop: 3 }} />
+                      <label key={option.value} htmlFor={`scope-${option.value}`} className="check-label">
+                        <input id={`scope-${option.value}`} type="radio" name="scope" value={option.value} checked={form.scope === option.value} onChange={() => chooseScope(option.value)} className="choice-box" />
                         <span>
                           {option.label}
-                          <span className="meta" style={{ display: 'block' }}>{option.hint}</span>
+                          <span className="meta check-label__aside">{option.hint}</span>
                         </span>
                       </label>
                     ))}
                   </div>
                 </fieldset>
 
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 'var(--space-4)' }}>
+                <div className="campaign-form__grid">
                   {form.scope === 'local' && (
                     <FormField label="Communes ou zones" required htmlFor="communes" hint="une par ligne">
-                      <textarea id="communes" name="communes" value={form.communes} onChange={handle} className="input" rows={6} style={{ resize: 'vertical' }} />
+                      <textarea id="communes" name="communes" value={form.communes} onChange={handle} className="input" rows={6} />
                     </FormField>
                   )}
                   <FormField label="Mots-clés de base" htmlFor="keywords" hint="un par ligne">
-                    <textarea id="keywords" name="keywords" value={form.keywords} onChange={handle} className="input" rows={6} style={{ resize: 'vertical' }} />
+                    <textarea id="keywords" name="keywords" value={form.keywords} onChange={handle} className="input" rows={6} />
                   </FormField>
                 </div>
 
                 {/* Un groupe de cases, pas des boutons bascule : une case dit
                     son état à un lecteur d'écran sans attribut supplémentaire. */}
-                <fieldset style={{ border: 0, padding: 0, margin: 0 }}>
+                <fieldset className="campaign-form__fieldset">
                   <legend className="field-label">Types de pages</legend>
-                  <div style={{ display: 'flex', gap: 'var(--space-4)', flexWrap: 'wrap' }}>
+                  <div className="campaign-form__checks">
                     {PAGE_TYPE_ORDER.map((type) => {
                       const unavailable = type === 'local_pack' && form.scope === 'national'
                       return (
@@ -411,8 +412,8 @@ export default function EditCampaignPage() {
             {/* ── Rythme ── */}
             <section className="panel">
               <div className="panel__header"><h2 className="card-title">Rythme</h2></div>
-              <div className="panel__body" style={{ display: 'grid', gap: 'var(--space-4)' }}>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 'var(--space-4)' }}>
+              <div className="panel__body campaign-form__body">
+                <div className="campaign-form__grid campaign-form__grid--narrow">
                   <FormField label="Fréquence" htmlFor="schedule-frequency">
                     <select id="schedule-frequency" name="schedule_frequency" value={form.schedule_frequency} onChange={handle} className="input">
                       {FREQUENCIES.map((frequency) => <option key={frequency.value} value={frequency.value}>{frequency.label}</option>)}
@@ -427,9 +428,9 @@ export default function EditCampaignPage() {
                 </div>
 
                 {form.schedule_frequency === 'custom' && (
-                  <fieldset style={{ border: 0, padding: 0, margin: 0 }}>
+                  <fieldset className="campaign-form__fieldset">
                     <legend className="field-label">Jours de génération</legend>
-                    <div style={{ display: 'flex', gap: 'var(--space-4)', flexWrap: 'wrap' }}>
+                    <div className="campaign-form__checks">
                       {WEEKDAYS.map((day) => (
                         <CheckLabel key={day.value} id={`weekday-${day.value}`} checked={form.schedule_days.includes(day.value)} onChange={() => toggleWeekday(day.value)} title={day.label}>
                           {day.short}
@@ -449,8 +450,8 @@ export default function EditCampaignPage() {
             {/* ── Rédaction ── */}
             <section className="panel">
               <div className="panel__header"><h2 className="card-title">Rédaction</h2></div>
-              <div className="panel__body" style={{ display: 'grid', gap: 'var(--space-4)' }}>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 'var(--space-4)' }}>
+              <div className="panel__body campaign-form__body">
+                <div className="campaign-form__grid campaign-form__grid--medium">
                   <FormField label="Modèle IA" htmlFor="ai-model">
                     <select id="ai-model" name="ai_model" value={form.ai_model} onChange={handle} className="input">
                       {/* Un modèle retiré du catalogue mais encore en base reste
@@ -472,14 +473,14 @@ export default function EditCampaignPage() {
                   </FormField>
                 </div>
 
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 'var(--space-4)' }}>
-                  <div style={{ display: 'grid', gap: 'var(--space-2)' }}>
+                <div className="campaign-form__grid campaign-form__grid--wide">
+                  <div className="campaign-form__links">
                     <CheckLabel id="enable-external-links" name="enable_external_links" checked={form.enable_external_links} onChange={handle}>
                       Insérer des liens externes
                     </CheckLabel>
                     {form.enable_external_links && (
                       <FormField label="Liens externes par page" htmlFor="external-link-count">
-                        <input id="external-link-count" name="external_link_count" type="number" min={1} max={10} value={form.external_link_count} onChange={handle} className="input" style={{ maxWidth: 140 }} />
+                        <input id="external-link-count" name="external_link_count" type="number" min={1} max={10} value={form.external_link_count} onChange={handle} className="input campaign-form__count" />
                       </FormField>
                     )}
                   </div>
@@ -490,9 +491,9 @@ export default function EditCampaignPage() {
             {/* ── Publication ── */}
             <section className="panel">
               <div className="panel__header"><h2 className="card-title">Publication</h2></div>
-              <div className="panel__body" style={{ display: 'grid', gap: 'var(--space-4)' }}>
+              <div className="panel__body campaign-form__body">
                 <FormField label="Statut à la publication" htmlFor="publish-status">
-                  <select id="publish-status" name="publish_status" value={form.publish_status} onChange={handle} className="input" style={{ maxWidth: 320 }}>
+                  <select id="publish-status" name="publish_status" value={form.publish_status} onChange={handle} className="input campaign-form__status">
                     {PUBLISH_STATUSES.map((status) => <option key={status.value} value={status.value}>{status.label}</option>)}
                   </select>
                 </FormField>
@@ -516,21 +517,21 @@ export default function EditCampaignPage() {
                 </CheckLabel>
               </div>
 
-              <div className="panel__footer" style={{ display: 'flex', gap: 'var(--space-3)', alignItems: 'center' }}>
+              <div className="panel__footer campaign-form__actions">
                 {error && <Notice inline tone="critical" title="Modifications non enregistrées" body={error} />}
-                <div style={{ flex: 1 }} />
+                <div className="campaign-form__spacer" />
                 <Button variant="ghost" href={backHref} disabled={saving}>Annuler</Button>
                 <Button icon={Save} loading={saving} onClick={submit}>Enregistrer les modifications</Button>
               </div>
             </section>
 
             {/* ── Zone de danger ── */}
-            <section className="panel" style={{ borderColor: 'var(--status-critical)' }}>
+            <section className="panel campaign-danger">
               <div className="panel__header">
-                <h2 className="card-title" style={{ color: 'var(--status-critical-text)' }}>Supprimer cette campagne</h2>
+                <h2 className="card-title campaign-danger__title">Supprimer cette campagne</h2>
               </div>
-              <div className="panel__body" style={{ display: 'flex', gap: 'var(--space-4)', alignItems: 'center', flexWrap: 'wrap' }}>
-                <p className="meta" style={{ margin: 0, flex: 1, minWidth: 260 }}>
+              <div className="panel__body campaign-danger__body">
+                <p className="meta campaign-danger__text">
                   Supprime le plan de cycle et le calendrier éditorial. Les pages déjà générées ou publiées sont
                   conservées. Une confirmation est demandée.
                 </p>
@@ -579,11 +580,11 @@ function CheckLabel({
   const hintId = hint ? `${id}-hint` : undefined
   return (
     <div>
-      <label htmlFor={id} title={title} style={{ display: 'flex', gap: 'var(--space-2)', alignItems: 'flex-start', cursor: disabled ? 'not-allowed' : 'pointer', fontSize: 'var(--fs-sm)', color: disabled ? 'var(--ink-secondary)' : 'var(--ink-primary)' }}>
-        <input id={id} name={name} type="checkbox" checked={checked} onChange={onChange} disabled={disabled} aria-describedby={hintId} style={{ marginTop: 3 }} />
+      <label htmlFor={id} title={title} className={`check-label${disabled ? ' check-label--disabled' : ''}`}>
+        <input id={id} name={name} type="checkbox" checked={checked} onChange={onChange} disabled={disabled} aria-describedby={hintId} className="choice-box" />
         <span>{children}</span>
       </label>
-      {hint && <p id={hintId} className="meta" style={{ margin: 'var(--space-1) 0 0 calc(13px + var(--space-2))' }}>{hint}</p>}
+      {hint && <p id={hintId} className="meta check-label__hint">{hint}</p>}
     </div>
   )
 }

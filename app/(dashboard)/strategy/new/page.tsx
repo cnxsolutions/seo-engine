@@ -16,6 +16,7 @@ import type { InventoryResponse } from '@/app/api/sites/[id]/inventory/types'
 import { normalizeInventoryPath } from '@/src/core/domain/existing/inventory'
 import { AI_MODEL_OPTIONS, DEFAULT_GENERATION_MODEL } from '@/lib/ai/provider'
 import { CAMPAIGN_SCOPE_OPTIONS, withoutLocalPack, type CampaignScope } from '@/lib/geo/scope'
+import '../strategy.css'
 
 // The select and the plan table used to read a local label table that said
 // 'Fille' and 'Local Pack' where the calendar and the strategy list said
@@ -263,7 +264,7 @@ export default function NewStrategyWorkflowPage() {
       body: JSON.stringify({ type: siteType, ...siteForm }),
     })
     const data = await res.json()
-    if (!res.ok) throw new Error(data.error || 'Creation du site impossible')
+    if (!res.ok) throw new Error(data.error || 'Création du site impossible')
     setSites((prev) => [data.site, ...prev])
     setSelectedSiteId(data.site.id)
     setCreateSiteMode(false)
@@ -327,7 +328,7 @@ export default function NewStrategyWorkflowPage() {
         }),
       })
       const data = await res.json()
-      if (!res.ok) throw new Error(data.error || 'Generation du plan impossible')
+      if (!res.ok) throw new Error(data.error || 'Génération du plan impossible')
       setCampaign(data.campaign)
       setPlan(data.plan)
       const briefs: PlanItemBrief[] = data.plan.plan_data || []
@@ -399,7 +400,7 @@ export default function NewStrategyWorkflowPage() {
   }
 
   return (
-    <div style={{ maxWidth: 1080 }}>
+    <div className="strategy-wizard">
       <PageHeader
         icon={Target}
         badge="Stratégie"
@@ -415,36 +416,36 @@ export default function NewStrategyWorkflowPage() {
       {error && <Notice tone="critical" title="Étape impossible" body={error} />}
 
       {step === 0 && (
-        <div className="glass-card" style={{ display: 'grid', gap: '1rem' }}>
-          <div style={{ display: 'flex', gap: '0.75rem' }}>
-            <button onClick={() => setCreateSiteMode(false)} className={createSiteMode ? 'btn-ghost' : 'btn-primary'} disabled={sites.length === 0}>Site existant</button>
-            <button onClick={() => setCreateSiteMode(true)} className={createSiteMode ? 'btn-primary' : 'btn-ghost'}>Créer un site</button>
+        <div className="glass-card wizard-step">
+          <div className="wizard-mode">
+            <button onClick={() => setCreateSiteMode(false)} aria-pressed={!createSiteMode} className={createSiteMode ? 'btn-ghost' : 'btn-primary'} disabled={sites.length === 0}>Site existant</button>
+            <button onClick={() => setCreateSiteMode(true)} aria-pressed={createSiteMode} className={createSiteMode ? 'btn-primary' : 'btn-ghost'}>Créer un site</button>
           </div>
 
           {!createSiteMode ? (
             <FormField label="Site cible">
               <select value={selectedSiteId} onChange={(event) => setSelectedSiteId(event.target.value)} className="input">
                 <option value="">Choisir un site</option>
-                {sites.map((site) => <option key={site.id} value={site.id}>{site.name} ({site.type})</option>)}
+                {sites.map((site) => <option key={site.id} value={site.id}>{site.name} ({site.type === 'nextjs' ? 'Next.js' : 'WordPress'})</option>)}
               </select>
             </FormField>
           ) : (
             <>
-              <div style={{ display: 'flex', gap: '0.5rem' }}>
-                <button onClick={() => setSiteType('wordpress')} className={siteType === 'wordpress' ? 'btn-primary' : 'btn-ghost'}><Globe2 size={15} /> WordPress</button>
-                <button onClick={() => setSiteType('nextjs')} className={siteType === 'nextjs' ? 'btn-primary' : 'btn-ghost'}>Next.js</button>
+              <div className="wizard-toggles">
+                <button onClick={() => setSiteType('wordpress')} aria-pressed={siteType === 'wordpress'} className={siteType === 'wordpress' ? 'btn-primary' : 'btn-ghost'}><Globe2 size={15} /> WordPress</button>
+                <button onClick={() => setSiteType('nextjs')} aria-pressed={siteType === 'nextjs'} className={siteType === 'nextjs' ? 'btn-primary' : 'btn-ghost'}>Next.js</button>
               </div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+              <div className="wizard-grid">
                 <FormField label="Nom du site"><input name="name" value={siteForm.name} onChange={updateSiteForm} className="input" /></FormField>
                 <FormField label="URL"><input name="url" value={siteForm.url} onChange={updateSiteForm} className="input" placeholder="https://example.com" /></FormField>
               </div>
               {siteType === 'wordpress' ? (
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                <div className="wizard-grid">
                   <FormField label="Utilisateur WordPress"><input name="wp_username" value={siteForm.wp_username} onChange={updateSiteForm} className="input" /></FormField>
                   <FormField label="Application Password"><input name="wp_app_password" type="password" value={siteForm.wp_app_password} onChange={updateSiteForm} className="input" /></FormField>
                 </div>
               ) : (
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '1rem' }}>
+                <div className="wizard-grid wizard-grid--3">
                   <FormField label="Repo GitHub"><input name="github_repo" value={siteForm.github_repo} onChange={updateSiteForm} className="input" placeholder="owner/repo" /></FormField>
                   <FormField label="Token GitHub"><input name="github_token" type="password" value={siteForm.github_token} onChange={updateSiteForm} className="input" /></FormField>
                   <FormField label="Branche cible"><input name="github_branch" value={siteForm.github_branch} onChange={updateSiteForm} className="input" placeholder="seo-engine" /></FormField>
@@ -453,15 +454,15 @@ export default function NewStrategyWorkflowPage() {
             </>
           )}
 
-          <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+          <div className="wizard-nav wizard-nav--end">
             <button onClick={() => setStep(1)} disabled={!canContinueSite} className="btn-primary">Continuer <ArrowRight size={15} /></button>
           </div>
         </div>
       )}
 
       {step === 1 && (
-        <div className="glass-card" style={{ display: 'grid', gap: '1rem' }}>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+        <div className="glass-card wizard-step">
+          <div className="wizard-grid">
             <FormField label="Nom de la stratégie"><input name="name" value={contextForm.name} onChange={updateContextForm} className="input" placeholder="SEO Plombier Troyes" /></FormField>
             <FormField label="Nom du business"><input name="business_name" value={contextForm.business_name} onChange={updateContextForm} className="input" /></FormField>
             <FormField label="Type d’activité"><input name="business_type" value={contextForm.business_type} onChange={updateContextForm} className="input" placeholder="plombier, coach, avocat..." /></FormField>
@@ -469,14 +470,14 @@ export default function NewStrategyWorkflowPage() {
           </div>
           <div>
             <div className="field-label">Portée</div>
-            <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+            <div className="wizard-toggles">
               {CAMPAIGN_SCOPE_OPTIONS.map((option) => (
-                <button key={option.value} onClick={() => chooseScope(option.value)} className={contextForm.scope === option.value ? 'btn-primary' : 'btn-ghost'}>
+                <button key={option.value} onClick={() => chooseScope(option.value)} aria-pressed={contextForm.scope === option.value} className={contextForm.scope === option.value ? 'btn-primary' : 'btn-ghost'}>
                   {option.label}
                 </button>
               ))}
             </div>
-            <p className="meta" style={{ marginTop: 'var(--space-2)' }}>
+            <p className="meta wizard-hint">
               {CAMPAIGN_SCOPE_OPTIONS.find((option) => option.value === contextForm.scope)?.hint}
             </p>
           </div>
@@ -489,11 +490,11 @@ export default function NewStrategyWorkflowPage() {
             <input name="keywords" value={contextForm.keywords} onChange={updateContextForm} className="input" placeholder="depannage, urgence, devis" />
           </FormField>
           <FormField label="URLs concurrentes" hint="une par ligne, 5 maximum">
-            <textarea name="competitor_urls" value={contextForm.competitor_urls} onChange={(event) => setContextForm((prev) => ({ ...prev, competitor_urls: event.target.value }))} className="input" style={{ minHeight: 96, resize: 'vertical' }} />
+            <textarea name="competitor_urls" value={contextForm.competitor_urls} onChange={(event) => setContextForm((prev) => ({ ...prev, competitor_urls: event.target.value }))} className="input wizard-textarea" />
           </FormField>
           <div>
             <div className="field-label">Types de pages</div>
-            <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+            <div className="wizard-toggles">
               {PAGE_TYPES.map((type) => {
                 const active = pageTypes.includes(type.value)
                 const unavailable = national && type.value === 'local_pack'
@@ -503,6 +504,7 @@ export default function NewStrategyWorkflowPage() {
                     onClick={() => setPageTypes((prev) => active ? prev.filter((item) => item !== type.value) : [...prev, type.value])}
                     disabled={unavailable}
                     title={unavailable ? 'Réservé aux campagnes locales' : undefined}
+                    aria-pressed={active}
                     className={active ? 'btn-primary' : 'btn-ghost'}
                   >
                     {type.label}
@@ -511,17 +513,17 @@ export default function NewStrategyWorkflowPage() {
               })}
             </div>
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '1rem' }}>
+          <div className="wizard-grid wizard-grid--4">
             <FormField label="Fréquence"><select name="schedule_frequency" value={contextForm.schedule_frequency} onChange={updateContextForm} className="input">{FREQUENCIES.map((frequency) => <option key={frequency.value} value={frequency.value}>{frequency.label}</option>)}</select></FormField>
             <FormField label="Durée du cycle"><select name="cycle_duration_days" value={contextForm.cycle_duration_days} onChange={updateContextForm} className="input"><option value="7">7 jours</option><option value="14">14 jours</option><option value="21">21 jours</option><option value="30">30 jours</option></select></FormField>
             <FormField label="Modèle IA"><select name="ai_model" value={contextForm.ai_model} onChange={updateContextForm} className="input">{AI_MODEL_OPTIONS.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}</select></FormField>
             <FormField label="Longueur"><select name="target_length" value={contextForm.target_length} onChange={updateContextForm} className="input"><option value="800">800 mots</option><option value="1200">1200 mots</option><option value="2000">2000 mots</option></select></FormField>
           </div>
-          <label style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', fontSize: 'var(--fs-sm)', color: 'var(--ink-secondary)' }}>
+          <label className="wizard-check">
             <input type="checkbox" name="auto_publish" checked={contextForm.auto_publish} onChange={updateContextForm} />
             Publier automatiquement le jour prévu
           </label>
-          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+          <div className="wizard-nav">
             <button onClick={() => setStep(0)} className="btn-ghost">Retour</button>
             <button onClick={runAnalysis} disabled={!canAnalyze || loading === 'analysis'} className="btn-primary">
               {loading === 'analysis' ? <Loader2 size={15} className="animate-spin" /> : <ScanSearch size={15} />} Analyser site + concurrents
@@ -531,8 +533,8 @@ export default function NewStrategyWorkflowPage() {
       )}
 
       {step === 2 && analysisRun && (
-        <div className="glass-card" style={{ display: 'grid', gap: '1rem' }}>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '0.75rem' }}>
+        <div className="glass-card wizard-step">
+          <div className="wizard-stats">
             {/* « 0 pages » sur un site que l'analyse n'a pas su lire annoncerait
                 au propriétaire que son site est vide — au moment précis où le
                 moteur s'apprête à écrire par-dessus ses pages. */}
@@ -549,11 +551,11 @@ export default function NewStrategyWorkflowPage() {
             <Stat label="Mots-clés manquants" value={analysisRun.analysis_data.gapAnalysis.missingKeywords.length} />
             <Stat label="Opportunités locales" value={analysisRun.analysis_data.gapAnalysis.localOpportunities.length} />
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+          <div className="wizard-grid">
             <SummaryBox title="Mots-clés manquants" items={analysisRun.analysis_data.gapAnalysis.missingKeywords.slice(0, 10)} />
             <SummaryBox title="Angles détectés" items={analysisRun.analysis_data.gapAnalysis.suggestedAngles.slice(0, 10)} />
           </div>
-          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+          <div className="wizard-nav">
             <button onClick={() => setStep(1)} className="btn-ghost">Retour</button>
             <button onClick={generatePlan} disabled={loading === 'plan'} className="btn-primary">
               {loading === 'plan' ? <Loader2 size={15} className="animate-spin" /> : <CalendarCheck size={15} />} Générer le plan de briefs
@@ -563,11 +565,11 @@ export default function NewStrategyWorkflowPage() {
       )}
 
       {step === 3 && plan && (
-        <div className="glass-card" style={{ display: 'grid', gap: '1rem' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 'var(--space-4)' }}>
+        <div className="glass-card wizard-step">
+          <div className="wizard-plan__head">
             <div>
               <h2 className="card-title">Plan du cycle</h2>
-              <p className="meta" style={{ margin: '0.25rem 0 0' }}>
+              <p className="meta wizard-plan__lede">
                 {items.length} briefs sur {plan.cycle_duration_days} jours. La rédaction est faite le jour prévu, pas maintenant.
               </p>
             </div>
@@ -603,14 +605,14 @@ export default function NewStrategyWorkflowPage() {
               d'adresse faite en amont : la page serait écrite, payée, puis
               refusée à la publication. */}
           {collisions > 0 && (
-            <p className="meta" style={{ margin: 0, color: 'var(--status-critical-text)' }}>
-              {collisions} adresse{collisions > 1 ? 's' : ''} déjà prise{collisions > 1 ? 's' : ''}. Corrigez-les
-              avant de lancer le cycle — sinon la page sera écrite puis refusée à la publication, après avoir
-              été payée.
+            <p className="meta wizard-plan__collisions">
+              {collisions} adresse{collisions > 1 ? 's' : ''} en collision (déjà prise sur le site, ou en double dans
+              ce plan). Corrigez-les avant de lancer le cycle — sinon la page sera écrite puis refusée à la
+              publication, après avoir été payée.
             </p>
           )}
 
-          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+          <div className="wizard-nav">
             <button onClick={() => setStep(2)} className="btn-ghost">Retour analyse</button>
             <button
               onClick={confirmPlan}
@@ -649,7 +651,7 @@ function addressVerdict(verdict: SlugVerdict | undefined): AddressVerdict {
         inline: 'adresse déjà prise',
         blocking: true,
         detail: 'Cette URL est déjà prise sur ce site (page en ligne ou adresse réservée par une génération). '
-          + 'Changez-la, ou laissez le moteur mettre cette page à jour plutôt que d’en créer une nouvelle.',
+          + 'Changez-la : le moteur écrit une nouvelle page, il ne met pas à jour une page existante.',
       }
     case 'duplicate-in-plan':
       return { tone: 'critical', inline: 'en double dans le plan', blocking: true, detail: 'Deux briefs de ce plan visent la même URL.' }
@@ -679,22 +681,14 @@ function addressVerdict(verdict: SlugVerdict | undefined): AddressVerdict {
 function Stepper({ step }: { step: Step }) {
   const labels = ['Site', 'Contexte', 'Analyse', 'Plan']
   return (
-    <ol style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 'var(--space-2)', marginBottom: 'var(--space-5)', listStyle: 'none', padding: 0 }}>
+    <ol className="wizard-stepper">
       {labels.map((label, index) => {
         const reached = index <= step
         return (
           <li
             key={label}
             aria-current={index === step ? 'step' : undefined}
-            style={{
-              padding: 'var(--space-3)',
-              borderRadius: 'var(--radius-md)',
-              border: `1px solid ${index === step ? 'var(--accent)' : 'var(--line)'}`,
-              background: reached ? 'var(--accent-wash)' : 'var(--surface-card)',
-              color: reached ? 'var(--accent-text)' : 'var(--ink-muted)',
-              fontWeight: 600,
-              fontSize: 'var(--fs-xs)',
-            }}
+            className={`wizard-stepper__step${reached ? ' wizard-stepper__step--reached' : ''}${index === step ? ' wizard-stepper__step--current' : ''}`}
           >
             {index + 1}. {label}
           </li>
@@ -710,9 +704,9 @@ function Stepper({ step }: { step: Step }) {
 function Stat({ label, value, hint }: { label: string; value: string | number; hint?: string }) {
   return (
     <div className="stat-card">
-      <div className="stat-value" style={{ fontSize: 'var(--fs-xl)' }}>{value}</div>
+      <div className="stat-value wizard-stat__value">{value}</div>
       <div className="stat-label">{label}</div>
-      {hint && <div className="meta" style={{ marginTop: 'var(--space-1)' }}>{hint}</div>}
+      {hint && <div className="meta wizard-stat__hint">{hint}</div>}
     </div>
   )
 }
@@ -720,8 +714,8 @@ function Stat({ label, value, hint }: { label: string; value: string | number; h
 function SummaryBox({ title, items }: { title: string; items: string[] }) {
   return (
     <div className="inset">
-      <div style={{ fontWeight: 600, fontSize: 'var(--fs-sm)', marginBottom: 'var(--space-2)' }}>{title}</div>
-      <ul className="meta" style={{ margin: 0, paddingLeft: '1.1rem', display: 'flex', flexDirection: 'column', gap: 'var(--space-1)' }}>
+      <div className="wizard-summary__title">{title}</div>
+      <ul className="meta wizard-summary__list">
         {(items.length ? items : ['Aucun élément critique détecté']).map((item, index) => (
           <li key={`${item}-${index}`}>{item}</li>
         ))}

@@ -18,6 +18,7 @@ import { useState } from 'react'
 import { Trash2 } from 'lucide-react'
 import { Button, Notice } from '@/components/ui'
 import { Modal } from '@/components/charts'
+import './strategy.css'
 
 export function DeleteCampaignDialog({
   campaign, onClose, onDeleted,
@@ -57,7 +58,7 @@ export function DeleteCampaignDialog({
       onClose={onClose}
       size="md"
       footer={
-        <div style={{ display: 'flex', gap: 'var(--space-2)', justifyContent: 'flex-end', width: '100%' }}>
+        <div className="modal__actions">
           <Button variant="ghost" onClick={onClose} disabled={deleting}>
             Annuler
           </Button>
@@ -67,16 +68,16 @@ export function DeleteCampaignDialog({
         </div>
       }
     >
-      <div style={{ padding: 'var(--space-5)', display: 'grid', gap: 'var(--space-3)' }}>
-        <p style={{ margin: 0, fontSize: 'var(--fs-sm)', color: 'var(--ink-secondary)', lineHeight: 'var(--lh-normal)' }}>
+      <div className="delete-campaign__body">
+        <p className="delete-campaign__text">
           La suppression efface le plan de cycle et le calendrier éditorial de cette campagne :
           aucun créneau restant ne sera généré.
         </p>
-        <p style={{ margin: 0, fontSize: 'var(--fs-sm)', color: 'var(--ink-secondary)', lineHeight: 'var(--lh-normal)' }}>
+        <p className="delete-campaign__text">
           <strong>Les pages déjà générées ou publiées sont conservées</strong>, sur le site comme dans
           l’historique des générations. Rien n’est retiré du site du client.
         </p>
-        <p className="meta" style={{ margin: 0 }}>
+        <p className="meta">
           Une campagne dont une génération ou une publication est en cours ne peut pas être supprimée :
           attendez la fin du créneau, puis réessayez.
         </p>

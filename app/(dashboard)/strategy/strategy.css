@@ -1,0 +1,474 @@
+/* ─────────────────────────────────────────────────────────────────────────────
+   Stratégie — l'onglet d'un site (ses campagnes, le plan de cycle et sa
+   provenance), l'assistant de création, la modification d'une campagne, le
+   dialogue de suppression (L6d).
+
+   Ces règles rendent ce que rendaient les styles en ligne, avec trois écarts
+   voulus :
+   - le téléphone (UX-12) : les grilles fixes de l'assistant (2, 3, 4 colonnes)
+     passent à 2 puis 1 colonne, chaque étape borne sa colonne pour qu'un brief
+     ou une adresse longue ne pousse plus la carte hors de l'écran, et les pieds
+     d'étape ou de formulaire passent à la ligne au lieu de couper leur bouton ;
+   - la couleur de la provenance d'un plan vit ici, une seule fois, par note
+     (mesuré, partiel, à l'aveugle, inconnu), et l'icône la reprend ;
+   - le pied du dialogue de suppression reprend `.modal__actions`, celui de
+     tous les autres dialogues (écart de 8 à 12 px entre les boutons).
+   ───────────────────────────────────────────────────────────────────────────── */
+
+/* ── L'onglet : les campagnes d'un site ── */
+
+.strategy-campaigns {
+  display: grid;
+  gap: var(--space-5);
+}
+
+.panel__header.campaign-panel__header {
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+
+.campaign-panel__title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.campaign-panel__actions {
+  display: flex;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.strategy-plan__text {
+  min-width: 0;
+}
+
+.input.strategy-plan__days {
+  width: 110px;
+}
+
+.plan-lede {
+  display: grid;
+  gap: var(--space-1);
+}
+
+.glass-card.strategy-loading {
+  display: grid;
+  justify-items: center;
+  gap: var(--space-3);
+  padding: var(--space-12);
+}
+
+/* ── La provenance d'un plan : ce qui a réellement été mesuré ── */
+
+.provenance--measured { --provenance-color: var(--status-good); }
+.provenance--partial { --provenance-color: var(--status-warning); }
+.provenance--blind { --provenance-color: var(--status-critical); }
+.provenance--unknown { --provenance-color: var(--ink-faint); }
+
+.inset.provenance {
+  display: grid;
+  gap: var(--space-3);
+  border-left: 3px solid var(--provenance-color);
+}
+
+.provenance__head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.provenance__icon {
+  color: var(--provenance-color);
+}
+
+.provenance__title {
+  font-size: var(--fs-sm);
+}
+
+.provenance__sources {
+  display: grid;
+  gap: var(--space-3);
+  grid-template-columns: repeat(auto-fit, minmax(min(280px, 100%), 1fr));
+}
+
+.source-block__head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-1);
+}
+
+.source-block__title {
+  font-size: var(--fs-xs);
+  font-weight: 600;
+}
+
+.meta.source-block__list {
+  margin: 0;
+  padding-left: 1.1rem;
+}
+
+.source-block__item {
+  margin-bottom: var(--space-1);
+}
+
+/* La requête citée, entre guillemets, au-dessus du gris de la ligne. */
+.query-quote {
+  color: var(--ink-primary);
+}
+
+.conflicts__title {
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  margin-bottom: var(--space-1);
+}
+
+.conflicts__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--space-2);
+}
+
+.meta.conflicts__note {
+  margin: var(--space-2) 0 0;
+}
+
+.conflict__line {
+  font-size: var(--fs-sm);
+  color: var(--ink-secondary);
+  line-height: var(--lh-snug);
+}
+
+.meta.conflict__losers {
+  margin: var(--space-1) 0 0;
+  padding-left: 1.1rem;
+}
+
+/* ── La source des SERP, en une ligne ── */
+
+.meta.serp-status {
+  display: flex;
+  gap: var(--space-2);
+  align-items: flex-start;
+}
+
+.serp-status__icon {
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.serp-status__source {
+  color: var(--ink-primary);
+}
+
+/* ── Supprimer une campagne : le dialogue ── */
+
+.delete-campaign__body {
+  padding: var(--space-5);
+  display: grid;
+  gap: var(--space-3);
+}
+
+.delete-campaign__text {
+  font-size: var(--fs-sm);
+  color: var(--ink-secondary);
+  line-height: var(--lh-normal);
+}
+
+/* ── L'assistant de création ── */
+
+.strategy-wizard {
+  max-width: 1080px;
+}
+
+/* Les marques de liste et la marge haute de l'<ol> restent celles du
+   navigateur, comme avant : seules la marge basse et le retrait sont posés. */
+.wizard-stepper {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: var(--space-2);
+  margin-bottom: var(--space-5);
+  list-style: none;
+  padding: 0;
+}
+
+.wizard-stepper__step {
+  padding: var(--space-3);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--line);
+  background: var(--surface-card);
+  color: var(--ink-muted);
+  font-weight: 600;
+  font-size: var(--fs-xs);
+}
+
+.wizard-stepper__step--reached {
+  background: var(--accent-wash);
+  color: var(--accent-text);
+}
+
+.wizard-stepper__step--current {
+  border-color: var(--accent);
+}
+
+/* Une colonne bornée : sans elle, l'adresse d'un brief (une ligne insécable)
+   élargissait la carte et coupait le bouton de lancement sur téléphone. */
+.glass-card.wizard-step {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-4);
+}
+
+.wizard-mode {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+
+.wizard-toggles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.wizard-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-4);
+}
+
+.wizard-grid--3 {
+  grid-template-columns: 1fr 1fr 1fr;
+}
+
+.wizard-grid--4 {
+  grid-template-columns: repeat(4, 1fr);
+}
+
+.wizard-stats {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: var(--space-3);
+}
+
+.meta.wizard-hint {
+  margin-top: var(--space-2);
+}
+
+.input.wizard-textarea {
+  min-height: 96px;
+}
+
+.wizard-check {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--fs-sm);
+  color: var(--ink-secondary);
+}
+
+/* Retour à gauche, l'étape suivante à droite — et, quand les deux ne tiennent
+   plus sur une ligne, l'étape suivante passe dessous, toujours à droite. */
+.wizard-nav {
+  display: flex;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+
+.wizard-nav > :last-child {
+  margin-left: auto;
+}
+
+.wizard-nav--end {
+  justify-content: flex-end;
+}
+
+.stat-value.wizard-stat__value {
+  font-size: var(--fs-xl);
+}
+
+.meta.wizard-stat__hint {
+  margin-top: var(--space-1);
+}
+
+.wizard-summary__title {
+  font-weight: 600;
+  font-size: var(--fs-sm);
+  margin-bottom: var(--space-2);
+}
+
+.meta.wizard-summary__list {
+  margin: 0;
+  padding-left: 1.1rem;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.wizard-plan__head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--space-4);
+}
+
+.meta.wizard-plan__lede {
+  margin: var(--space-1) 0 0;
+}
+
+.meta.wizard-plan__collisions {
+  color: var(--status-critical-text);
+}
+
+@media (max-width: 720px) {
+  .wizard-grid--4,
+  .wizard-stats {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+@media (max-width: 560px) {
+  .wizard-grid,
+  .wizard-grid--3,
+  .wizard-grid--4 {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ── Modifier une campagne ── */
+
+.campaign-form {
+  max-width: 820px;
+}
+
+.campaign-form__sections {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.panel__body.campaign-form__body {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.campaign-form__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr));
+  gap: var(--space-4);
+}
+
+.campaign-form__grid--narrow {
+  grid-template-columns: repeat(auto-fit, minmax(min(180px, 100%), 1fr));
+}
+
+.campaign-form__grid--medium {
+  grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr));
+}
+
+.campaign-form__grid--wide {
+  grid-template-columns: repeat(auto-fit, minmax(min(280px, 100%), 1fr));
+}
+
+.campaign-form__fieldset {
+  border: 0;
+  padding: 0;
+  margin: 0;
+}
+
+.campaign-form__scopes {
+  display: flex;
+  gap: var(--space-5);
+  flex-wrap: wrap;
+}
+
+.campaign-form__checks {
+  display: flex;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+}
+
+.campaign-form__links {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.input.campaign-form__count {
+  max-width: 140px;
+}
+
+.input.campaign-form__status {
+  max-width: 320px;
+}
+
+/* Le refus, puis Annuler et Enregistrer. Sur téléphone le refus prend sa ligne
+   et Enregistrer, s'il ne tient plus, passe dessous, à droite. */
+.panel__footer.campaign-form__actions {
+  display: flex;
+  gap: var(--space-3);
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.campaign-form__spacer {
+  flex: 1;
+}
+
+.campaign-form__actions > :last-child {
+  margin-left: auto;
+}
+
+@media (max-width: 560px) {
+  .campaign-form__actions > .notice {
+    flex-basis: 100%;
+  }
+}
+
+.panel.campaign-danger {
+  border-color: var(--status-critical);
+}
+
+.card-title.campaign-danger__title {
+  color: var(--status-critical-text);
+}
+
+.panel__body.campaign-danger__body {
+  display: flex;
+  gap: var(--space-4);
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.meta.campaign-danger__text {
+  flex: 1;
+  min-width: 260px;
+}
+
+/* Une case ou un bouton radio, son texte, et ce qu'il entraîne. */
+.check-label {
+  display: flex;
+  gap: var(--space-2);
+  align-items: flex-start;
+  cursor: pointer;
+  font-size: var(--fs-sm);
+  color: var(--ink-primary);
+}
+
+.check-label--disabled {
+  cursor: not-allowed;
+  color: var(--ink-secondary);
+}
+
+.meta.check-label__hint {
+  margin: var(--space-1) 0 0 calc(13px + var(--space-2));
+}
+
+.meta.check-label__aside {
+  display: block;
+}
