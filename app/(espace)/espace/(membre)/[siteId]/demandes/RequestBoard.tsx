@@ -266,7 +266,7 @@ export function RequestBoard({ siteId, zone, requests, today, lastDay, children 
         {shown.length === 0 ? (
           <p className="espace-empty">{REQUEST_TEXT.listEmpty}</p>
         ) : (
-          <ul className="espace-list">
+          <ul className="espace-list stagger">
             {shown.map((request) => (
               <RequestItem
                 key={request.id}

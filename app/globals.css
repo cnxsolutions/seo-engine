@@ -692,6 +692,7 @@ button > .glass-card:hover {
   border-radius: var(--radius-sm);
   border-color: var(--line);
   color: var(--ink-secondary);
+  transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
 }
 
 .btn-icon:hover:not(:disabled) {
@@ -920,6 +921,7 @@ textarea.input {
   font-size: var(--fs-sm);
   color: var(--ink-secondary);
   vertical-align: middle;
+  transition: background var(--dur-fast) var(--ease);
 }
 
 /* A row header is a label, not a column head: it must not inherit the caps. */
@@ -2416,7 +2418,7 @@ textarea.input {
   stroke-linecap: round;
   transform-box: fill-box;
   transform-origin: left center;
-  animation: thread-draw var(--dur-slow) ease-in-out both;
+  animation: thread-draw var(--dur-slow) var(--ease) both;
 }
 
 .thread__dot {
@@ -2576,6 +2578,7 @@ textarea.input {
   font-size: var(--fs-xs);
   font-weight: 600;
   text-decoration: none;
+  transition: color var(--dur-fast) var(--ease);
 }
 
 .site-hero__back:hover {

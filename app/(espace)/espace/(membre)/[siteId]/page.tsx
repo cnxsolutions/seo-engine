@@ -64,7 +64,7 @@ export default async function SiteHomePage({ params }: { params: Promise<{ siteI
         </div>
         {latest.requests.length === 0
           ? <p className="espace-empty">{REQUEST_TEXT.listEmpty}</p>
-          : <ul className="espace-list">{latest.requests.map((request) => <RequestItem key={request.id} request={request} />)}</ul>}
+          : <ul className="espace-list stagger">{latest.requests.map((request) => <RequestItem key={request.id} request={request} />)}</ul>}
         <div className="espace-section__cta">
           <Button href={`${requestsHref}#proposer`} variant="primary" icon={MessageSquarePlus}>{REQUEST_TEXT.propose}</Button>
         </div>

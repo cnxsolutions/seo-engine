@@ -91,7 +91,7 @@ export async function SitePicker({
         />
       ) : (
         <nav aria-label={`Sites — ${title}`}>
-          <ul className="site-picker">
+          <ul className="site-picker stagger">
             {ordered.map((site) => (
               <li key={site.id}>
                 <Link href={hrefFor(site.id)} className="site-picker__row">

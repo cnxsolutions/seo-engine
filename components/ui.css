@@ -480,6 +480,40 @@
   }
 }
 
+/* ── Stagger — a list that enters in sequence (docs/design.md § 8) ──
+   Opt-in, list by list: « tout en fondu-montée » is on the design's list of
+   what not to do. Each item fades in and rises 8 px, 60 ms after the one
+   before; from the ninth on they arrive together, so a long list never makes
+   anyone wait. It plays when the items are first rendered: a keyed item that
+   stays in the list does not play it again.
+
+   `backwards`, not `both`: once arrived, an item leaves the animation behind
+   entirely, so its own hover transitions keep working. */
+@keyframes list-rise {
+  from { opacity: 0; transform: translateY(8px); }
+}
+
+.stagger > * {
+  animation: list-rise var(--dur) var(--ease) backwards;
+}
+
+.stagger > :nth-child(2) { animation-delay: 60ms; }
+.stagger > :nth-child(3) { animation-delay: 120ms; }
+.stagger > :nth-child(4) { animation-delay: 180ms; }
+.stagger > :nth-child(5) { animation-delay: 240ms; }
+.stagger > :nth-child(6) { animation-delay: 300ms; }
+.stagger > :nth-child(7) { animation-delay: 360ms; }
+.stagger > :nth-child(8) { animation-delay: 420ms; }
+.stagger > :nth-child(n + 9) { animation-delay: 480ms; }
+
+/* The global reduced-motion rule shortens durations, not delays: without this,
+   an item would stay invisible for its delay, then appear at once. */
+@media (prefers-reduced-motion: reduce) {
+  .stagger > * {
+    animation: none;
+  }
+}
+
 /* ── Error page — an address outside every screen, or a layout that failed:
    no rail around it, one card in the middle of the page ── */
 
@@ -665,6 +699,18 @@
 
 /* ── Modal, ConfirmModal ── */
 
+/* The arrival (docs/design.md § 8): the scrim fades in, the panel settles from
+   0.98 in 250 ms on the CNX curve — no bounce. It leaves at once, shorter than
+   it came. Under reduced motion the global rule of globals.css takes both to
+   nothing. */
+@keyframes scrim-in {
+  from { opacity: 0; }
+}
+
+@keyframes dialog-in {
+  from { opacity: 0; transform: scale(0.98); }
+}
+
 .modal__scrim {
   position: fixed;
   inset: 0;
@@ -674,6 +720,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
+  animation: scrim-in var(--dur-fast) var(--ease) backwards;
 }
 
 /* A flex column whose body is the ONLY scroller: an overflow on the panel
@@ -686,6 +733,7 @@
   display: flex;
   flex-direction: column;
   box-shadow: var(--shadow-lg);
+  animation: dialog-in var(--dur) var(--ease) backwards;
 }
 
 .panel__header.modal__head,
