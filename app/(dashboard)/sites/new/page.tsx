@@ -7,6 +7,7 @@ import {
 import { useRouter } from 'next/navigation'
 import { Button, FormField, IconBox, Notice, PageHeader } from '@/components/ui'
 import type { SiteType } from '@/lib/types'
+import '../sites.css'
 
 /**
  * Both connectors are alive: WordPress publishes through the REST API with an
@@ -109,7 +110,7 @@ export default function NewSitePage() {
   const complete = credentialsFilled && Boolean(form.name)
 
   return (
-    <div style={{ maxWidth: 680 }}>
+    <div className="site-form">
       <PageHeader
         icon={Globe}
         badge="Sites"
@@ -118,7 +119,7 @@ export default function NewSitePage() {
         backHref="/sites"
       />
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-3)', marginBottom: 'var(--space-5)' }}>
+      <div className="site-types">
         {SITE_TYPES.map(({ type, icon: Icon, label, desc, color }) => {
           const selected = siteType === type
           return (
@@ -127,27 +128,21 @@ export default function NewSitePage() {
               type="button"
               onClick={() => setSiteType(type)}
               aria-pressed={selected}
-              className="card card--interactive"
-              style={{
-                display: 'flex', gap: 'var(--space-3)', alignItems: 'center', textAlign: 'left',
-                padding: 'var(--space-4)',
-                borderColor: selected ? 'var(--accent)' : 'var(--line)',
-                boxShadow: selected ? '0 0 0 1px var(--accent-wash)' : 'var(--shadow-xs)',
-              }}
+              className={`card card--interactive site-type${selected ? ' site-type--selected' : ''}`}
             >
               <IconBox icon={Icon} color={color} boxSize={34} size={17} />
-              <span style={{ minWidth: 0 }}>
-                <span style={{ display: 'block', fontWeight: 600, color: 'var(--ink-primary)', fontSize: 'var(--fs-md)' }}>{label}</span>
+              <span className="site-type__text">
+                <span className="site-type__label">{label}</span>
                 <span className="meta">{desc}</span>
               </span>
-              {selected && <CheckCircle2 size={16} color="var(--accent)" style={{ marginLeft: 'auto', flexShrink: 0 }} />}
+              {selected && <CheckCircle2 size={16} color="var(--accent)" className="site-type__check" />}
             </button>
           )
         })}
       </div>
 
       <div className="panel">
-        <div className="panel__body" style={{ display: 'grid', gap: 'var(--space-4)' }}>
+        <div className="panel__body site-form__fields">
           <FormField label="Nom du site" required htmlFor="site-name">
             <input suppressHydrationWarning id="site-name" name="name" value={form.name} onChange={handle} className="input" placeholder="BoxnFit – Site principal" />
           </FormField>
@@ -167,7 +162,7 @@ export default function NewSitePage() {
                 htmlFor="wp-password"
                 hint="WordPress → Utilisateurs → Profil → Application Passwords"
               >
-                <div style={{ position: 'relative' }}>
+                <div className="secret-input">
                   <input
                     suppressHydrationWarning
                     id="wp-password"
@@ -175,16 +170,14 @@ export default function NewSitePage() {
                     type={showPassword ? 'text' : 'password'}
                     value={form.wp_app_password}
                     onChange={handle}
-                    className="input"
+                    className="input secret-input__field"
                     placeholder="xxxx xxxx xxxx xxxx xxxx xxxx"
-                    style={{ paddingRight: '2.5rem' }}
                   />
                   <button
                     type="button"
-                    className="btn-icon"
+                    className="btn-icon secret-input__toggle"
                     onClick={() => setShowPassword((prev) => !prev)}
                     aria-label={showPassword ? 'Masquer le mot de passe' : 'Afficher le mot de passe'}
-                    style={{ position: 'absolute', right: 4, top: '50%', transform: 'translateY(-50%)', border: 0 }}
                   >
                     {showPassword ? <EyeOff size={15} /> : <Eye size={15} />}
                   </button>
@@ -207,7 +200,7 @@ export default function NewSitePage() {
                 hint="recommandé"
               >
                 <input suppressHydrationWarning id="gh-branch" name="github_branch" value={form.github_branch} onChange={handle} className="input" placeholder="seo-engine" />
-                <p className="meta" style={{ marginTop: 'var(--space-2)' }}>
+                <p className="meta site-form__note">
                   Laissée vide, les pages sont commitées sur la branche par défaut — en production, sans relecture ni
                   vérification de build. Une branche dédiée permet de relire avant de fusionner.
                 </p>
@@ -215,10 +208,7 @@ export default function NewSitePage() {
 
               {form.github_branch.trim() !== '' && (
                 <FormField label="Mise en ligne" htmlFor="auto-promote">
-                  <label
-                    htmlFor="auto-promote"
-                    style={{ display: 'flex', gap: 'var(--space-2)', alignItems: 'flex-start', cursor: 'pointer' }}
-                  >
+                  <label htmlFor="auto-promote" className="check-row">
                     <input
                       suppressHydrationWarning
                       id="auto-promote"
@@ -226,7 +216,7 @@ export default function NewSitePage() {
                       type="checkbox"
                       checked={form.auto_promote}
                       onChange={handle}
-                      style={{ marginTop: 3 }}
+                      className="choice-box"
                     />
                     <span>Fusionner automatiquement dans la branche de production après publication</span>
                   </label>
@@ -235,7 +225,7 @@ export default function NewSitePage() {
                     what made every page published so far invisible: the branch
                     collected commits while the host kept deploying another one.
                   */}
-                  <p className="meta" style={{ marginTop: 'var(--space-2)' }}>
+                  <p className="meta site-form__note">
                     {form.auto_promote
                       ? `Chaque page publiée sera reportée sur la branche par défaut, donc déployée. La branche « ${form.github_branch.trim()} » garde la trace et permet de revenir en arrière.`
                       : `Les pages resteront sur « ${form.github_branch.trim()} » jusqu’à une fusion manuelle. Tant qu’elle n’a pas lieu, elles ne sont visibles nulle part.`}
@@ -259,11 +249,11 @@ export default function NewSitePage() {
           {error && <Notice inline tone="critical" title="Site non enregistré" body={error} />}
         </div>
 
-        <div className="panel__footer" style={{ display: 'flex', gap: 'var(--space-3)', alignItems: 'center' }}>
+        <div className="panel__footer site-form__actions">
           <Button variant="ghost" icon={PlugZap} loading={testing} onClick={testConnection} disabled={!credentialsFilled}>
             Tester la connexion
           </Button>
-          <div style={{ flex: 1 }} />
+          <div className="site-form__spacer" />
           <Button iconRight={ArrowRight} loading={saving} onClick={submit} disabled={!complete}>
             Enregistrer le site
           </Button>

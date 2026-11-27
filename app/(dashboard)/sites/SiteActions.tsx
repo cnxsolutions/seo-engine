@@ -5,6 +5,7 @@ import { Trash2, TriangleAlert } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { Button, FormField } from '@/components/ui'
 import { ConfirmDialog } from '@/components/ConfirmDialog'
+import './sites.css'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Deleting a site — two entry points, one call
@@ -126,21 +127,20 @@ export function DeleteSiteZone({ siteId, siteName }: { siteId: string; siteName:
 
   return (
     <section
-      className="panel"
+      className="panel danger-zone"
       aria-labelledby="danger-zone-title"
       // No top margin of its own: it closes the settings tab, whose sections
       // are spaced by the tab's own gap.
-      style={{ borderColor: 'var(--status-critical)' }}
     >
       <div className="panel__header">
-        <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', minWidth: 0 }}>
+        <div className="danger-zone__title-row">
           <TriangleAlert size={15} color="var(--status-critical)" aria-hidden="true" />
           <h3 id="danger-zone-title" className="card-title">Zone dangereuse</h3>
         </div>
       </div>
 
-      <div className="panel__body" style={{ display: 'grid', gap: 'var(--space-4)' }}>
-        <p style={{ margin: 0, fontSize: 'var(--fs-sm)', color: 'var(--ink-secondary)', lineHeight: 1.55 }}>
+      <div className="panel__body danger-zone__body">
+        <p className="danger-zone__text">
           {DELETION_SCOPE} La suppression est refusée tant qu’une génération ou une publication est en cours sur ce site.
           Cette action est irréversible.
         </p>
@@ -152,7 +152,7 @@ export function DeleteSiteZone({ siteId, siteName }: { siteId: string; siteName:
             </Button>
           </div>
         ) : (
-          <div className="inset" style={{ display: 'grid', gap: 'var(--space-3)', borderLeft: '3px solid var(--status-critical)' }}>
+          <div className="inset danger-zone__confirm">
             <FormField
               label="Confirmez en tapant le nom du site"
               required
@@ -169,18 +169,18 @@ export function DeleteSiteZone({ siteId, siteName }: { siteId: string; siteName:
                 spellCheck={false}
                 aria-describedby="confirm-site-name-help"
               />
-              <p id="confirm-site-name-help" className="meta" style={{ marginTop: 'var(--space-2)' }}>
+              <p id="confirm-site-name-help" className="meta site-form__note">
                 Le bouton ne s’active que lorsque le nom correspond exactement.
               </p>
             </FormField>
 
             {error && (
-              <p role="alert" className="meta" style={{ margin: 0, color: 'var(--status-critical-text)' }}>
+              <p role="alert" className="meta danger-zone__error">
                 {error}
               </p>
             )}
 
-            <div style={{ display: 'flex', gap: 'var(--space-3)', alignItems: 'center' }}>
+            <div className="danger-zone__actions">
               <Button variant="danger" icon={Trash2} loading={deleting} disabled={!matches} onClick={remove}>
                 Supprimer définitivement
               </Button>

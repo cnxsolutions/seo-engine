@@ -33,6 +33,7 @@ import {
   Database,
 } from 'lucide-react'
 import { ContentTypeCard, SchemaField, SeoConfigBadge } from '@/components/ui'
+import '../../sites.css'
 
 // Miroir du DTO renvoyé par GET /api/schema/extract/[siteId]
 interface FieldDto {
@@ -77,7 +78,7 @@ export function SchemaPanel({ siteId }: { siteId: string }) {
   const [expandedTypes, setExpandedTypes] = useState<Set<string>>(new Set())
   const [searchQuery, setSearchQuery] = useState('')
   const [filterType, setFilterType] = useState<string>('all')
-  const [copiedField, setCopiedField] = useState<string | null>(null)
+  const [copied, setCopied] = useState<{ key: string; ok: boolean } | null>(null)
 
   // Local read: our own `sites` row, without ever contacting the client's
   // WordPress.
@@ -127,10 +128,18 @@ export function SchemaPanel({ siteId }: { siteId: string }) {
     })
   }
 
-  const copyFieldKey = (key: string) => {
-    navigator.clipboard.writeText(key)
-    setCopiedField(key)
-    setTimeout(() => setCopiedField(null), 2000)
+  // The browser may refuse the clipboard (permission, a page served without
+  // HTTPS). Saying « Copié » regardless sent the operator to paste a key that
+  // was never copied.
+  const copyFieldKey = async (key: string) => {
+    let ok = true
+    try {
+      await navigator.clipboard.writeText(key)
+    } catch {
+      ok = false
+    }
+    setCopied({ key, ok })
+    setTimeout(() => setCopied(null), 2000)
   }
 
   const filteredContentTypes = schema?.contentTypes.filter((ct) => {
@@ -176,12 +185,12 @@ export function SchemaPanel({ siteId }: { siteId: string }) {
         )}
       </div>
 
-      <p className="meta" style={{ margin: 0 }}>
+      <p className="meta settings-section__lead">
         Types de contenu, champs et extension SEO de ce WordPress : ils guident la génération.
         {schema && ` Lu le ${new Date(schema.extractedAt).toLocaleString('fr-FR')}.`}
       </p>
       {error && schema && (
-        <p className="meta" role="alert" style={{ margin: 0, color: 'var(--status-critical-text)' }}>
+        <p className="meta settings-section__lead schema-panel__error" role="alert">
           Relecture impossible : {error}
         </p>
       )}
@@ -189,26 +198,18 @@ export function SchemaPanel({ siteId }: { siteId: string }) {
       {/* Nothing read yet: the extraction is a live call to the client's site,
           so it waits for an explicit order. */}
       {!schema && (
-        <div className="glass-card" style={{ textAlign: 'center', padding: '3rem 2rem' }}>
+        <div className="glass-card schema-panel__empty">
           {error ? (
-            <AlertTriangle size={40} style={{ color: 'var(--status-critical-text)', margin: '0 auto 1rem' }} />
+            <AlertTriangle size={40} className="schema-panel__empty-icon schema-panel__empty-icon--failed" />
           ) : (
-            <Database size={40} style={{ color: 'var(--ink-faint)', margin: '0 auto 1rem' }} />
+            <Database size={40} className="schema-panel__empty-icon" />
           )}
 
-          <h4 style={{ fontWeight: 650, marginBottom: 'var(--space-2)' }}>
+          <h4 className="schema-panel__empty-title">
             {error ? 'Schéma indisponible' : 'Schéma non lu'}
           </h4>
 
-          <p
-            style={{
-              color: error ? 'var(--status-critical-text)' : 'var(--ink-muted)',
-              fontSize: 'var(--fs-sm)',
-              maxWidth: 520,
-              margin: '0 auto var(--space-5)',
-              lineHeight: 'var(--lh-normal)',
-            }}
-          >
+          <p className={`schema-panel__empty-text${error ? ' schema-panel__empty-text--failed' : ''}`}>
             {error ??
               "La lecture interroge directement l'API REST de ce WordPress — types de contenu, champs, groupes ACF, plugin SEO. Rien n'est mis en cache : chaque lecture est un aller-retour vers le site."}
           </p>
@@ -223,69 +224,58 @@ export function SchemaPanel({ siteId }: { siteId: string }) {
       {schema && (
         <>
           {/* SEO Config */}
-          <div className="glass-card" style={{ padding: '1.25rem' }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '1rem' }}>
+          <div className="glass-card schema-panel__card">
+            <div className="schema-panel__summary">
               <div>
-                <h4 style={{ fontSize: '0.9rem', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '0.5rem' }}>
+                <h4 className="schema-panel__card-title">
                   Configuration SEO
                 </h4>
                 <SeoConfigBadge plugin={schema.seoPlugin ?? undefined} schemaTypes={schema.schemaTypes} />
               </div>
 
-              <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
-                <div style={{ textAlign: 'center' }}>
-                  <div style={{ fontSize: '1.5rem', fontWeight: 700, color: 'var(--text-primary)' }}>
+              <div className="schema-panel__counts">
+                <div className="schema-panel__count">
+                  <div className="schema-panel__count-value">
                     {schema.contentTypes.length}
                   </div>
-                  <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Types</div>
+                  <div className="schema-panel__count-label">Types</div>
                 </div>
-                <div style={{ textAlign: 'center' }}>
-                  <div style={{ fontSize: '1.5rem', fontWeight: 700, color: 'var(--text-primary)' }}>
+                <div className="schema-panel__count">
+                  <div className="schema-panel__count-value">
                     {schema.contentTypes.reduce((sum, ct) => sum + ct.fieldCount, 0)}
                   </div>
-                  <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Champs</div>
+                  <div className="schema-panel__count-label">Champs</div>
                 </div>
                 {/* "Requis" is a property of a field, not an alarm: a reserved
                     status hue here would read as "something is wrong". */}
-                <div style={{ textAlign: 'center' }}>
-                  <div style={{ fontSize: '1.5rem', fontWeight: 700, color: 'var(--ink-primary)' }}>
+                <div className="schema-panel__count">
+                  <div className="schema-panel__count-value">
                     {schema.contentTypes.reduce((sum, ct) => sum + ct.requiredCount, 0)}
                   </div>
-                  <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Requis</div>
+                  <div className="schema-panel__count-label">Requis</div>
                 </div>
               </div>
             </div>
           </div>
 
           {/* Search & Filter */}
-          <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
-            <div style={{ flex: 1, minWidth: 'min(250px, 100%)', position: 'relative' }}>
-              <Search
-                size={16}
-                style={{
-                  position: 'absolute',
-                  left: '0.75rem',
-                  top: '50%',
-                  transform: 'translateY(-50%)',
-                  color: 'var(--text-muted)',
-                }}
-              />
+          <div className="schema-panel__filters">
+            <div className="schema-panel__search">
+              <Search size={16} className="schema-panel__search-icon" />
               <input
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder="Rechercher un type ou un champ..."
                 aria-label="Rechercher un type ou un champ"
-                className="input"
-                style={{ paddingLeft: '2.5rem' }}
+                className="input schema-panel__search-input"
               />
             </div>
 
             <select
               value={filterType}
               onChange={(e) => setFilterType(e.target.value)}
-              className="input"
-              style={{ width: 'auto', minWidth: 180 }}
+              className="input schema-panel__filter"
               aria-label="Filtrer les types de contenu"
             >
               <option value="all">Tous les types</option>
@@ -296,7 +286,7 @@ export function SchemaPanel({ siteId }: { siteId: string }) {
           </div>
 
           {/* Content Types */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+          <div className="schema-panel__types">
             {filteredContentTypes.length > 0 ? (
               filteredContentTypes.map((contentType) => (
                 <ContentTypeCard
@@ -310,26 +300,9 @@ export function SchemaPanel({ siteId }: { siteId: string }) {
                 >
                   {/* Taxonomies */}
                   {contentType.taxonomies.length > 0 && (
-                    <div
-                      style={{
-                        marginBottom: '1rem',
-                        padding: '0.75rem',
-                        background: 'var(--bg-secondary)',
-                        borderRadius: 8,
-                      }}
-                    >
-                      <div
-                        style={{
-                          fontSize: '0.7rem',
-                          fontWeight: 600,
-                          color: 'var(--text-muted)',
-                          textTransform: 'uppercase',
-                          marginBottom: '0.5rem',
-                        }}
-                      >
-                        Taxonomies
-                      </div>
-                      <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                    <div className="schema-panel__taxonomies">
+                      <div className="schema-panel__eyebrow">Taxonomies</div>
+                      <div className="schema-panel__chips">
                         {contentType.taxonomies.map((tax) => (
                           <span key={tax.key} className="chip">{tax.label}</span>
                         ))}
@@ -338,7 +311,7 @@ export function SchemaPanel({ siteId }: { siteId: string }) {
                   )}
 
                   {/* Fields */}
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                  <div className="schema-panel__fields">
                     {contentType.fields.map((field) => (
                       <SchemaField
                         key={field.key}
@@ -348,29 +321,28 @@ export function SchemaPanel({ siteId }: { siteId: string }) {
                         description={field.description}
                       >
                         {field.isAcf && (
-                          <span className="badge badge-info" style={{ marginLeft: 'var(--space-2)' }}>ACF</span>
+                          <span className="badge badge-info schema-panel__acf">ACF</span>
                         )}
 
                         <button
-                          onClick={() => copyFieldKey(field.key)}
-                          style={{
-                            marginLeft: 'auto',
-                            background: 'transparent',
-                            border: 'none',
-                            color: copiedField === field.key ? 'var(--status-good-text)' : 'var(--ink-muted)',
-                            cursor: 'pointer',
-                            padding: '0.25rem',
-                            fontSize: '0.7rem',
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: '0.25rem',
-                          }}
+                          type="button"
+                          onClick={() => void copyFieldKey(field.key)}
+                          className={`schema-panel__copy${
+                            copied?.key !== field.key ? '' : copied.ok ? ' schema-panel__copy--done' : ' schema-panel__copy--failed'
+                          }`}
                         >
-                          {copiedField === field.key ? (
-                            <>
-                              <CheckCircle size={12} />
-                              Copié
-                            </>
+                          {copied?.key === field.key ? (
+                            copied.ok ? (
+                              <>
+                                <CheckCircle size={12} />
+                                Copié
+                              </>
+                            ) : (
+                              <>
+                                <AlertTriangle size={12} />
+                                Copie refusée par le navigateur
+                              </>
+                            )
                           ) : (
                             <>
                               <Copy size={12} />
@@ -380,8 +352,8 @@ export function SchemaPanel({ siteId }: { siteId: string }) {
                         </button>
 
                         {field.options && field.options.length > 0 && (
-                          <div style={{ marginTop: '0.5rem', fontSize: '0.7rem', color: 'var(--text-muted)' }}>
-                            Options: {field.options.join(', ')}
+                          <div className="schema-panel__options">
+                            Options : {field.options.join(', ')}
                           </div>
                         )}
                       </SchemaField>
@@ -390,40 +362,23 @@ export function SchemaPanel({ siteId }: { siteId: string }) {
                 </ContentTypeCard>
               ))
             ) : (
-              <div
-                style={{
-                  textAlign: 'center',
-                  padding: '3rem 2rem',
-                  background: 'var(--bg-card)',
-                  borderRadius: 12,
-                  border: '1px solid var(--border)',
-                }}
-              >
-                <Search size={32} style={{ color: 'var(--text-muted)', marginBottom: '1rem' }} />
-                <p style={{ color: 'var(--text-muted)' }}>Aucun type de contenu ne correspond à votre recherche.</p>
+              <div className="schema-panel__no-match">
+                <Search size={32} className="schema-panel__no-match-icon" />
+                <p className="schema-panel__no-match-text">Aucun type de contenu ne correspond à votre recherche.</p>
               </div>
             )}
           </div>
 
           {/* SEO Fields Reference */}
           {schema.seoFields.length > 0 && (
-            <div className="glass-card" style={{ padding: '1.25rem' }}>
-              <h4 style={{ fontSize: '0.9rem', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '1rem' }}>
+            <div className="glass-card schema-panel__card">
+              <h4 className="schema-panel__card-title schema-panel__card-title--spaced">
                 Champs SEO disponibles
               </h4>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+              <div className="schema-panel__seo-fields">
                 {schema.seoFields.map((fieldKey) => (
-                  <div
-                    key={fieldKey}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      padding: '0.5rem 0.75rem',
-                      background: 'var(--bg-secondary)',
-                      borderRadius: 6,
-                    }}
-                  >
-                    <code style={{ fontSize: 'var(--fs-sm)', color: 'var(--ink-primary)' }}>{fieldKey}</code>
+                  <div key={fieldKey} className="schema-panel__seo-field">
+                    <code className="schema-panel__seo-key">{fieldKey}</code>
                   </div>
                 ))}
               </div>

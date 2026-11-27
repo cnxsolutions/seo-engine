@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { CheckCircle2, ScanSearch, TriangleAlert } from 'lucide-react'
 import { Button } from '@/components/ui'
 import type { RepoProfile } from '@/lib/publishers/nextjs-analyzer'
+import './sites.css'
 
 /**
  * Triggers `POST /api/sites/:id/analyze`.
@@ -81,7 +82,7 @@ export function AnalyzeRepoButton({ siteId, hasProfile }: { siteId: string; hasP
   }
 
   return (
-    <div style={{ display: 'grid', gap: 'var(--space-2)' }}>
+    <div className="repo-analysis">
       <Button
         variant="secondary"
         size="sm"
@@ -100,19 +101,11 @@ export function AnalyzeRepoButton({ siteId, hasProfile }: { siteId: string; hasP
       )}
 
       {result && (
-        <p
-          className="meta"
-          style={{
-            display: 'flex',
-            gap: 'var(--space-2)',
-            alignItems: 'flex-start',
-            color: result.ok ? 'var(--status-good-text)' : 'var(--status-critical-text)',
-          }}
-        >
+        <p className={`meta repo-analysis__result${result.ok ? '' : ' repo-analysis__result--failed'}`}>
           {result.ok
-            ? <CheckCircle2 size={13} style={{ flexShrink: 0, marginTop: 1 }} />
-            : <TriangleAlert size={13} style={{ flexShrink: 0, marginTop: 1 }} />}
-          <span style={{ wordBreak: 'break-word' }}>{result.message}</span>
+            ? <CheckCircle2 size={13} className="repo-analysis__icon" />
+            : <TriangleAlert size={13} className="repo-analysis__icon" />}
+          <span className="repo-analysis__message">{result.message}</span>
         </p>
       )}
     </div>

@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { CheckCircle2, RefreshCw, TriangleAlert } from 'lucide-react'
 import { Button } from '@/components/ui'
 import type { RefreshJob } from '@/lib/existing/refresh'
+import './sites.css'
 
 const POLL_MS = 3000
 
@@ -64,6 +65,7 @@ export function RefreshPagesButton({ siteId, compact = false }: { siteId: string
   }
 
   const running = job?.state === 'running'
+  const failed = Boolean(error) || job?.state === 'failed'
   const message = error
     ?? (job?.state === 'failed' ? job.error ?? 'La lecture du site a échoué' : null)
     ?? (job?.state === 'done' && !compact
@@ -71,19 +73,18 @@ export function RefreshPagesButton({ siteId, compact = false }: { siteId: string
       : null)
 
   return (
-    <span style={{ display: 'inline-flex', flexDirection: 'column', alignItems: compact ? 'flex-end' : 'flex-start', gap: 'var(--space-1)' }}>
+    <span className={`refresh-pages${compact ? ' refresh-pages--compact' : ''}`}>
       <Button variant="secondary" size="sm" icon={RefreshCw} loading={running} onClick={start} disabled={running}>
         {running ? 'Lecture du site…' : compact ? 'Rafraîchir' : 'Rafraîchir les pages'}
       </Button>
       {message && (
         <span
-          className="meta"
-          role={error || job?.state === 'failed' ? 'alert' : undefined}
-          style={{ display: 'flex', gap: 4, alignItems: 'flex-start', maxWidth: 360, color: error || job?.state === 'failed' ? 'var(--status-critical-text)' : 'var(--status-good-text)' }}
+          className={`meta refresh-pages__message${failed ? ' refresh-pages__message--failed' : ''}`}
+          role={failed ? 'alert' : undefined}
         >
-          {error || job?.state === 'failed'
-            ? <TriangleAlert size={12} style={{ flexShrink: 0, marginTop: 2 }} />
-            : <CheckCircle2 size={12} style={{ flexShrink: 0, marginTop: 2 }} />}
+          {failed
+            ? <TriangleAlert size={12} className="refresh-pages__icon" />
+            : <CheckCircle2 size={12} className="refresh-pages__icon" />}
           {message}
         </span>
       )}
