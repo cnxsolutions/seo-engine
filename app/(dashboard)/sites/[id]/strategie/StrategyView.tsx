@@ -941,7 +941,7 @@ function SourceBlock({
 
 function LoadingPanel({ label }: { label: string }) {
   return (
-    <div className="glass-card strategy-loading">
+    <div className="glass-card loading-card">
       <Loader2 size={22} className="animate-spin" color="var(--ink-faint)" />
       <span className="meta">{label}</span>
     </div>

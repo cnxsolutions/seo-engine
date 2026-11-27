@@ -1,0 +1,348 @@
+/* ─────────────────────────────────────────────────────────────────────────────
+   Publication — l'onglet d'un site et ses trois canaux : les pages qui
+   attendent (./PublishQueue.tsx), le flux de génération
+   (./GenerationPanel.tsx), les posts de la fiche Google (./GbpTab.tsx), et
+   leurs pièces communes (./queue-bits.tsx) (L6e).
+
+   Ces règles rendent ce que rendaient les styles en ligne, y compris ceux que
+   `rowStyle()` cachait derrière une fonction : une ligne de file est désormais
+   `.queue-row`, avec ses deux variantes.
+   ───────────────────────────────────────────────────────────────────────────── */
+
+/* ── Le cadre commun des trois canaux ── */
+
+.kpi-row.publication-kpis {
+  margin-bottom: var(--space-6);
+}
+
+.panel__body.publication-loading {
+  display: flex;
+  justify-content: center;
+  padding: var(--space-10);
+}
+
+.panel.queue-panel {
+  margin-bottom: var(--space-6);
+}
+
+.queue-panel__titles {
+  min-width: 0;
+}
+
+.meta.queue-panel__hint {
+  margin-top: 2px;
+}
+
+.queue-row {
+  padding: var(--space-4) var(--space-5);
+  border-bottom: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+}
+
+.queue-row--last {
+  border-bottom: 0;
+}
+
+.queue-row--gap {
+  gap: var(--space-3);
+}
+
+.queue-row__line {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+}
+
+.queue-row__spacer {
+  flex: 1;
+}
+
+.row-head {
+  flex: 1;
+  min-width: 220px;
+}
+
+.row-head__title-line {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.row-head__title {
+  font-weight: 600;
+  font-size: var(--fs-sm);
+}
+
+.meta.row-head__context {
+  margin-top: 2px;
+}
+
+/* Remonte sous le panneau qu'elle commente. */
+.meta.publication-legacy-note {
+  margin: calc(-1 * var(--space-3)) 0 var(--space-6);
+}
+
+/* ── La preuve d'un quasi-doublon ── */
+
+.inset.duplicate-evidence {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.eyebrow.duplicate-evidence__heading {
+  color: var(--ink-secondary);
+}
+
+.eyebrow.duplicate-evidence__heading--refusal {
+  color: var(--status-critical-text);
+}
+
+/* --ink-secondary et non `.meta` : --ink-muted sur --surface-inset mesure
+   4,42:1, sous AA, et ces phrases portent une décision. */
+.duplicate-evidence__text {
+  font-size: var(--fs-sm);
+  color: var(--ink-secondary);
+  line-height: var(--lh-snug);
+}
+
+.duplicate-evidence__lede {
+  margin-top: var(--space-2);
+}
+
+.duplicate-evidence__matches {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--space-3);
+}
+
+.match-line {
+  display: grid;
+  gap: var(--space-1);
+}
+
+.match-line__head,
+.match-line__score {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.match-line__partial {
+  font-size: var(--fs-xs);
+  color: var(--ink-secondary);
+  line-height: var(--lh-snug);
+}
+
+.match-line__path {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.num.match-line__score-value {
+  font-size: var(--fs-md);
+  font-weight: 700;
+  color: var(--ink-secondary);
+}
+
+.num.match-line__score-value--partial {
+  color: var(--ink-muted);
+}
+
+.num.match-line__score-max {
+  font-size: var(--fs-xs);
+  color: var(--ink-secondary);
+}
+
+/* ── La génération ── */
+
+.panel__body.generation-launch {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.generation-launch__controls {
+  display: flex;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.input.generation-launch__campaign {
+  width: auto;
+  min-width: 260px;
+}
+
+.input.generation-launch__city {
+  width: auto;
+  min-width: 200px;
+}
+
+.inset.refusal-actions {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.refusal-actions__buttons {
+  display: flex;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.inset.run-outcome {
+  border-left: 2px solid var(--status-critical);
+}
+
+.inset.run-outcome--ok {
+  border-left-color: var(--status-good);
+}
+
+.run-outcome__message {
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--status-critical-text);
+}
+
+.run-outcome--ok .run-outcome__message {
+  color: var(--status-good-text);
+}
+
+.run-outcome__reasons {
+  margin: var(--space-2) 0 0;
+  padding-left: 1.1rem;
+  font-size: var(--fs-xs);
+  color: var(--ink-secondary);
+  line-height: 1.7;
+}
+
+/* ── Les posts de la fiche ── */
+
+.panel__body.gbp-compose {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.gbp-compose__fields {
+  display: grid;
+  gap: var(--space-3);
+  grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr));
+}
+
+.gbp-compose__field {
+  display: grid;
+  gap: var(--space-1);
+}
+
+.inset.gbp-compose__target {
+  display: grid;
+  gap: var(--space-1);
+}
+
+.gbp-compose__target-title {
+  font-size: var(--fs-sm);
+  color: var(--ink-secondary);
+  font-weight: 600;
+}
+
+.btn-link.gbp-compose__target-link {
+  justify-self: start;
+}
+
+.gbp-compose__target-note {
+  font-size: var(--fs-xs);
+  color: var(--ink-secondary);
+}
+
+.gbp-outcome {
+  display: grid;
+  gap: var(--space-3);
+}
+
+/* Le résumé COMPLET, jamais tronqué : c'est ce qu'on relit avant de publier. */
+.gbp-summary {
+  font-size: var(--fs-sm);
+  color: var(--ink-secondary);
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: var(--lh-normal);
+}
+
+.angle-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.meta.gbp-cta {
+  display: inline-flex;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.truncate.gbp-cta__url {
+  max-width: 260px;
+}
+
+.meta.gbp-row__preview-toggle {
+  cursor: pointer;
+}
+
+.gbp-row__preview {
+  margin-top: var(--space-3);
+}
+
+.inset.gbp-doubt {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.gbp-doubt__title {
+  font-size: var(--fs-sm);
+  color: var(--status-warning-text);
+}
+
+.gbp-doubt__text {
+  font-size: var(--fs-sm);
+  color: var(--ink-secondary);
+  line-height: var(--lh-normal);
+}
+
+/* La réponse de Google, verbatim. */
+.mono.gbp-doubt__response {
+  margin: 0;
+  font-size: var(--fs-xs);
+  color: var(--ink-secondary);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.gbp-doubt__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
+.meta.gbp-published__day {
+  min-width: 56px;
+}
+
+.truncate.gbp-published__summary {
+  flex: 1;
+  min-width: 180px;
+  font-size: var(--fs-sm);
+}
+
+.gbp-row-error {
+  display: grid;
+  gap: var(--space-2);
+}

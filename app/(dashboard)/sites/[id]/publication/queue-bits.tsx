@@ -48,6 +48,7 @@ import {
 } from '@/src/core/domain/existing/verdict'
 import type { FeedGeneration } from '@/app/api/generate/feed-types'
 import type { InventorySummary } from '@/app/api/sites/[id]/inventory/types'
+import './publication.css'
 
 // ─── Mise en page d'une file ────────────────────────────────────────────────
 //
@@ -67,11 +68,11 @@ export function Panel({
   children: React.ReactNode
 }) {
   return (
-    <div className="panel" style={{ marginBottom: 'var(--space-6)' }}>
+    <div className="panel queue-panel">
       <div className="panel__header">
-        <div style={{ minWidth: 0 }}>
+        <div className="queue-panel__titles">
           <h2 className="card-title">{title}</h2>
-          {hint && <p className="meta" style={{ marginTop: 2 }}>{hint}</p>}
+          {hint && <p className="meta queue-panel__hint">{hint}</p>}
         </div>
         <span className="badge badge-muted">{count}</span>
       </div>
@@ -80,14 +81,9 @@ export function Panel({
   )
 }
 
-export function rowStyle(last: boolean, gap: boolean): React.CSSProperties {
-  return {
-    padding: 'var(--space-4) var(--space-5)',
-    borderBottom: last ? undefined : '1px solid var(--line)',
-    display: 'flex',
-    flexDirection: 'column',
-    gap: gap ? 'var(--space-3)' : 0,
-  }
+/** A queue row: the last one draws no rule under it, `gap` spaces its blocks. */
+export function rowClass(last: boolean, gap: boolean): string {
+  return `queue-row${last ? ' queue-row--last' : ''}${gap ? ' queue-row--gap' : ''}`
 }
 
 /**
@@ -105,9 +101,9 @@ export function RowHead({ generation: g, extra }: { generation: FeedGeneration; 
   const refresh = g.intent === 'refresh'
 
   return (
-    <div style={{ flex: 1, minWidth: 220 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', flexWrap: 'wrap' }}>
-        <span style={{ fontWeight: 600, fontSize: 'var(--fs-sm)' }}>
+    <div className="row-head">
+      <div className="row-head__title-line">
+        <span className="row-head__title">
           {g.title || g.slug || g.focus_keyword || g.city}
         </span>
         {refresh && (
@@ -116,11 +112,11 @@ export function RowHead({ generation: g, extra }: { generation: FeedGeneration; 
           </span>
         )}
       </div>
-      <div className="meta" style={{ marginTop: 2 }}>
+      <div className="meta row-head__context">
         {[g.page_type, g.city, g.ai_model, g.campaign?.name, g.site?.name, extra].filter(Boolean).join(' • ')}
       </div>
       {refresh && g.refresh_target_path && (
-        <div className="meta mono truncate" style={{ marginTop: 2 }}>{g.refresh_target_path}</div>
+        <div className="meta mono truncate row-head__context">{g.refresh_target_path}</div>
       )}
     </div>
   )
@@ -241,25 +237,22 @@ export function DuplicateEvidence({ verdict }: { verdict: DuplicateVerdict }) {
       : 'Cette page n’est pas partie. Elle ressemble à :'
 
   return (
-    <div className="inset" style={{ display: 'grid', gap: 'var(--space-3)' }}>
+    <div className="inset duplicate-evidence">
       <div>
         {/* Le titre porte la couleur du ton, jamais la couleur seule : le mot
             dit déjà s'il s'agit d'un refus, d'une observation ou d'une note. */}
-        <div
-          className="eyebrow"
-          style={{ color: holds && !observing ? 'var(--status-critical-text)' : 'var(--ink-secondary)' }}
-        >
+        <div className={`eyebrow duplicate-evidence__heading${holds && !observing ? ' duplicate-evidence__heading--refusal' : ''}`}>
           {heading}
         </div>
         {/* --ink-secondary et non `.meta` : --ink-muted sur --surface-inset
             mesure 4,42:1, sous AA, et cette phrase porte une décision. */}
-        <p style={{ margin: 'var(--space-2) 0 0', fontSize: 'var(--fs-sm)', color: 'var(--ink-secondary)', lineHeight: 'var(--lh-snug)' }}>
+        <p className="duplicate-evidence__text duplicate-evidence__lede">
           {lede}
         </p>
       </div>
 
       {verdict.matches.length > 0 ? (
-        <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'grid', gap: 'var(--space-3)' }}>
+        <ul className="duplicate-evidence__matches">
           {verdict.matches.map((match, index) => (
             <li key={`${match.entryKey}-${match.code}-${index}`}>
               <MatchLine match={match} observing={observing} />
@@ -270,7 +263,7 @@ export function DuplicateEvidence({ verdict }: { verdict: DuplicateVerdict }) {
         <>
           {/* Un refus dont on ne peut plus nommer l'objet est une énigme. On le
               dit, au lieu de rendre un bloc vide sous un titre d'alerte. */}
-          <p style={{ margin: 0, fontSize: 'var(--fs-sm)', color: 'var(--ink-secondary)', lineHeight: 'var(--lh-snug)' }}>
+          <p className="duplicate-evidence__text">
             Le moteur n’a pas conservé la page en cause.
           </p>
           <ReasonList title="Ce qui a été relevé" reasons={verdict.reasons} />
@@ -278,7 +271,7 @@ export function DuplicateEvidence({ verdict }: { verdict: DuplicateVerdict }) {
       )}
 
       {/* Une décision prise à la main est TRACÉE, jamais silencieuse. */}
-      <p className="meta" style={{ margin: 0 }}>
+      <p className="meta">
         {verdict.decidedBy === 'operator'
           ? `Décision prise à la main le ${formatDayLong(verdict.decidedAt)}.`
           : `Verdict automatique du ${formatDayLong(verdict.decidedAt)}.`}
@@ -301,10 +294,10 @@ function MatchLine({ match, observing }: { match: DuplicateMatchEvidence; observ
   const label = !match.partial && blocking && observing ? 'Retiendrait la page' : undefined
 
   return (
-    <div style={{ display: 'grid', gap: 'var(--space-1)' }}>
-      <div style={{ display: 'flex', alignItems: 'baseline', gap: 'var(--space-2)', flexWrap: 'wrap' }}>
+    <div className="match-line">
+      <div className="match-line__head">
         <RiskBadge level={level} label={label} size="sm" />
-        <span style={{ fontSize: 'var(--fs-sm)', color: 'var(--ink-secondary)', lineHeight: 'var(--lh-snug)' }}>
+        <span className="duplicate-evidence__text">
           {DUPLICATE_CODE_LABELS[match.code]}
         </span>
       </div>
@@ -313,7 +306,7 @@ function MatchLine({ match, observing }: { match: DuplicateMatchEvidence; observ
       <MatchScore match={match} />
 
       {match.partial && (
-        <p style={{ margin: 0, fontSize: 'var(--fs-xs)', color: 'var(--ink-secondary)', lineHeight: 'var(--lh-snug)' }}>
+        <p className="match-line__partial">
           Comparaison partielle : le moteur ne connaît que les 2 000 premiers caractères de cette page.
           Une différence sur le reste du texte ne serait pas visible ici.
         </p>
@@ -348,7 +341,7 @@ function MatchTarget({ match }: { match: DuplicateMatchEvidence }) {
   }
 
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', flexWrap: 'wrap' }}>
+    <div className="match-line__path">
       <span className="chip">{match.entryPath}</span>
       <span className="meta">Adresse en ligne inconnue — le moteur n’a pas retenu d’URL pour cette page.</span>
     </div>
@@ -377,12 +370,12 @@ function MatchScore({ match }: { match: DuplicateMatchEvidence }) {
   }
 
   return (
-    <div style={{ display: 'flex', alignItems: 'baseline', gap: 'var(--space-2)', flexWrap: 'wrap' }}>
+    <div className="match-line__score">
       <span className="meta">Ressemblance</span>
-      <span className="num" style={{ fontSize: 'var(--fs-md)', fontWeight: 700, color: match.partial ? 'var(--ink-muted)' : 'var(--ink-secondary)' }}>
+      <span className={`num match-line__score-value${match.partial ? ' match-line__score-value--partial' : ''}`}>
         {formatMetric(match.similarity * 100, 'number', { decimals: 0 })}
       </span>
-      <span className="num" style={{ fontSize: 'var(--fs-xs)', color: 'var(--ink-secondary)' }}>/ 100</span>
+      <span className="num match-line__score-max">/ 100</span>
     </div>
   )
 }

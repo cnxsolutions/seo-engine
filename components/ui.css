@@ -458,6 +458,37 @@
   overflow-wrap: anywhere;
 }
 
+/* On a phone an action no longer squeezes the text into a narrow column: the
+   text keeps the first line beside its icon, the action goes under it, aligned
+   with the text, and a close button follows on the right. A notice without an
+   action is left as it is. */
+@media (max-width: 560px) {
+  .notice:has(> .btn-secondary) {
+    flex-wrap: wrap;
+  }
+
+  .notice:has(> .btn-secondary) > .notice__content {
+    flex-basis: calc(100% - 16px - var(--space-3));
+  }
+
+  .notice > .btn-secondary {
+    margin-left: calc(16px + var(--space-3));
+  }
+
+  .notice:has(> .btn-secondary) > .btn-icon {
+    margin-left: auto;
+  }
+}
+
+/* ── Loading card — a spinner and its sentence, while a list is read ── */
+
+.glass-card.loading-card {
+  display: grid;
+  justify-items: center;
+  gap: var(--space-3);
+  padding: var(--space-12);
+}
+
 /* ── ReasonList ── */
 
 .reason-list__heading {

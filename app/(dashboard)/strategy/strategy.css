@@ -54,13 +54,6 @@
   gap: var(--space-1);
 }
 
-.glass-card.strategy-loading {
-  display: grid;
-  justify-items: center;
-  gap: var(--space-3);
-  padding: var(--space-12);
-}
-
 /* ── La provenance d'un plan : ce qui a réellement été mesuré ── */
 
 .provenance--measured { --provenance-color: var(--status-good); }
