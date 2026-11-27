@@ -328,7 +328,7 @@ export default async function SitesPage() {
           action={{ label: 'Connecter mon premier site', href: '/sites/new', icon: Plus }}
         />
       ) : (
-        <div className="site-grid">
+        <div className="site-grid stagger">
           {sites.map((site) => (
             <SiteCard key={site.id} site={site} facts={facts.get(site.id) ?? null} />
           ))}

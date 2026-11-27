@@ -99,7 +99,7 @@ function RankedList({ title, id, rows }: { title: string; id: string; rows: Arra
       {rows.length === 0 ? (
         <p className="espace-empty">{RESULTS_TEXT.emptyList}</p>
       ) : (
-        <ol className="espace-list espace-ranked">
+        <ol className="espace-list espace-ranked stagger">
           {rows.map((row) => (
             <li key={row.key} className="espace-row espace-ranked__row">
               <span className="espace-ranked__label">{row.label}</span>

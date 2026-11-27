@@ -27,7 +27,7 @@ export function PageStateBadge({ state }: { state: ClientPageState }) {
 
 export function UpcomingList({ pages }: { pages: UpcomingPage[] }) {
   return (
-    <ul className="espace-list">
+    <ul className="espace-list stagger">
       {pages.map((page) => (
         <li key={page.id} className="espace-row">
           <time className="espace-row__day" dateTime={page.day}>{formatDay(page.day)}</time>
@@ -45,7 +45,7 @@ function displayUrl(url: string): string {
 
 export function OnlineList({ pages }: { pages: OnlinePage[] }) {
   return (
-    <ul className="espace-list">
+    <ul className="espace-list stagger">
       {pages.map((page) => (
         <li key={page.id} className="espace-row espace-row--online">
           <div className="espace-row__main">

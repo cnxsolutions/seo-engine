@@ -39,7 +39,7 @@ production n'est touchee que pour appliquer une migration avant un merge.
 npm run dev          # http://localhost:3000
 npm run lint         # ESLint          — 0 erreur attendue (33 warnings tolerees)
 npm run typecheck    # tsc --noEmit    — 0 erreur attendue
-npm test             # Vitest          — 1 462 tests (107 fichiers), tous verts
+npm test             # Vitest          — 1 464 tests (107 fichiers), tous verts
 npm run build        # build local (sans sortie standalone, voir next.config.ts)
 ```
 
@@ -168,7 +168,11 @@ La DA est celle de CNX Solutions (site et films), detaillee dans `docs/design.md
   style en ligne admise. Le style des composants partages vit dans
   `components/ui.css`, celui d'un ecran dans le fichier `.css` de son dossier.
 - **Jamais `window.confirm()`** : `components/ConfirmDialog.tsx`, qui garde le
-  refus du serveur sous les yeux. Ces deux regles sont verifiees par
+  refus du serveur sous les yeux.
+- **Une seule courbe de mouvement**, `var(--ease)`, ecrite dans
+  `components/tokens.css` et nulle part ailleurs (hors boucles `linear`). Une
+  liste qui doit entrer en sequence prend la classe `.stagger` ; jamais un
+  tableau ni des tuiles de chiffres. Ces trois regles sont verifiees par
   `components/ui-rules.test.ts` : la CI echoue au premier ecart. **Jamais de jargon interne** dans un texte
   visible (nom de table, « gate », « slot »).
 - Tout nouveau couple texte/fond se mesure (AA, 4,5:1) avant d'entrer dans les jetons.

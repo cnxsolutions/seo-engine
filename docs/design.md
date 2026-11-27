@@ -76,9 +76,13 @@ filet `.2`).
 
 **Statuts** (bon, attention, sérieux, critique) : on garde les quatre teintes validées, toujours accompagnées
 d'une icône ou d'un libellé ; le vert passe à `#12a150` (celui des films) si le validateur le confirme contre les
-nouvelles surfaces. **Séries de graphiques** : la série 1 devient `#0b6cf9`, la série 7 `#6d4aff` (le violet SAP
-de la marque) ; la palette entière repasse le validateur dataviz au L6 (UX-11). Une couleur de série n'est jamais
-une couleur de statut, et inversement.
+nouvelles surfaces. **Séries de graphiques** : la série 1 est `#0b6cf9`, la série 7 `#6d4aff` (le violet SAP
+de la marque), depuis le L6g (UX-11). La palette entière a repassé le validateur dataviz sur la surface des cartes
+(`#ffffff`) : bande de luminosité et chroma conformes pour les huit, pire paire voisine ΔE 9,1 sous daltonisme
+(cible 8), 19,6 en vision normale (plancher 15). L'aqua, le jaune et le magenta restent sous 3:1 contre le blanc :
+chaque graphique garde donc son tableau jumeau (« Voir le tableau »), qui est la condition de leur emploi. La rampe
+séquentielle (`--ramp-1…5`) passe ses propres contrôles et ne change pas. Une couleur de série n'est jamais une
+couleur de statut, et inversement.
 
 ## 4. Typographie
 
@@ -157,8 +161,14 @@ Repris du thème et des films, réduit à ce qu'un outil supporte :
 | `--dur` | 250 ms | apparition d'un menu, d'un toast |
 | `--dur-slow` | 500 ms | l'allongement du bouton au survol (« le survol doit glisser et non claquer ») |
 
-- Listes : entrée échelonnée de 60 ms, opacité et 8 px de translation, au premier rendu seulement.
-- Arrivée d'une modale : 250 ms, échelle 0,98 → 1. Sortie plus courte que l'entrée.
+- Listes : entrée échelonnée de 60 ms, opacité et 8 px de translation, au premier rendu seulement. Une liste
+  s'y abonne par la classe `.stagger` (`components/ui.css`) : cartes de `/sites`, sélecteurs de site, listes de
+  l'espace client. Jamais les tableaux ni les tuiles de chiffres. À partir du neuvième élément, tous arrivent
+  ensemble.
+- Arrivée d'une modale : 250 ms, échelle 0,98 → 1, le fond en 150 ms. Elle part sans animation, donc plus vite
+  qu'elle n'arrive.
+- La courbe ne s'écrit que dans `components/tokens.css` : `components/ui-rules.test.ts` refuse toute transition ou
+  animation hors `var(--ease)` (hors boucles `linear` : toupie, chatoiement).
 - **Aucun rebond, aucun ressort** sur l'interface ; un titre posé ne bouge plus.
 - `prefers-reduced-motion: reduce` : plus aucune translation ni échelle, les fondus restent sous 150 ms.
 
